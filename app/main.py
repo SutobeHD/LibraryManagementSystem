@@ -15,6 +15,7 @@ import unicodedata
 import urllib.parse
 import uuid
 from collections.abc import Callable, Iterator, Mapping, Sequence
+from concurrent.futures import Executor, ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, BinaryIO
@@ -99,7 +100,7 @@ from .artist_store import projection as artist_projection
 from .artist_store import registry as artist_registry
 from .artist_store import schema as artist_schema
 from .artist_store import sync as artist_sync
-from .audio_analyzer import LIBROSA_AVAILABLE, AudioAnalyzer
+from .audio_analyzer import LIBROSA_AVAILABLE, AudioAnalyzer, fingerprint_pcm_md5
 from .config import EXPORT_DIR, LOG_DIR, MUSIC_DIR, TEMP_DIR
 from .database import db, db_lock
 from .genre_atlas import get_atlas, library_spelling
@@ -7578,37 +7579,64 @@ class DuplicateMergeRequest(BaseModel):
     merge_play_counts: bool = True
 
 
-def _fingerprint_python_fallback(path: str) -> bytes | None:
+# Name kept: the remix-detector research doc builds on it.
+_fingerprint_python_fallback = fingerprint_pcm_md5
+
+# Threads, not processes: librosa.load (soundfile/mpg123 decode + soxr) runs
+# with the GIL released. Measured 2026-11-08, 200 MP3/AIFF on 32 cores:
+# 1 thread 10.2 s, 8 threads 1.15 s, loop lag <= ~20 ms; an 8-process pool
+# lost ~5 s to spawn + per-worker librosa import. Cap leaves cores for the UI.
+_DUP_SCAN_MAX_WORKERS = 8
+# One scan at a time: two scans plus AudioAnalyzer's pool would oversubscribe
+# the CPU. Created lazily so it binds to the running loop.
+_dup_scan_lock: asyncio.Lock | None = None
+
+
+def _dup_fingerprint_similarity(fp1: Any, fp2: Any) -> float:
+    """Hamming similarity for list[int] (Rust), equality for bytes digests."""
+    if isinstance(fp1, list) and isinstance(fp2, list):
+        length = min(len(fp1), len(fp2))
+        if length < 4:
+            return 0.0
+        diff = sum(bin(x ^ y).count("1") for x, y in zip(fp1[:length], fp2[:length], strict=True))
+        return 1.0 - diff / (length * 32)
+    if isinstance(fp1, bytes) and isinstance(fp2, bytes):
+        return 1.0 if fp1 == fp2 else 0.0
+    return 0.0
+
+
+def _group_pairwise(
+    paths: list[str],
+    fingerprints: Mapping[str, Any],
+    indices: list[int],
+    similarity_threshold: float,
+) -> list[tuple[int, dict[str, Any]]]:
+    """Greedy first-come grouping over ``indices`` (ascending), O(k^2).
+
+    Returns ``(master index, group)`` pairs so callers can merge partitions
+    back into input order.
     """
-    Python fallback fingerprint: MD5 of first 30 seconds of decoded PCM.
-
-    Used when the Rust Tauri sidecar is not accessible from the backend
-    process.  Less accurate than acoustic fingerprinting but catches exact
-    re-encodes, bit-for-bit duplicates, and format conversions of the same
-    master.
-
-    Returns None on any error.
-    """
-    import hashlib
-
-    try:
-        # Try librosa first for actual PCM decoding
-        try:
-            import librosa  # type: ignore
-            import numpy as np
-
-            y, _ = librosa.load(path, sr=11025, mono=True, duration=30.0)
-            raw = (y * 32768).astype("int16").tobytes()
-        except ImportError:
-            # Fallback: raw file bytes (catches bit-for-bit duplicates only)
-            with open(path, "rb") as fh:
-                raw = fh.read(30 * 11025 * 2)
-        digest = hashlib.md5(raw).digest()
-        logger.debug("_fingerprint_python_fallback: %s → %s", path, digest.hex())
-        return digest
-    except Exception as exc:
-        logger.error("_fingerprint_python_fallback: failed for %s — %s", path, exc)
-        return None
+    visited: set[int] = set()
+    groups: list[tuple[int, dict[str, Any]]] = []
+    for pos, i in enumerate(indices):
+        if i in visited:
+            continue
+        p1 = paths[i]
+        fp1 = fingerprints[p1]
+        members = [p1]
+        sims: list[float] = []
+        for j in indices[pos + 1 :]:
+            if j in visited:
+                continue
+            sim = _dup_fingerprint_similarity(fp1, fingerprints[paths[j]])
+            if sim >= similarity_threshold:
+                members.append(paths[j])
+                sims.append(sim)
+                visited.add(j)
+        if len(members) > 1:
+            avg_sim = sum(sims) / len(sims) if sims else 1.0
+            groups.append((i, {"master": p1, "members": members, "similarity": round(avg_sim, 3)}))
+    return groups
 
 
 def _group_duplicates(
@@ -7618,8 +7646,8 @@ def _group_duplicates(
     """
     Group paths by fingerprint similarity.
 
-    For Vec<u32> fingerprints (from Rust):  uses Hamming distance via pure Python.
-    For bytes fingerprints (fallback):       uses exact equality.
+    For Vec<u32> fingerprints (from Rust):  Hamming similarity, pairwise.
+    For bytes fingerprints (fallback):       exact equality, one dict pass (O(n)).
 
     Args:
         fingerprints: {path: fingerprint}  (fingerprint is list[int] or bytes)
@@ -7627,57 +7655,141 @@ def _group_duplicates(
 
     Returns:
         List of groups.  Each group: {"master": path, "members": [path, ...], "similarity": float}
-        Groups with only 1 member are omitted.
+        Groups with only 1 member are omitted. Groups are ordered by their
+        master's position in ``fingerprints``; members keep input order.
     """
-    paths = list(fingerprints.keys())
-    visited: set[int] = set()
-    groups: list[dict] = []
+    paths = list(fingerprints)
+    if not 0.0 < similarity_threshold <= 1.0:
+        # Digest pairs score exactly 0.0 or 1.0, so only a threshold in (0, 1]
+        # makes grouping equal to equality classes.
+        everything = list(range(len(paths)))
+        return [
+            g for _, g in _group_pairwise(paths, fingerprints, everything, similarity_threshold)
+        ]
 
-    def hamming_sim_py(a: list, b: list) -> float:
-        """Hamming similarity between two u32 fingerprint vectors."""
-        length = min(len(a), len(b))
-        if length < 4:
-            return 0.0
-        diff = sum(bin(x ^ y).count("1") for x, y in zip(a[:length], b[:length]))
-        return 1.0 - diff / (length * 32)
+    buckets: dict[bytes, list[int]] = {}
+    hamming: list[int] = []
+    for i, path in enumerate(paths):
+        fp = fingerprints[path]
+        if isinstance(fp, bytes):
+            buckets.setdefault(fp, []).append(i)
+        elif isinstance(fp, list):
+            hamming.append(i)
+        # Any other type scores 0.0 against everything: never grouped.
 
-    for i, p1 in enumerate(paths):
-        if i in visited:
+    groups: list[tuple[int, dict[str, Any]]] = [
+        (
+            idx[0],
+            {"master": paths[idx[0]], "members": [paths[k] for k in idx], "similarity": 1.0},
+        )
+        for idx in buckets.values()
+        if len(idx) > 1
+    ]
+    groups.extend(_group_pairwise(paths, fingerprints, hamming, similarity_threshold))
+    groups.sort(key=lambda g: g[0])
+    return [g for _, g in groups]
+
+
+def _dup_location_key(loc: str) -> str:
+    return os.path.normcase(os.path.abspath(loc))
+
+
+def _dup_location_index(tracks: Sequence[Mapping[str, Any]]) -> dict[str, list[Mapping[str, Any]]]:
+    """``{normcase(abspath(location)): [tracks...]}`` in library order."""
+    index: dict[str, list[Mapping[str, Any]]] = {}
+    for t in tracks:
+        loc = t.get("Location") or t.get("path") or ""
+        if not loc:
             continue
-        group_members = [p1]
-        group_sims = []
-        fp1 = fingerprints[p1]
+        try:
+            key = _dup_location_key(str(loc))
+        except (TypeError, ValueError):
+            continue
+        index.setdefault(key, []).append(t)
+    return index
 
-        for j, p2 in enumerate(paths):
-            if j <= i or j in visited:
-                continue
-            fp2 = fingerprints[p2]
 
-            # Handle both list[int] (Rust) and bytes (Python fallback)
-            if isinstance(fp1, list) and isinstance(fp2, list):
-                sim = hamming_sim_py(fp1, fp2)
-            elif isinstance(fp1, bytes) and isinstance(fp2, bytes):
-                sim = 1.0 if fp1 == fp2 else 0.0
-            else:
-                sim = 0.0
+def _dup_member_info(path: str, index: Mapping[str, list[Mapping[str, Any]]]) -> dict[str, Any]:
+    track_meta: dict[str, Any] = {
+        "path": path,
+        "title": "",
+        "artist": "",
+        "size_mb": 0.0,
+        "format": "",
+        "bitrate": 0,
+        "play_count": 0,
+    }
+    try:
+        file_path = Path(path)
+        if file_path.exists():
+            track_meta["size_mb"] = round(file_path.stat().st_size / (1024 * 1024), 2)
+            track_meta["format"] = file_path.suffix.lstrip(".").upper()
+    except OSError:
+        pass
 
-            if sim >= similarity_threshold:
-                group_members.append(p2)
-                group_sims.append(sim)
-                visited.add(j)
+    try:
+        matches = index.get(_dup_location_key(path))
+        if matches:
+            t = matches[0]
+            track_meta["title"] = t.get("Name") or t.get("title") or ""
+            track_meta["artist"] = t.get("Artist") or t.get("artist") or ""
+            track_meta["bitrate"] = int(t.get("BitRate") or t.get("bitrate") or 0)
+            track_meta["play_count"] = int(t.get("PlayCount") or t.get("play_count") or 0)
+    except (TypeError, ValueError) as meta_exc:
+        logger.debug("[DUP] metadata lookup failed for %s: %s", path, meta_exc)
+    return track_meta
 
-        if len(group_members) > 1:
-            avg_sim = sum(group_sims) / len(group_sims) if group_sims else 1.0
-            groups.append(
-                {
-                    "master": p1,
-                    "members": group_members,
-                    "similarity": round(avg_sim, 3),
-                }
-            )
-            visited.add(i)
 
-    return groups
+def _build_duplicate_groups(fingerprints: dict[str, Any]) -> list[dict[str, Any]]:
+    """Group fingerprints and enrich members with library metadata (blocking)."""
+    raw_groups = _group_duplicates(fingerprints)
+    index: dict[str, list[Mapping[str, Any]]] = {}
+    if raw_groups and db.loaded:
+        try:
+            index = _dup_location_index(db.get_all_tracks() or [])
+        except Exception as exc:
+            logger.warning("[DUP] library index failed, groups stay unenriched: %s", exc)
+    return [
+        {
+            "master": group["master"],
+            "similarity": group["similarity"],
+            "duplicates": [_dup_member_info(p, index) for p in group["members"]],
+        }
+        for group in raw_groups
+    ]
+
+
+def _dup_scan_worker_count(n_paths: int) -> int:
+    cpu = os.cpu_count() or 2
+    return max(1, min(cpu - 1, _DUP_SCAN_MAX_WORKERS, n_paths))
+
+
+async def _fingerprint_paths(
+    paths: list[str],
+    executor: Executor | None,
+    workers: int,
+    on_progress: Callable[[], None],
+    fingerprint_fn: Callable[[str], Any] = fingerprint_pcm_md5,
+) -> dict[str, Any]:
+    """Fingerprint ``paths`` with ``workers`` jobs in flight.
+
+    ``workers`` consumer coroutines share one iterator, so at most that many
+    executor jobs exist at any time (no 20k pending futures). Result dict is
+    in input order: _group_duplicates output depends on it.
+    """
+    loop = asyncio.get_running_loop()
+    results: dict[int, Any] = {}
+    jobs = iter(enumerate(paths))
+
+    async def _consume() -> None:
+        for idx, path in jobs:
+            fp = await loop.run_in_executor(executor, fingerprint_fn, path)
+            if fp is not None:
+                results[idx] = fp
+            on_progress()
+
+    await asyncio.gather(*(_consume() for _ in range(max(1, workers))))
+    return {paths[i]: results[i] for i in sorted(results)}
 
 
 async def _run_duplicate_scan(job_id: str, track_paths: list[str]) -> None:
@@ -7686,80 +7798,39 @@ async def _run_duplicate_scan(job_id: str, track_paths: list[str]) -> None:
 
     Updates _dup_jobs[job_id] with results when complete.
     Uses Python fallback fingerprinting (librosa/MD5) since the Rust
-    fingerprint commands require a Tauri window context.
+    fingerprint commands require a Tauri window context. Fingerprints run on
+    a per-scan thread pool (not the loop's default executor, which
+    asyncio.to_thread callers share); grouping + enrichment run in a thread.
     """
+    global _dup_scan_lock
     logger.info("[DUP] scan job %s: %d tracks", job_id, len(track_paths))
     _dup_jobs[job_id] = {"status": "running", "groups": [], "total": len(track_paths), "done": 0}
 
+    if _dup_scan_lock is None:
+        _dup_scan_lock = asyncio.Lock()
+
+    def _progress() -> None:
+        _dup_jobs[job_id]["done"] += 1
+
     try:
-        fingerprints: dict[str, Any] = {}
-
-        for idx, path in enumerate(track_paths):
-            fp = await asyncio.get_event_loop().run_in_executor(
-                None,
-                lambda p=path: _fingerprint_python_fallback(p),
+        async with _dup_scan_lock:
+            workers = _dup_scan_worker_count(len(track_paths))
+            t0 = time.monotonic()
+            executor = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="dup-fp")
+            try:
+                fingerprints = await _fingerprint_paths(track_paths, executor, workers, _progress)
+            finally:
+                executor.shutdown(wait=False, cancel_futures=True)
+            logger.info(
+                "[DUP] job %s: fingerprinted %d/%d tracks in %.1fs (%d workers)",
+                job_id,
+                len(fingerprints),
+                len(track_paths),
+                time.monotonic() - t0,
+                workers,
             )
-            if fp is not None:
-                fingerprints[path] = fp
-            _dup_jobs[job_id]["done"] = idx + 1
 
-        logger.info(
-            "[DUP] job %s: fingerprinted %d/%d tracks", job_id, len(fingerprints), len(track_paths)
-        )
-
-        # Group by fingerprint similarity
-        raw_groups = _group_duplicates(fingerprints)
-
-        # Enrich each group with metadata from the library
-        enriched_groups = []
-        for group in raw_groups:
-            members_info = []
-            for p in group["members"]:
-                # Find track metadata from library
-                track_meta: dict[str, Any] = {
-                    "path": p,
-                    "title": "",
-                    "artist": "",
-                    "size_mb": 0.0,
-                    "format": "",
-                    "bitrate": 0,
-                    "play_count": 0,
-                }
-                try:
-                    file_path = Path(p)
-                    if file_path.exists():
-                        track_meta["size_mb"] = round(file_path.stat().st_size / (1024 * 1024), 2)
-                        track_meta["format"] = file_path.suffix.lstrip(".").upper()
-                except OSError:
-                    pass
-
-                # Try to enrich from library db
-                if db.loaded:
-                    try:
-                        for t in db.get_all_tracks() or []:
-                            loc = t.get("Location") or t.get("path") or ""
-                            if loc and (loc == p or Path(loc) == Path(p)):
-                                track_meta["title"] = t.get("Name") or t.get("title") or ""
-                                track_meta["artist"] = t.get("Artist") or t.get("artist") or ""
-                                track_meta["bitrate"] = int(
-                                    t.get("BitRate") or t.get("bitrate") or 0
-                                )
-                                track_meta["play_count"] = int(
-                                    t.get("PlayCount") or t.get("play_count") or 0
-                                )
-                                break
-                    except Exception as meta_exc:
-                        logger.debug("[DUP] metadata lookup failed for %s: %s", p, meta_exc)
-
-                members_info.append(track_meta)
-
-            enriched_groups.append(
-                {
-                    "master": group["master"],
-                    "similarity": group["similarity"],
-                    "duplicates": members_info,
-                }
-            )
+            enriched_groups = await asyncio.to_thread(_build_duplicate_groups, fingerprints)
 
         _dup_jobs[job_id]["status"] = "done"
         _dup_jobs[job_id]["groups"] = enriched_groups
@@ -7826,7 +7897,7 @@ async def duplicates_results(job_id: str):
 
 
 @app.post("/api/duplicates/merge", dependencies=[Depends(require_session)])
-async def duplicates_merge(body: DuplicateMergeRequest):
+def duplicates_merge(body: DuplicateMergeRequest):
     """
     Merge duplicate tracks: keep one master, remove duplicates from the library.
 
@@ -7835,6 +7906,9 @@ async def duplicates_merge(body: DuplicateMergeRequest):
 
     The actual file deletion is NOT performed (non-destructive) — only the
     library entries are removed.  The caller can delete files separately.
+
+    Sync handler (FastAPI threadpool): db deletes + save block, and holding
+    the write lock must not stall the event loop.
 
     Request body: {keep_path, remove_paths, merge_play_counts}
     Returns: {status, data: {removed, merged_play_count}}
@@ -7856,47 +7930,49 @@ async def duplicates_merge(body: DuplicateMergeRequest):
         removed_count = 0
         merged_play_count = 0
 
-        # Find master track
-        master_track = None
-        for t in db.get_all_tracks() or []:
-            loc = t.get("Location") or t.get("path") or ""
-            if loc and Path(loc) == Path(body.keep_path):
-                master_track = t
-                break
+        # One lock span: the location index is a snapshot, the deletes must
+        # act on that same library state.
+        with db_lock():
+            index = _dup_location_index(db.get_all_tracks() or [])
 
-        if master_track is None:
-            raise HTTPException(status_code=404, detail=f"Master track not found: {body.keep_path}")
+            masters = index.get(_dup_location_key(body.keep_path))
+            master_track = masters[0] if masters else None
+            if master_track is None:
+                raise HTTPException(
+                    status_code=404, detail=f"Master track not found: {body.keep_path}"
+                )
 
-        master_pc = int(master_track.get("PlayCount") or master_track.get("play_count") or 0)
-        merged_play_count = master_pc
+            master_pc = int(master_track.get("PlayCount") or master_track.get("play_count") or 0)
+            merged_play_count = master_pc
 
-        # Remove duplicate library entries and accumulate play counts
-        for path in body.remove_paths:
-            for t in db.get_all_tracks() or []:
-                loc = t.get("Location") or t.get("path") or ""
-                if not (loc and Path(loc) == Path(path)):
-                    continue
-                tid = str(t.get("TrackID") or t.get("track_id") or "")
-                if not tid:
-                    continue
-                pc = int(t.get("PlayCount") or t.get("play_count") or 0)
-                if body.merge_play_counts:
-                    merged_play_count += pc
-                try:
-                    db.delete_track(tid)
-                    removed_count += 1
-                    logger.info("[DUP] removed track id=%s path=%s", tid, path)
-                except Exception as del_exc:
-                    logger.error("[DUP] delete failed for id=%s: %s", tid, del_exc)
+            # Remove every library entry at each path and accumulate play counts.
+            # removed_ids mirrors the old per-path re-read: a path listed twice
+            # must not count a deleted track again.
+            removed_ids: set[str] = set()
+            for path in body.remove_paths:
+                for t in index.get(_dup_location_key(path), []):
+                    tid = str(t.get("TrackID") or t.get("track_id") or "")
+                    if not tid or tid in removed_ids:
+                        continue
+                    pc = int(t.get("PlayCount") or t.get("play_count") or 0)
+                    if body.merge_play_counts:
+                        merged_play_count += pc
+                    try:
+                        db.delete_track(tid)
+                        removed_ids.add(tid)
+                        removed_count += 1
+                        logger.info("[DUP] removed track id=%s path=%s", tid, path)
+                    except Exception as del_exc:
+                        logger.error("[DUP] delete failed for id=%s: %s", tid, del_exc)
 
-        # Update master play count if merging
-        if body.merge_play_counts and master_track:
-            master_id = str(master_track.get("TrackID") or master_track.get("track_id") or "")
-            if master_id:
-                try:
-                    db.save()  # persist deletions first
-                except Exception:
-                    pass
+            # Update master play count if merging
+            if body.merge_play_counts and master_track:
+                master_id = str(master_track.get("TrackID") or master_track.get("track_id") or "")
+                if master_id:
+                    try:
+                        db.save()  # persist deletions first
+                    except Exception as save_exc:
+                        logger.warning("[DUP] merge save failed: %s", save_exc)
 
         logger.info(
             "[DUP] merge complete: removed=%d merged_play_count=%d",
@@ -7915,7 +7991,7 @@ async def duplicates_merge(body: DuplicateMergeRequest):
         raise
     except Exception as exc:
         logger.error("[DUP] merge error: %s", exc, exc_info=True)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail=safe_error_message(exc))
 
 
 if __name__ == "__main__":
