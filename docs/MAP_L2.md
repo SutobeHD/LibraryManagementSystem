@@ -1534,7 +1534,7 @@ Rekordbox beat-grid helpers shared by the DAW and the waveform editor.
 
 ### `frontend/src/audio/beatGrid.test.js`
 
-Beat-grid helpers.
+Beat-grid helpers + the waveform editor's computeBeats.
 
 ### `frontend/src/audio/dawState/cues.js`
 

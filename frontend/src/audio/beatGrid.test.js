@@ -1,8 +1,10 @@
 /**
- * Beat-grid helpers.
+ * Beat-grid helpers + the waveform editor's computeBeats.
  *
  *   node --import ./frontend/src/audio/dawState/dawReducer.test.resolver.mjs \
  *        --test frontend/src/audio/beatGrid.test.js
+ *
+ * The resolver is needed for computeBeats' extensionless Vite import.
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -13,6 +15,7 @@ import {
     beatGridToTempoMap,
     gridAnchorSec,
 } from './beatGrid.js';
+import computeBeats from '../components/waveform/computeBeats.js';
 
 // First beats of a real ANLZ grid (track 127448057, 140 BPM): one entry per beat.
 const ANLZ = [
@@ -118,4 +121,31 @@ test('gridAnchorSec picks the first downbeat, else the first beat', () => {
     assert.ok(Math.abs(gridAnchorSec(midBar) - (0.418 + 3 * (60 / 143))) < 1e-6);
     // .rbep / buildTempoMap entries carry no bar position.
     assert.equal(gridAnchorSec([{ index: 0, bpm: 128, positionMs: 250 }]), 0.25);
+});
+
+test('computeBeats follows the Rekordbox grid, bars included', () => {
+    const beats = computeBeats([{ time: 0.021, bpm: 160, beat: 3 }], 160, 3);
+    assert.equal(beats[0].time, 0.021);
+    assert.deepEqual(
+        beats.slice(0, 7).map((b) => [b.barNum, b.isDownbeat]),
+        [
+            [1, false],
+            [1, false],
+            [2, true],
+            [2, false],
+            [2, false],
+            [2, false],
+            [3, true],
+        ]
+    );
+});
+
+test('computeBeats falls back to even spacing from 0 without a grid', () => {
+    const beats = computeBeats([], 120, 2);
+    assert.deepEqual(times(beats), [0, 0.5, 1, 1.5]);
+    assert.deepEqual(
+        beats.map((b) => b.isDownbeat),
+        [true, false, false, false]
+    );
+    assert.deepEqual(computeBeats([], 0, 2), []);
 });

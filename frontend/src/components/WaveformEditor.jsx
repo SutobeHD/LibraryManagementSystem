@@ -8,7 +8,7 @@ import React, {
     useImperativeHandle,
 } from 'react';
 import AudioBandAnalyzer from '../utils/AudioBandAnalyzer';
-import api from '../api/api';
+import api, { fetchTrackBeatGrid } from '../api/api';
 import { log } from '../utils/log';
 import { useToast } from './ToastContext';
 import EditorBrowser from './editor/EditorBrowser';
@@ -265,7 +265,6 @@ const WaveformEditorInner = forwardRef(
                     .then((res) => {
                         setFullTrack(res.data);
                         if (res.data.BPM) setBpm(parseFloat(res.data.BPM));
-                        if (res.data.beatGrid) setBeatGrid(res.data.beatGrid);
                         if (res.data.dropTime) setDropTime(parseFloat(res.data.dropTime));
                         setLoading(false);
                     })
@@ -275,6 +274,29 @@ const WaveformEditorInner = forwardRef(
                 setLoading(false);
             }
         }, [track, track?.id]);
+
+        // The loaded track's Rekordbox grid (a saved editor grid wins). Keyed on the
+        // track id: useWaveSurfer's load effect re-runs on visibility changes, so a
+        // grid reset there wiped the grid again. No grid → computeBeats spaces evenly.
+        const gridTrackId = fullTrack?.ID || fullTrack?.id || fullTrack?.TrackID || null;
+        useEffect(() => {
+            setBeatGrid([]);
+            if (!gridTrackId || String(gridTrackId).startsWith('local-')) return;
+            let cancelled = false;
+            fetchTrackBeatGrid(gridTrackId, { timeout: 15000 })
+                .then((grid) => {
+                    if (!cancelled) setBeatGrid(grid);
+                })
+                .catch((err) => {
+                    console.warn(
+                        '[WaveformEditor] Beat grid unavailable, using even BPM spacing:',
+                        err.message
+                    );
+                });
+            return () => {
+                cancelled = true;
+            };
+        }, [gridTrackId]);
 
         useImperativeHandle(ref, () => ({
             setTime: (time) => wavesurfer.current?.setTime(time),
@@ -305,7 +327,6 @@ const WaveformEditorInner = forwardRef(
             setIsLooping(false);
             setCuts([]);
             setHotCues([]);
-            setBeatGrid([]);
         }, []);
 
         const beats = useMemo(
@@ -363,7 +384,6 @@ const WaveformEditorInner = forwardRef(
             setIsLooping,
             setCuts,
             setHotCues,
-            setBeatGrid,
             setHistory,
             setHistoryIdx,
             setClipboard,
