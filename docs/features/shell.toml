@@ -22,7 +22,7 @@ status = "shipped"
 test = "testen"
 desc = "decorations:false, eigene Min/Max/Close, startDragging, Doppelklick maximiert."
 related = ["system-lifecycle-routes"]
-notes = "Close ruft vorher /api/system/shutdown. Code in main.jsx + tauri.conf.json."
+notes = "Close ruft vorher /api/system/shutdown. Code in main.jsx + tauri.conf.json. 2026-11-07 tauri dev (PR #60): Close -> /api/system/shutdown -> Backend sauber beendet; Ziehen/Doppelklick weiter ungeprüft."
 
 [[feature]]
 id = "boot-splash"

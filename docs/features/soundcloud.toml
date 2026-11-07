@@ -14,6 +14,7 @@ status = "shipped"
 test = "testen"
 desc = "OAuth 2.1 + PKCE, Consent im In-App-Webview oder OS-Browser (sc_auth_mode)."
 paths = ["src-tauri/src/soundcloud_client.rs"]
+todo = ["In-App-Login (sc_auth_mode gui): 'Weiter mit Google' gesperrt ('Aktiviere Popup-Fenster') - Login-Webview erlaubt keine Popups, keine New-Window-Behandlung in soundcloud_client.rs", "Browser-Modus 2026-11-07: Callback auf 127.0.0.1:5001 kam nicht an - Ursache offen (Login evtl. nicht abgeschlossen)", "Log schreibt den OAuth-state-Parameter mit"]
 
 [[feature]]
 id = "sc-session-status"
@@ -38,7 +39,7 @@ desc = "Refresh-Token im Keyring, stilles Single-Flight-Refresh im Backend - Log
 paths = ["app/soundcloud_auth.py", "tests/test_soundcloud_auth.py", "tests/test_soundcloud_refresh_route.py"]
 routes = ["/api/soundcloud/refresh"]
 depends_on = ["sc-session-status", "rate-limiter"]
-todo = ["nach #58-Merge Doc -> archived/implemented_", "Keyring-Blob chunken, falls > 1280 Zeichen", "Refresh in Tauri real testen", "Bestandsuser müssen sich einmal neu einloggen"]
+todo = ["nach #58-Merge Doc -> archived/implemented_", "Keyring-Blob chunken, falls > 1280 Zeichen", "Refresh in Tauri real testen", "Bestandsuser müssen sich einmal neu einloggen", "auth-status meldet authenticated:true bei abgelaufenem Legacy-Token (source=legacy, refreshable=false, SC antwortet 401) - UI zeigt trotzdem 'Not connected'"]
 notes = "Gebaut als Artist-Hub T-19. Doc steht noch auf evaluated_."
 
 [[feature]]

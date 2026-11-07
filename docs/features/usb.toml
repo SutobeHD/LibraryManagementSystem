@@ -49,6 +49,7 @@ paths = ["app/usb_manager.py", "frontend/src/components/usb/UsbSyncPanel.jsx", "
 routes = ["/api/usb/sync", "/api/usb/sync/all", "/api/usb/diff", "/api/usb/history"]
 depends_on = ["usb-profiles", "usb-onelibrary-export"]
 related = ["performance-overhaul"]
+todo = ["App-Start ohne Stick: POST /api/usb/initialize für fehlendes E:\\ läuft wiederholt in 500 (WinError 3) - fehlendes Laufwerk sauber als 'nicht verbunden' melden"]
 notes = "Blockierender POST mit Fake-Progress; Scan/Diff mit N+1 (Perf-Overhaul)."
 
 [[feature]]
