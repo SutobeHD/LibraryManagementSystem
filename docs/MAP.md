@@ -149,6 +149,8 @@
 | `frontend/src/config/constants.js` | Frontend-wide constants. |
 | `frontend/src/config/tagTaxonomy.js` | Tag chips for the Ranking view. |
 | `frontend/src/config/tagTaxonomy.test.js` | node --test frontend/src/config/tagTaxonomy.test.js Pure module, imports carry extensions — no resolver neede… |
+| `frontend/src/hooks/useTaskPolling.js` | useTaskPolling — one shared poller per endpoint for background-task status. |
+| `frontend/src/hooks/useTaskPolling.test.js` | node:test for the shared task-polling store (refcount, back-off, pause, kick). |
 | `frontend/src/store/authStore.js` | Tiny module-level auth state shared across the frontend. |
 | `frontend/src/utils/AudioBandAnalyzer.js` | AudioBandAnalyzer Splits an AudioBuffer into 3 frequency bands (Rekordbox-style): - Low: < 400 Hz (Bass / Kic… |
 | `frontend/src/utils/log.js` | Dev-only logging utility. |

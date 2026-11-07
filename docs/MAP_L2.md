@@ -1917,6 +1917,26 @@ Tag chips for the Ranking view.
 
 node --test frontend/src/config/tagTaxonomy.test.js Pure module, imports carry extensions — no resolver needed.
 
+### `frontend/src/hooks/useTaskPolling.js`
+
+useTaskPolling — one shared poller per endpoint for background-task status.
+
+- `TASK_POLL_ACTIVE_MS()`
+- `TASK_POLL_IDLE_MS()`
+- `TASK_POLL_KICK_WINDOW_MS()`
+- `SC_TASKS_ENDPOINT()`
+- `IMPORT_TASKS_ENDPOINT()`
+- `TERMINAL_TASK_STATES()` — End states of import_tracker + SoundCloud downloader tasks.
+- `TASK_START_URL_PREFIXES()` — Mutating requests that register import / download tasks on the backend.
+- `isTaskStartRequest()` — export const isAnyTaskRunning = (snapshot) => !!snapshot && typeof snapshot === 'object' && Object.…
+- `createTaskPollingStore()` — Framework-free poller registry.
+- `connectTaskPolling()` — const refresh = (endpoint) => { const p = pollers.get(endpoint); if (!p) return Promise.resolve(EMP…
+- `useTaskPolling()` — Subscribe a component to the shared poller for `endpoint`.
+
+### `frontend/src/hooks/useTaskPolling.test.js`
+
+node:test for the shared task-polling store (refcount, back-off, pause, kick).
+
 ### `frontend/src/store/authStore.js`
 
 Tiny module-level auth state shared across the frontend.
