@@ -212,6 +212,18 @@ paths = ["frontend/src/hooks/useVirtualRows.js", "frontend/src/hooks/useLibraryT
 related = ["track-table"]
 notes = "372 hinter main. Backend-Teil ist in perf-backend-quickwins neu gebaut - nur das Frontend fehlt noch. Stand 2026-11-07 (PR #60): Collection rendert alle 4760 Zeilen ins DOM."
 
+[[feature]]
+id = "playlist-tracks-light"
+group = "Performance"
+parent = "performance-overhaul"
+name = "Playlist-Tracks ohne Beatgrids"
+status = "idea"
+desc = "Playlist-, Smart-Playlist- und Artist-Tracklisten ohne beatGrid/Cues ausliefern wie die leichte Collection-Liste."
+routes = ["/api/playlist/{pid}/tracks"]
+related = ["perf-backend-quickwins", "collection-view"]
+todo = ["/api/playlist/{pid}/tracks liefert volle beatGrids: ~31 kB pro Track (31 Tracks = 0,96 MB), 1000er-Playlist ~30 MB -> Backend blockiert wieder Sekunden", "Smart-Playlist-evaluate und /api/artists/{id}/local-tracks auf dasselbe prüfen"]
+notes = "Gefunden 2026-11-07 beim Nachmessen von feat/light-library-tracks: dort ist nur /api/library/tracks leicht (light=true)."
+
 # ── Mobile ────────────────────────────────────────────────────────────────
 
 [[feature]]
