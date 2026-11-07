@@ -15,6 +15,17 @@ desc = "Registry aller Features + Live-Abgleich mit Branches/Worktrees: wer baut
 paths = ["scripts/feature_map.py", "scripts/feature_map_template.html", "docs/features/", ".claude/rules/feature-map.md", ".claude/commands/feature-map.md"]
 related = ["research-pipeline", "code-map-regen"]
 
+[[feature]]
+id = "feature-map-phases"
+group = "Arbeitsweise"
+name = "Feature-Map: Tags Idee bis Getestet"
+status = "unmerged"
+branch = "feat/feature-map-phases"
+parent = "feature-map"
+desc = "Jedes Feature trägt einen Tag Idee / Geplant / Angefangen / Fertig / Testen / Getestet / Verworfen; Mindmap färbt und filtert danach, --mark setzt den Test-Tag."
+todo = ["Mindmap im Browser selbst durchklicken (Umschalter Tag/Status, Chips, Liste)", "Tags der Features mit Test-Stand 'Fertig' nach und nach bestätigen"]
+notes = "Phase wird aus status abgeleitet; nur Fertig/Testen/Getestet brauchen das Feld test. Erstbelegung 2026-11-07 aus TOML-Notizen, Memory und PR-Testplänen."
+
 # ── Research-Pipeline ─────────────────────────────────────────────────────
 
 [[feature]]

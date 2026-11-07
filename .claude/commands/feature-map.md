@@ -21,4 +21,11 @@ Show the feature map (`docs/features/*.toml` + live git overlay). Rules: `.claud
    ```
    Print the `--active` output, then the mindmap path. Add one line per real risk you see in it: work that was never pushed, a detached HEAD holding commits, two live sites on the same feature.
 
+3. **`testen` / `getestet <id...>`** as argument — the user's test to-do list, or a confirmed test:
+   ```bash
+   python scripts/feature_map.py --list --phase testen
+   python scripts/feature_map.py --mark getestet <id> [<id> ...]
+   ```
+   Commit a `--mark` change right away (`docs(docs): mark <id> tested in the feature map`).
+
 Keep it terse — status glance, not a report.
