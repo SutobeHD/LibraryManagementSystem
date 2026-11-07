@@ -24,7 +24,13 @@ LibraryManagementSystem -- Analysis Result Cache
 - `  AnalysisCache.invalidate()` — Remove a cache entry without deleting the underlying audio file.
 - `  AnalysisCache.clear()` — Empty the entire cache.
 - `  AnalysisCache.stats()` — Return cache size + entry count.
+- `WaveformCache` — Disk cache for /api/audio/waveform response bodies.
+- `  WaveformCache.key()`
+- `  WaveformCache.get()` — Cached body if the source file still has the stat ``st``, else None.
+- `  WaveformCache.put()` — Store ``body`` for the source stat ``st`` (taken before computing).
+- `  WaveformCache.clear()` — Delete every entry.
 - `get_default_cache()`
+- `get_waveform_cache()`
 
 ### `app/analysis_db_writer.py`
 
@@ -382,6 +388,7 @@ artist_store.sync — the idle signal + the background catalogue refresh (T-17).
 
 LibraryManagementSystem -- Audio Analyzer (Unified Wrapper)
 
+- `fingerprint_pcm_md5()` — MD5 digest of the first 30 s of decoded mono PCM (11025 Hz).
 - `AudioAnalyzer` — Background worker pool for audio analysis.
 - `  AudioAnalyzer.get_executor()`
 - `  AudioAnalyzer.shutdown()`
@@ -3785,6 +3792,20 @@ Tests for app/download_registry.py — SoundCloud download dedup/history DB.
 - `test_set_names_on_a_row_that_is_not_there_is_false()`
 - `test_set_names_on_an_unreadable_registry_is_false_and_logged()`
 
+### `tests/test_duplicate_grouping.py`
+
+Duplicate finder: O(n) digest grouping, parallel fingerprinting, location index.
+
+- `test_grouping_equals_legacy_on_mixed_input()`
+- `test_grouping_equals_legacy_on_5k_digests()`
+- `test_digest_grouping_is_linear_on_5k_paths()`
+- `test_fingerprint_paths_preserves_input_order_and_bounds_inflight()`
+- `test_worker_count_bounds()`
+- `test_run_duplicate_scan_end_to_end_real_decode()` — Real librosa decode on the scan's thread pool, grouping + enrichment.
+- `test_location_index_first_match_wins_and_keeps_all()`
+- `test_location_index_matches_like_windows_path_equality()`
+- `test_member_info_survives_bad_numeric_metadata()`
+
 ### `tests/test_external_track_match.py`
 
 external_track_match unit tests (external-track-match-unified-module T-3..T-9).
@@ -4011,6 +4032,13 @@ GET /api/library/tracks — the optional ``light`` projection (app/main.py).
 - `test_hide_streaming_applies_light_or_not()`
 - `test_usb_source_and_rekordbox_xml_keep_grids_after_a_light_fetch()` — The CDJ-facing readers of the cached dicts, after a light fetch.
 - `test_light_survives_the_beatgrid_loader_writing_meanwhile()` — A writer keeps removing and re-inserting beatGrid on every cached dict
+
+### `tests/test_librosa_lazy_import.py`
+
+Booting the sidecar (``import app.main``) must not import librosa / numpy.
+
+- `test_import_app_main_does_not_load_librosa_or_numpy()`
+- `test_flag_is_a_plain_bool_and_engine_loads_on_demand()`
 
 ### `tests/test_live_cue_loading.py`
 
@@ -4819,6 +4847,18 @@ Route tests for the persistent SoundCloud login (T-19).
 - `test_auth_status_clamps_a_negative_lifetime()` — An already-expired token reports 0 s left, never a negative number.
 - `test_auth_status_legacy_session_has_no_known_lifetime()` — A pre-refresh login carries no expiry — `null`, never a made-up number.
 
+### `tests/test_stream_chunking.py`
+
+GET /api/stream: file reads happen off the event loop, in 1 MiB chunks.
+
+- `sandbox_root()`
+- `audio()`
+- `reads()`
+- `test_full_stream_reads_off_loop_in_1mib_chunks()`
+- `test_ranged_stream_reads_off_loop()`
+- `test_open_ended_range_to_eof()`
+- `test_invalid_range_is_416()`
+
 ### `tests/test_stream_unicode_filename.py`
 
 Regression: GET /api/stream 500 on non-latin-1 filenames.
@@ -5058,6 +5098,36 @@ Tests for app/variant_schema.py — variants.db DDL + migration runner.
 - `test_tables_and_indexes_exist()`
 - `test_schema_accepts_a_variant_row()`
 - `test_newer_schema_left_untouched()`
+
+### `tests/test_waveform_cache.py`
+
+GET /api/audio/waveform: off-loop compute, disk cache, in-flight dedup.
+
+- `FakeEngine`
+- `sandbox_root()`
+- `audio_file()`
+- `cache()`
+- `test_cache_roundtrip_and_key_includes_pps()`
+- `test_cache_invalidates_on_mtime_or_size_change()`
+- `test_cache_key_is_case_insensitive_on_windows()`
+- `test_cache_corrupt_entry_is_a_miss()`
+- `test_cache_prunes_least_recently_used()`
+- `test_cache_prunes_by_total_bytes()`
+- `test_second_call_is_cache_hit()`
+- `test_response_bytes_match_previous_jsonresponse()`
+- `test_file_change_recomputes()`
+- `test_health_answers_while_waveform_computes()`
+- `test_concurrent_requests_share_one_computation()`
+- `test_compute_error_is_500_and_not_cached()`
+- `test_non_positive_pps_rejected()`
+- `test_sandbox_still_enforced()`
+
+### `tests/test_xml_clean_offloop.py`
+
+POST /api/xml/clean: upload copy + full library reload run off the event loop.
+
+- `test_clean_xml_loads_in_worker_thread_under_db_lock()`
+- `test_clean_xml_rejects_non_xml()`
 
 ### `tests/test_xml_generator.py`
 
