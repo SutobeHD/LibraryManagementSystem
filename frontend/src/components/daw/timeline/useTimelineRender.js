@@ -74,10 +74,10 @@ const peakCacheMap = new Map(); // legacy compat
  * @param {Object}   args.goodFramesRef  ref counting good frames for LOD hysteresis
  */
 export function useTimelineRender({ state, dispatch, canvasRef, ds, goodFramesRef }) {
-    const animFrameRef    = useRef(null);
+    const animFrameRef = useRef(null);
     // OffscreenCanvas waveform cache
-    const waveformBitmap  = useRef(null); // ImageBitmap
-    const waveformKey     = useRef('');   // invalidation key
+    const waveformBitmap = useRef(null); // ImageBitmap
+    const waveformKey = useRef(''); // invalidation key
 
     // ── SYNC REACT → DRAW STATE ──────────────────────────────────────────────────
     useEffect(() => {
@@ -92,26 +92,25 @@ export function useTimelineRender({ state, dispatch, canvasRef, ds, goodFramesRe
         }
         if (!state.isPlaying) d.playhead = state.playhead;
 
-        d.isPlaying   = state.isPlaying;
-        d.regions     = state.regions;
+        d.isPlaying = state.isPlaying;
+        d.regions = state.regions;
         d.selectedIds = state.selectedRegionIds;
-        d.bpm         = state.bpm;
+        d.bpm = state.bpm;
         d.snapDivision = state.snapDivision || '1/4';
-        d.firstBeatSec = ((state.tempoMap?.[0]?.positionMs || 0) / 1000) + (state.gridOffsetSec || 0);
+        d.firstBeatSec = (state.tempoMap?.[0]?.positionMs || 0) / 1000 + (state.gridOffsetSec || 0);
         d.totalDuration = state.totalDuration;
         // Source duration drives peak indexing. AudioBuffer wins (most
         // authoritative). trackMeta.duration is set in handleFileSelect for
         // .rbep loads. totalDuration is the last-resort fallback for simple
         // track-loads where source == timeline.
-        d.sourceDuration = state.sourceBuffer?.duration
-            || state.trackMeta?.duration
-            || state.totalDuration;
-        d.hotCues      = state.hotCues;
-        d.memoryCues   = state.memoryCues;
-        d.loops        = state.loops;
+        d.sourceDuration =
+            state.sourceBuffer?.duration || state.trackMeta?.duration || state.totalDuration;
+        d.hotCues = state.hotCues;
+        d.memoryCues = state.memoryCues;
+        d.loops = state.loops;
         d.activeLoopIndex = state.activeLoopIndex;
-        d.snapEnabled  = state.snapEnabled;
-        d.slipMode     = state.slipMode || false;
+        d.snapEnabled = state.snapEnabled;
+        d.slipMode = state.slipMode || false;
         d.waveformStyle = state.waveformStyle || '3band';
         d.selectionRange = state.selectionRange;
 
@@ -128,7 +127,8 @@ export function useTimelineRender({ state, dispatch, canvasRef, ds, goodFramesRe
         if (state.regions?.length) {
             let h = 0;
             for (const r of state.regions) {
-                const sample = ((r.timelineStart || 0) + (r.duration || 0) + (r.sourceStart || 0)) * 1000;
+                const sample =
+                    ((r.timelineStart || 0) + (r.duration || 0) + (r.sourceStart || 0)) * 1000;
                 h = ((h << 5) - h + Math.floor(sample)) | 0;
             }
             regionsSig = `${state.regions.length}:${h}`;
@@ -139,10 +139,10 @@ export function useTimelineRender({ state, dispatch, canvasRef, ds, goodFramesRe
             waveformKey.current = newKey;
         }
 
-        d.bandPeaks    = state.bandPeaks;
+        d.bandPeaks = state.bandPeaks;
         d.fallbackPeaks = state.fallbackPeaks || null;
         d.deadReckoning = state.deadReckoning || { lastSyncWallClock: 0, lastSyncAudioTime: 0 };
-        d.needsRedraw  = true;
+        d.needsRedraw = true;
     }, [state, dispatch, ds]);
 
     // ── MAIN RAF LOOP ─────────────────────────────────────────────────────────────
@@ -192,7 +192,8 @@ export function useTimelineRender({ state, dispatch, canvasRef, ds, goodFramesRe
                 // tracks the waveform AND so playback stop doesn't snap
                 // the view back to the pre-play scroll position.
                 d.scrollSyncAccum = (d.scrollSyncAccum || 0) + 1;
-                if (d.scrollSyncAccum >= 12) {  // ~5 dispatches/sec at 60fps
+                if (d.scrollSyncAccum >= 12) {
+                    // ~5 dispatches/sec at 60fps
                     d.scrollSyncAccum = 0;
                     if (d.dispatch) d.dispatch({ type: 'SET_SCROLL_X', payload: d.scrollX });
                 }
@@ -250,7 +251,7 @@ export function useTimelineRender({ state, dispatch, canvasRef, ds, goodFramesRe
             peakCacheMap.clear(); // EC10
             waveformBitmap.current = null;
         };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 }
 
@@ -259,11 +260,23 @@ export function useTimelineRender({ state, dispatch, canvasRef, ds, goodFramesRe
 // ═══════════════════════════════════════════════════════════════════════════════
 
 function buildWaveformBitmap(d) {
-    const { width, height, dpr, zoom, scrollX, regions, bandPeaks, fallbackPeaks, sourceDuration, lodLevel, waveformStyle } = d;
+    const {
+        width,
+        height,
+        dpr,
+        zoom,
+        scrollX,
+        regions,
+        bandPeaks,
+        fallbackPeaks,
+        sourceDuration,
+        lodLevel,
+        waveformStyle,
+    } = d;
     if (width <= 0 || height <= 0) return null;
 
-    const hasBand  = bandPeaks && (bandPeaks.low?.length > 0 || bandPeaks.lod?.r1?.low?.length > 0);
-    const hasMono  = fallbackPeaks && fallbackPeaks.length > 0;
+    const hasBand = bandPeaks && (bandPeaks.low?.length > 0 || bandPeaks.lod?.r1?.low?.length > 0);
+    const hasMono = fallbackPeaks && fallbackPeaks.length > 0;
     if (!hasBand && !hasMono) return null;
     // sourceDuration is the audio-buffer length the peaks were generated
     // from. Without it, peak-index calculations would mis-stretch the
@@ -279,9 +292,9 @@ function buildWaveformBitmap(d) {
 
     const waveTop = RULER_HEIGHT;
     const waveBot = height - PHASE_METER_HEIGHT;
-    const waveH   = waveBot - waveTop;
+    const waveH = waveBot - waveTop;
     const centerY = waveTop + waveH / 2;
-    const maxAmp  = waveH * 0.44;
+    const maxAmp = waveH * 0.44;
 
     // Pick LOD peaks
     let activePeaks = {};
@@ -295,15 +308,15 @@ function buildWaveformBitmap(d) {
     }
 
     const startTime = scrollX / zoom;
-    const endTime   = (scrollX + width) / zoom;
+    const endTime = (scrollX + width) / zoom;
 
     for (const region of regions) {
         if (!region.duration || region.duration <= 0) continue; // EC16
         const regionEnd = region.timelineStart + region.duration;
         if (regionEnd < startTime || region.timelineStart > endTime) continue;
 
-        const rStartPx = Math.max(0,     region.timelineStart * zoom - scrollX);
-        const rEndPx   = Math.min(width, regionEnd            * zoom - scrollX);
+        const rStartPx = Math.max(0, region.timelineStart * zoom - scrollX);
+        const rEndPx = Math.min(width, regionEnd * zoom - scrollX);
         if (rEndPx <= rStartPx) continue;
 
         // Style dispatcher:
@@ -316,22 +329,98 @@ function buildWaveformBitmap(d) {
         //   'mono'            → silhouette of mono fallback peaks.
         //   'bass'            → silhouette of LOW band only.
         if (waveformStyle === 'mono' && hasMono) {
-            drawSmoothBandPath(ctx, fallbackPeaks, 'fallback', region, rStartPx, rEndPx, scrollX, zoom, sourceDuration, centerY, maxAmp, lodLevel, width, height);
+            drawSmoothBandPath(
+                ctx,
+                fallbackPeaks,
+                'fallback',
+                region,
+                rStartPx,
+                rEndPx,
+                scrollX,
+                zoom,
+                sourceDuration,
+                centerY,
+                maxAmp,
+                lodLevel,
+                width,
+                height
+            );
         } else if (waveformStyle === 'bass' && hasBand && activePeaks.low?.length) {
-            drawSmoothBandPath(ctx, activePeaks.low, 'low', region, rStartPx, rEndPx, scrollX, zoom, sourceDuration, centerY, maxAmp, lodLevel, width, height);
+            drawSmoothBandPath(
+                ctx,
+                activePeaks.low,
+                'low',
+                region,
+                rStartPx,
+                rEndPx,
+                scrollX,
+                zoom,
+                sourceDuration,
+                centerY,
+                maxAmp,
+                lodLevel,
+                width,
+                height
+            );
         } else if (waveformStyle === 'liquid' && hasBand && activePeaks) {
             for (const bk of ['low', 'mid', 'high']) {
                 const p = activePeaks[bk];
                 if (!p?.length) continue;
-                drawSmoothBandPath(ctx, p, bk, region, rStartPx, rEndPx, scrollX, zoom, sourceDuration, centerY, maxAmp, lodLevel, width, height);
+                drawSmoothBandPath(
+                    ctx,
+                    p,
+                    bk,
+                    region,
+                    rStartPx,
+                    rEndPx,
+                    scrollX,
+                    zoom,
+                    sourceDuration,
+                    centerY,
+                    maxAmp,
+                    lodLevel,
+                    width,
+                    height
+                );
             }
-        } else if (hasBand && activePeaks.low?.length && activePeaks.mid?.length && activePeaks.high?.length) {
+        } else if (
+            hasBand &&
+            activePeaks.low?.length &&
+            activePeaks.mid?.length &&
+            activePeaks.high?.length
+        ) {
             // Default '3band' (and any unknown style with band data available)
             // → Mixxx-style stacked colour zones (low/mid/high as discrete
             // vertical bands from center outward, asymmetric min/max envelope).
-            drawMixxxFilteredWaveform(ctx, activePeaks, region, rStartPx, rEndPx, scrollX, zoom, sourceDuration, centerY, maxAmp);
+            drawMixxxFilteredWaveform(
+                ctx,
+                activePeaks,
+                region,
+                rStartPx,
+                rEndPx,
+                scrollX,
+                zoom,
+                sourceDuration,
+                centerY,
+                maxAmp
+            );
         } else if (hasMono) {
-            drawSmoothBandPath(ctx, fallbackPeaks, 'fallback', region, rStartPx, rEndPx, scrollX, zoom, sourceDuration, centerY, maxAmp, lodLevel, width, height);
+            drawSmoothBandPath(
+                ctx,
+                fallbackPeaks,
+                'fallback',
+                region,
+                rStartPx,
+                rEndPx,
+                scrollX,
+                zoom,
+                sourceDuration,
+                centerY,
+                maxAmp,
+                lodLevel,
+                width,
+                height
+            );
         }
     }
 
@@ -393,21 +482,32 @@ const MIXXX_COLORS = {
     // Rekordbox CDJ-style palette — warmer reds for bass body, brighter
     // emerald for mids, sky-blue for highs. Picked from samples of the
     // Pioneer Rekordbox 6/7 main waveform.
-    low:  [255, 80, 40],     // orange-red — bass / kick / sub
-    mid:  [70, 230, 100],    // emerald green — vocals / instruments
-    high: [60, 180, 255],    // sky blue — hi-hats / cymbals / air
+    low: [255, 80, 40], // orange-red — bass / kick / sub
+    mid: [70, 230, 100], // emerald green — vocals / instruments
+    high: [60, 180, 255], // sky blue — hi-hats / cymbals / air
 };
 
-function drawMixxxFilteredWaveform(ctx, bandPeaks, region, rStartPx, rEndPx, scrollX, zoom, sourceDuration, centerY, maxAmp) {
-    const low  = bandPeaks.low;
-    const mid  = bandPeaks.mid;
+function drawMixxxFilteredWaveform(
+    ctx,
+    bandPeaks,
+    region,
+    rStartPx,
+    rEndPx,
+    scrollX,
+    zoom,
+    sourceDuration,
+    centerY,
+    maxAmp
+) {
+    const low = bandPeaks.low;
+    const mid = bandPeaks.mid;
     const high = bandPeaks.high;
     if (!low?.length || !mid?.length || !high?.length) return;
     if (sourceDuration <= 0) return;
 
     const peakLen = Math.min(low.length, mid.length, high.length);
     const startPx = Math.max(0, Math.floor(rStartPx));
-    const endPx   = Math.ceil(rEndPx);
+    const endPx = Math.ceil(rEndPx);
     if (endPx <= startPx) return;
 
     const pxToPeakRatio = peakLen / (sourceDuration * zoom);
@@ -431,7 +531,7 @@ function drawMixxxFilteredWaveform(ctx, bandPeaks, region, rStartPx, rEndPx, scr
     //
     // This matches what Pioneer CDJs draw: a continuous loudness silhouette
     // whose internal colour mix reveals spectral content WITHIN the envelope.
-    const GAMMA = 0.9;     // slight expansion so quiet content is still visible
+    const GAMMA = 0.9; // slight expansion so quiet content is still visible
 
     // ── PASS 1: gather band amplitudes per pixel column ──
     // Fixed stride = 1 px. Earlier versions flipped between 1 and 2 px
@@ -444,17 +544,17 @@ function drawMixxxFilteredWaveform(ctx, bandPeaks, region, rStartPx, rEndPx, scr
     const STRIDE = 1;
     const sampleCount = Math.ceil((endPx - startPx) / STRIDE) + 1;
     // Flat typed arrays — one entry per sample column.
-    const sX  = new Float32Array(sampleCount);
-    const slT = new Float32Array(sampleCount);  // low top  height (px)
-    const smT = new Float32Array(sampleCount);  // mid top  height (px)
-    const shT = new Float32Array(sampleCount);  // high top height (px)
-    const slB = new Float32Array(sampleCount);  // low bot  height (px)
-    const smB = new Float32Array(sampleCount);  // mid bot  height (px)
-    const shB = new Float32Array(sampleCount);  // high bot height (px)
+    const sX = new Float32Array(sampleCount);
+    const slT = new Float32Array(sampleCount); // low top  height (px)
+    const smT = new Float32Array(sampleCount); // mid top  height (px)
+    const shT = new Float32Array(sampleCount); // high top height (px)
+    const slB = new Float32Array(sampleCount); // low bot  height (px)
+    const smB = new Float32Array(sampleCount); // mid bot  height (px)
+    const shB = new Float32Array(sampleCount); // high bot height (px)
     let n = 0;
 
     for (let px = startPx; px <= endPx; px += STRIDE) {
-        const time    = (px + scrollX) / zoom;
+        const time = (px + scrollX) / zoom;
         const srcTime = region.sourceStart + (time - region.timelineStart);
         if (srcTime < 0 || srcTime > sourceDuration) {
             sX[n] = px;
@@ -465,40 +565,48 @@ function drawMixxxFilteredWaveform(ctx, bandPeaks, region, rStartPx, rEndPx, scr
 
         const fIdx0 = (srcTime / sourceDuration) * peakLen;
         const fIdx1 = fIdx0 + Math.max(1, pxToPeakRatio);
-        const idx0  = Math.floor(fIdx0);
-        const idx1  = Math.min(peakLen - 1, Math.ceil(fIdx1));
+        const idx0 = Math.floor(fIdx0);
+        const idx1 = Math.min(peakLen - 1, Math.ceil(fIdx1));
 
-        let lowPos = 0, midPos = 0, highPos = 0;
-        let lowNeg = 0, midNeg = 0, highNeg = 0;
+        let lowPos = 0,
+            midPos = 0,
+            highPos = 0;
+        let lowNeg = 0,
+            midNeg = 0,
+            highNeg = 0;
         for (let i = idx0; i <= idx1; i++) {
-            const lp = low[i]; const mp = mid[i]; const hp = high[i];
+            const lp = low[i];
+            const mp = mid[i];
+            const hp = high[i];
             if (!lp || !mp || !hp) continue;
-            if (lp.max > lowPos)   lowPos  = lp.max;
-            if (mp.max > midPos)   midPos  = mp.max;
-            if (hp.max > highPos)  highPos = hp.max;
-            const ln = -lp.min, mn = -mp.min, hn = -hp.min;
-            if (ln > lowNeg)  lowNeg  = ln;
-            if (mn > midNeg)  midNeg  = mn;
+            if (lp.max > lowPos) lowPos = lp.max;
+            if (mp.max > midPos) midPos = mp.max;
+            if (hp.max > highPos) highPos = hp.max;
+            const ln = -lp.min,
+                mn = -mp.min,
+                hn = -hp.min;
+            if (ln > lowNeg) lowNeg = ln;
+            if (mn > midNeg) midNeg = mn;
             if (hn > highNeg) highNeg = hn;
         }
 
         // γ-curve raw band amplitudes (Rekordbox uses ~0.8-1.0 — slight
         // expansion of quiet content without crushing loud peaks)
-        const lP = Math.pow(Math.min(1, lowPos),  GAMMA);
-        const mP = Math.pow(Math.min(1, midPos),  GAMMA);
+        const lP = Math.pow(Math.min(1, lowPos), GAMMA);
+        const mP = Math.pow(Math.min(1, midPos), GAMMA);
         const hP = Math.pow(Math.min(1, highPos), GAMMA);
-        const lN = Math.pow(Math.min(1, lowNeg),  GAMMA);
-        const mN = Math.pow(Math.min(1, midNeg),  GAMMA);
+        const lN = Math.pow(Math.min(1, lowNeg), GAMMA);
+        const mN = Math.pow(Math.min(1, midNeg), GAMMA);
         const hN = Math.pow(Math.min(1, highNeg), GAMMA);
 
         // ENVELOPE = MAX BAND. Inner band slices are proportional to share
         // of the total band sum — see header comment for the rationale.
-        const envT  = Math.max(lP, mP, hP) * maxAmp;
-        const sumT  = lP + mP + hP;
-        const envB  = Math.max(lN, mN, hN) * maxAmp;
-        const sumB  = lN + mN + hN;
+        const envT = Math.max(lP, mP, hP) * maxAmp;
+        const sumT = lP + mP + hP;
+        const envB = Math.max(lN, mN, hN) * maxAmp;
+        const sumB = lN + mN + hN;
 
-        sX[n]  = px;
+        sX[n] = px;
         if (sumT > 0.0001) {
             slT[n] = (lP / sumT) * envT;
             smT[n] = (mP / sumT) * envT;
@@ -522,30 +630,76 @@ function drawMixxxFilteredWaveform(ctx, bandPeaks, region, rStartPx, rEndPx, scr
     // playback". The mid-point bezier in Path2D already smooths visually
     // (purely geometric, deterministic per sample value), so we skip the
     // pre-bezier kernel entirely.
-    const sLT = slT, sMT = smT, sHT = shT;
-    const sLB = slB, sMB = smB, sHB = shB;
+    const sLT = slT,
+        sMT = smT,
+        sHT = shT;
+    const sLB = slB,
+        sMB = smB,
+        sHB = shB;
 
     // ── PASS 3: build & fill 6 smooth polygons (3 top, 3 bottom) ──
     // Each band's polygon spans the row between its inner edge (closer to
     // centerline) and its outer edge. Inner edges are CUMULATIVE — mid's
     // inner edge sits on top of low's outer edge, etc. This gives the
     // stacked-band look (red core, green mantle, blue tip).
-    const colLow  = `rgb(${MIXXX_COLORS.low[0]},${MIXXX_COLORS.low[1]},${MIXXX_COLORS.low[2]})`;
-    const colMid  = `rgb(${MIXXX_COLORS.mid[0]},${MIXXX_COLORS.mid[1]},${MIXXX_COLORS.mid[2]})`;
+    const colLow = `rgb(${MIXXX_COLORS.low[0]},${MIXXX_COLORS.low[1]},${MIXXX_COLORS.low[2]})`;
+    const colMid = `rgb(${MIXXX_COLORS.mid[0]},${MIXXX_COLORS.mid[1]},${MIXXX_COLORS.mid[2]})`;
     const colHigh = `rgb(${MIXXX_COLORS.high[0]},${MIXXX_COLORS.high[1]},${MIXXX_COLORS.high[2]})`;
 
     // ── TOP HALF ──
     // low: inner = centerY, outer = centerY - lT
-    fillSmoothBand(ctx, sX, n, (i) => centerY,                          (i) => centerY - sLT[i],                        colLow);
+    fillSmoothBand(
+        ctx,
+        sX,
+        n,
+        (i) => centerY,
+        (i) => centerY - sLT[i],
+        colLow
+    );
     // mid: inner = centerY - lT, outer = centerY - lT - mT
-    fillSmoothBand(ctx, sX, n, (i) => centerY - sLT[i],                 (i) => centerY - sLT[i] - sMT[i],               colMid);
+    fillSmoothBand(
+        ctx,
+        sX,
+        n,
+        (i) => centerY - sLT[i],
+        (i) => centerY - sLT[i] - sMT[i],
+        colMid
+    );
     // high: inner = centerY - lT - mT, outer = centerY - lT - mT - hT
-    fillSmoothBand(ctx, sX, n, (i) => centerY - sLT[i] - sMT[i],        (i) => centerY - sLT[i] - sMT[i] - sHT[i],      colHigh);
+    fillSmoothBand(
+        ctx,
+        sX,
+        n,
+        (i) => centerY - sLT[i] - sMT[i],
+        (i) => centerY - sLT[i] - sMT[i] - sHT[i],
+        colHigh
+    );
 
     // ── BOTTOM HALF (mirrored) ──
-    fillSmoothBand(ctx, sX, n, (i) => centerY,                          (i) => centerY + sLB[i],                        colLow);
-    fillSmoothBand(ctx, sX, n, (i) => centerY + sLB[i],                 (i) => centerY + sLB[i] + sMB[i],               colMid);
-    fillSmoothBand(ctx, sX, n, (i) => centerY + sLB[i] + sMB[i],        (i) => centerY + sLB[i] + sMB[i] + sHB[i],      colHigh);
+    fillSmoothBand(
+        ctx,
+        sX,
+        n,
+        (i) => centerY,
+        (i) => centerY + sLB[i],
+        colLow
+    );
+    fillSmoothBand(
+        ctx,
+        sX,
+        n,
+        (i) => centerY + sLB[i],
+        (i) => centerY + sLB[i] + sMB[i],
+        colMid
+    );
+    fillSmoothBand(
+        ctx,
+        sX,
+        n,
+        (i) => centerY + sLB[i] + sMB[i],
+        (i) => centerY + sLB[i] + sMB[i] + sHB[i],
+        colHigh
+    );
 }
 
 /**
@@ -606,7 +760,22 @@ function fillSmoothBand(ctx, xs, n, yInner, yOuter, fillStyle) {
 
 // ─── SMOOTH PATH2D BAND SILHOUETTE ──────────────────────────────────────────────
 
-function drawSmoothBandPath(ctx, peaks, bandKey, region, rStartPx, rEndPx, scrollX, zoom, sourceDuration, centerY, maxAmp, lodLevel, width, height) {
+function drawSmoothBandPath(
+    ctx,
+    peaks,
+    bandKey,
+    region,
+    rStartPx,
+    rEndPx,
+    scrollX,
+    zoom,
+    sourceDuration,
+    centerY,
+    maxAmp,
+    lodLevel,
+    width,
+    height
+) {
     const widthPx = Math.max(1, Math.ceil(rEndPx) - Math.floor(rStartPx));
     // Sample density. Cap step so even narrow regions get >= 3 samples —
     // otherwise small pasted clips (e.g., 8 px wide at LOD 4 with step=8)
@@ -615,11 +784,11 @@ function drawSmoothBandPath(ctx, peaks, bandKey, region, rStartPx, rEndPx, scrol
     // "missing region with audio still playing" gap.
     const baseStep = Math.max(2, lodLevel * 2);
     const step = Math.min(baseStep, Math.max(1, Math.floor(widthPx / 3)));
-    const pts  = [];
+    const pts = [];
 
     const samplePixel = (px) => {
-        const time     = (px + scrollX) / zoom;
-        const srcTime  = region.sourceStart + (time - region.timelineStart);
+        const time = (px + scrollX) / zoom;
+        const srcTime = region.sourceStart + (time - region.timelineStart);
         // BUG FIX 2026-05-11: was `srcTime / totalDuration` — `totalDuration`
         // is the edit-timeline length, which can differ from the source
         // audio length in .rbep projects whose regions rearrange or repeat
@@ -627,9 +796,9 @@ function drawSmoothBandPath(ctx, peaks, bandKey, region, rStartPx, rEndPx, scrol
         // divide by sourceDuration. Symptom of the old bug: waveform
         // sample-positions drifted by the ratio (totalDur / sourceDur);
         // visible as "waveform doesn't match audio" during playback.
-        const rawIdx   = (srcTime / sourceDuration) * peaks.length;
-        const idx      = Math.floor(rawIdx);
-        const frac     = rawIdx - idx;
+        const rawIdx = (srcTime / sourceDuration) * peaks.length;
+        const idx = Math.floor(rawIdx);
+        const frac = rawIdx - idx;
 
         if (idx < 0 || idx >= peaks.length) return null;
         const p0 = peaks[idx];
@@ -673,9 +842,12 @@ function drawSmoothBandPath(ctx, peaks, bandKey, region, rStartPx, rEndPx, scrol
     // Build gradient for this band
     const grad = ctx.createLinearGradient(0, centerY - maxAmp, 0, centerY + maxAmp);
     const c = COLORS[bandKey] || COLORS.fallback;
-    grad.addColorStop(0,    c.top);
-    grad.addColorStop(0.45, c.top.includes('0.92') ? c.top.replace('0.92', '0.60') : c.top.replace('0.88', '0.55'));
-    grad.addColorStop(1,    c.bot);
+    grad.addColorStop(0, c.top);
+    grad.addColorStop(
+        0.45,
+        c.top.includes('0.92') ? c.top.replace('0.92', '0.60') : c.top.replace('0.88', '0.55')
+    );
+    grad.addColorStop(1, c.bot);
 
     // Draw filled silhouette using Path2D with smooth quadratic bezier
     const path = new Path2D();
@@ -688,7 +860,7 @@ function drawSmoothBandPath(ctx, peaks, bandKey, region, rStartPx, rEndPx, scrol
     for (let i = 1; i < pts.length; i++) {
         const prev = pts[i - 1];
         const curr = pts[i];
-        const mx   = (prev.px + curr.px) / 2;
+        const mx = (prev.px + curr.px) / 2;
         path.quadraticCurveTo(prev.px, prev.yTop, mx, (prev.yTop + curr.yTop) / 2);
     }
     // Cap right edge
@@ -699,7 +871,7 @@ function drawSmoothBandPath(ctx, peaks, bandKey, region, rStartPx, rEndPx, scrol
     for (let i = pts.length - 2; i >= 0; i--) {
         const curr = pts[i + 1];
         const prev = pts[i];
-        const mx   = (prev.px + curr.px) / 2;
+        const mx = (prev.px + curr.px) / 2;
         path.quadraticCurveTo(curr.px, curr.yBot, mx, (curr.yBot + prev.yBot) / 2);
     }
 
@@ -739,7 +911,7 @@ function drawFrame(ctx, d, bitmap) {
     ctx.fillRect(0, 0, width, height);
 
     const startTime = d.scrollX / d.zoom;
-    const endTime   = (d.scrollX + d.width) / d.zoom;
+    const endTime = (d.scrollX + d.width) / d.zoom;
 
     // ── LAYER 0: Waveform bitmap ──
     // Translate the bitmap by the delta between the scrollX it was built
@@ -778,12 +950,15 @@ function drawGrid(ctx, d, startTime, endTime) {
     if (!bpm || bpm <= 0) return;
 
     const beatDur = 60 / bpm;
-    const barDur  = beatDur * 4;
-    const ppb     = beatDur * zoom;
+    const barDur = beatDur * 4;
+    const ppb = beatDur * zoom;
 
     let gridUnit = beatDur;
-    if (ppb < 8)  { gridUnit = barDur; }
-    else if (ppb > 60) { gridUnit = beatDur / 4; }
+    if (ppb < 8) {
+        gridUnit = barDur;
+    } else if (ppb > 60) {
+        gridUnit = beatDur / 4;
+    }
 
     const first = Math.floor((startTime - firstBeatSec) / gridUnit) * gridUnit + firstBeatSec;
     const waveBot = height - PHASE_METER_HEIGHT;
@@ -795,9 +970,14 @@ function drawGrid(ctx, d, startTime, endTime) {
         if (x < -1 || x > width + 1) continue;
 
         const beatNum = Math.round((t - firstBeatSec) / beatDur);
-        ctx.strokeStyle = beatNum % 4 === 0 ? COLORS.gridBar :
-            ppb > 60 ? (Math.round((t - firstBeatSec) / (beatDur / 4)) % 4 === 0 ? COLORS.gridBeat : COLORS.gridSub)
-                     : COLORS.gridBeat;
+        ctx.strokeStyle =
+            beatNum % 4 === 0
+                ? COLORS.gridBar
+                : ppb > 60
+                  ? Math.round((t - firstBeatSec) / (beatDur / 4)) % 4 === 0
+                      ? COLORS.gridBeat
+                      : COLORS.gridSub
+                  : COLORS.gridBeat;
 
         ctx.beginPath();
         ctx.moveTo(x, RULER_HEIGHT);
@@ -812,10 +992,10 @@ function drawPhraseMarkers(ctx, d, startTime, endTime) {
     const { width, height, zoom, scrollX, bpm, firstBeatSec } = d;
     if (!bpm || bpm <= 0) return;
 
-    const beatDur    = 60 / bpm;
-    const phraseDur  = beatDur * 64;
-    const firstP     = Math.floor((startTime - firstBeatSec) / phraseDur) * phraseDur + firstBeatSec;
-    const waveBot    = height - PHASE_METER_HEIGHT;
+    const beatDur = 60 / bpm;
+    const phraseDur = beatDur * 64;
+    const firstP = Math.floor((startTime - firstBeatSec) / phraseDur) * phraseDur + firstBeatSec;
+    const waveBot = height - PHASE_METER_HEIGHT;
 
     ctx.lineWidth = 1.5;
     ctx.setLineDash([4, 4]);
@@ -864,7 +1044,7 @@ function drawRegionBoundaries(ctx, d, startTime, endTime) {
         if (regionEnd < startTime || region.timelineStart > endTime) continue;
 
         const x1 = region.timelineStart * zoom - scrollX;
-        const x2 = regionEnd            * zoom - scrollX;
+        const x2 = regionEnd * zoom - scrollX;
         const sel = selectedIds.has(region.id);
 
         if (sel) {
@@ -873,8 +1053,14 @@ function drawRegionBoundaries(ctx, d, startTime, endTime) {
         }
         ctx.strokeStyle = sel ? COLORS.regionSelectedBorder : COLORS.regionBorder;
         ctx.lineWidth = sel ? 2 : 1;
-        ctx.beginPath(); ctx.moveTo(Math.round(x1) + 0.5, RULER_HEIGHT); ctx.lineTo(Math.round(x1) + 0.5, waveBot); ctx.stroke();
-        ctx.beginPath(); ctx.moveTo(Math.round(x2) + 0.5, RULER_HEIGHT); ctx.lineTo(Math.round(x2) + 0.5, waveBot); ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(Math.round(x1) + 0.5, RULER_HEIGHT);
+        ctx.lineTo(Math.round(x1) + 0.5, waveBot);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(Math.round(x2) + 0.5, RULER_HEIGHT);
+        ctx.lineTo(Math.round(x2) + 0.5, waveBot);
+        ctx.stroke();
     }
 }
 
@@ -887,7 +1073,7 @@ function drawSelectionRange(ctx, d, startTime, endTime) {
     if (end <= start || end < startTime || start > endTime) return;
 
     const x1 = Math.round(start * zoom - scrollX);
-    const x2 = Math.round(end   * zoom - scrollX);
+    const x2 = Math.round(end * zoom - scrollX);
     const waveBot = height - PHASE_METER_HEIGHT;
 
     if (x2 < 0 || x1 > width) return;
@@ -925,13 +1111,16 @@ function drawCueMarkers(ctx, d, startTime, endTime) {
     }
 
     for (const { i, x, cue, row } of items) {
-        const color  = `rgb(${cue.red},${cue.green},${cue.blue})`;
+        const color = `rgb(${cue.red},${cue.green},${cue.blue})`;
         const labelY = row * 14;
 
         // Full-height vertical line
         ctx.strokeStyle = color + 'cc';
         ctx.lineWidth = 1.5;
-        ctx.beginPath(); ctx.moveTo(x, RULER_HEIGHT); ctx.lineTo(x, waveBot); ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(x, RULER_HEIGHT);
+        ctx.lineTo(x, waveBot);
+        ctx.stroke();
 
         // Flag shape
         ctx.fillStyle = color;
@@ -974,7 +1163,10 @@ function drawCueMarkers(ctx, d, startTime, endTime) {
         ctx.strokeStyle = COLORS.memoryCueDash;
         ctx.lineWidth = 1;
         ctx.setLineDash([3, 3]);
-        ctx.beginPath(); ctx.moveTo(x, RULER_HEIGHT + 8); ctx.lineTo(x, waveBot); ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(x, RULER_HEIGHT + 8);
+        ctx.lineTo(x, waveBot);
+        ctx.stroke();
         ctx.setLineDash([]);
     }
 
@@ -983,7 +1175,10 @@ function drawCueMarkers(ctx, d, startTime, endTime) {
         ctx.strokeStyle = COLORS.ghostCue;
         ctx.lineWidth = 1;
         ctx.setLineDash([4, 4]);
-        ctx.beginPath(); ctx.moveTo(ghostCueX + 0.5, RULER_HEIGHT); ctx.lineTo(ghostCueX + 0.5, waveBot); ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(ghostCueX + 0.5, RULER_HEIGHT);
+        ctx.lineTo(ghostCueX + 0.5, waveBot);
+        ctx.stroke();
         ctx.setLineDash([]);
     }
 }
@@ -1002,15 +1197,23 @@ function drawLoops(ctx, d, startTime, endTime) {
         if (x2 < 0 || x1 > width) continue;
 
         const active = i === activeLoopIndex;
-        const color  = `rgb(${loop.red ?? 251},${loop.green ?? 146},${loop.blue ?? 60})`;
+        const color = `rgb(${loop.red ?? 251},${loop.green ?? 146},${loop.blue ?? 60})`;
 
-        ctx.fillStyle = active ? `rgba(${loop.red ?? 251},${loop.green ?? 146},${loop.blue ?? 60},0.14)` : COLORS.loopFill;
+        ctx.fillStyle = active
+            ? `rgba(${loop.red ?? 251},${loop.green ?? 146},${loop.blue ?? 60},0.14)`
+            : COLORS.loopFill;
         ctx.fillRect(x1, RULER_HEIGHT, x2 - x1, waveBot - RULER_HEIGHT);
 
         ctx.strokeStyle = active ? color : COLORS.loopBorder;
-        ctx.lineWidth   = active ? 2 : 1;
-        ctx.beginPath(); ctx.moveTo(Math.round(x1) + 0.5, RULER_HEIGHT); ctx.lineTo(Math.round(x1) + 0.5, waveBot); ctx.stroke();
-        ctx.beginPath(); ctx.moveTo(Math.round(x2) + 0.5, RULER_HEIGHT); ctx.lineTo(Math.round(x2) + 0.5, waveBot); ctx.stroke();
+        ctx.lineWidth = active ? 2 : 1;
+        ctx.beginPath();
+        ctx.moveTo(Math.round(x1) + 0.5, RULER_HEIGHT);
+        ctx.lineTo(Math.round(x1) + 0.5, waveBot);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(Math.round(x2) + 0.5, RULER_HEIGHT);
+        ctx.lineTo(Math.round(x2) + 0.5, waveBot);
+        ctx.stroke();
 
         if (x2 - x1 > 20) {
             ctx.fillStyle = color;
@@ -1034,20 +1237,35 @@ function drawPlayhead(ctx, d) {
     const waveBot = height - PHASE_METER_HEIGHT;
 
     // Glow layers
-    ctx.strokeStyle = COLORS.playheadGlow2; ctx.lineWidth = 9;
-    ctx.beginPath(); ctx.moveTo(x, RULER_HEIGHT); ctx.lineTo(x, waveBot); ctx.stroke();
-    ctx.strokeStyle = COLORS.playheadGlow;   ctx.lineWidth = 3;
-    ctx.beginPath(); ctx.moveTo(x, RULER_HEIGHT); ctx.lineTo(x, waveBot); ctx.stroke();
+    ctx.strokeStyle = COLORS.playheadGlow2;
+    ctx.lineWidth = 9;
+    ctx.beginPath();
+    ctx.moveTo(x, RULER_HEIGHT);
+    ctx.lineTo(x, waveBot);
+    ctx.stroke();
+    ctx.strokeStyle = COLORS.playheadGlow;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(x, RULER_HEIGHT);
+    ctx.lineTo(x, waveBot);
+    ctx.stroke();
 
     // Main line (full height, above ruler)
-    ctx.strokeStyle = COLORS.playhead; ctx.lineWidth = 1.2;
-    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, waveBot); ctx.stroke();
+    ctx.strokeStyle = COLORS.playhead;
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, waveBot);
+    ctx.stroke();
 
     // Triangle at top
     ctx.fillStyle = COLORS.playhead;
     ctx.beginPath();
-    ctx.moveTo(x - 6, 0); ctx.lineTo(x + 6, 0); ctx.lineTo(x, 9);
-    ctx.closePath(); ctx.fill();
+    ctx.moveTo(x - 6, 0);
+    ctx.lineTo(x + 6, 0);
+    ctx.lineTo(x, 9);
+    ctx.closePath();
+    ctx.fill();
 }
 
 // ─── PHASE METER ─────────────────────────────────────────────────────────────────
@@ -1064,7 +1282,7 @@ function drawPhaseMeter(ctx, d) {
     ctx.fillRect(0, y, width, PHASE_METER_HEIGHT);
 
     const beatDur = 60 / bpm;
-    const phase   = (playhead % beatDur) / beatDur; // 0..1
+    const phase = (playhead % beatDur) / beatDur; // 0..1
 
     // Fill color: cyan → orange as approaching next beat
     const r = Math.round(phase * 255);
@@ -1084,7 +1302,7 @@ function drawPhaseMeter(ctx, d) {
     const barDur = beatDur * 4;
     const firstBeat = Math.floor(playhead / beatDur) * beatDur - beatDur * 2;
     for (let bt = firstBeat; bt < playhead + beatDur * 8; bt += beatDur) {
-        const phaseOfBt = ((bt % barDur) / barDur);
+        const phaseOfBt = (bt % barDur) / barDur;
         const bx = phaseOfBt * width;
         ctx.fillStyle = bt % barDur < 0.001 ? 'rgba(255,60,60,0.8)' : 'rgba(255,255,255,0.2)';
         ctx.fillRect(bx, y, 1, PHASE_METER_HEIGHT);
@@ -1099,18 +1317,22 @@ function drawRuler(ctx, d, startTime, endTime) {
     ctx.fillStyle = COLORS.rulerBg;
     ctx.fillRect(0, 0, width, RULER_HEIGHT);
 
-    ctx.strokeStyle = COLORS.rulerLine; ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.moveTo(0, RULER_HEIGHT - 0.5); ctx.lineTo(width, RULER_HEIGHT - 0.5); ctx.stroke();
+    ctx.strokeStyle = COLORS.rulerLine;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(0, RULER_HEIGHT - 0.5);
+    ctx.lineTo(width, RULER_HEIGHT - 0.5);
+    ctx.stroke();
 
     if (!bpm || bpm <= 0) return;
 
     const beatDur = 60 / bpm;
-    const barDur  = beatDur * 4;
-    const ppb     = barDur * zoom;
+    const barDur = beatDur * 4;
+    const ppb = barDur * zoom;
 
     let labelInt = barDur;
-    if (ppb < 40)  labelInt = barDur * 4;
-    if (ppb < 15)  labelInt = barDur * 16;
+    if (ppb < 40) labelInt = barDur * 4;
+    if (ppb < 15) labelInt = barDur * 16;
 
     const first = Math.floor((startTime - firstBeatSec) / labelInt) * labelInt + firstBeatSec;
 
@@ -1122,8 +1344,12 @@ function drawRuler(ctx, d, startTime, endTime) {
         const x = Math.round(t * zoom - scrollX);
         if (x < -40 || x > width + 40) continue;
 
-        ctx.strokeStyle = COLORS.rulerTick; ctx.lineWidth = 1;
-        ctx.beginPath(); ctx.moveTo(x + 0.5, RULER_HEIGHT - 5); ctx.lineTo(x + 0.5, RULER_HEIGHT - 1); ctx.stroke();
+        ctx.strokeStyle = COLORS.rulerTick;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(x + 0.5, RULER_HEIGHT - 5);
+        ctx.lineTo(x + 0.5, RULER_HEIGHT - 1);
+        ctx.stroke();
 
         const mins = Math.floor(t / 60);
         const secs = Math.floor(t % 60);

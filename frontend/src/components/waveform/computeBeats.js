@@ -18,7 +18,7 @@ export default function computeBeats(beatGrid, bpm, duration) {
                 result.push({
                     time: t,
                     barNum: Math.floor(absoluteBeat / 4) + 1,
-                    isDownbeat: absoluteBeat % 4 === 0
+                    isDownbeat: absoluteBeat % 4 === 0,
                 });
                 t += segBeatDur;
                 absoluteBeat++;
@@ -31,7 +31,7 @@ export default function computeBeats(beatGrid, bpm, duration) {
             result.push({
                 time: t,
                 barNum: Math.floor(beatCount / 4) + 1,
-                isDownbeat: beatCount % 4 === 0
+                isDownbeat: beatCount % 4 === 0,
             });
             t += 60 / bpm;
             beatCount++;
