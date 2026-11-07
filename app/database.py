@@ -1450,8 +1450,8 @@ class RekordboxDB:
         if override is not None:
             return override
         track = self.get_track_details(tid)
-        if track and "BeatGrid" in track:
-            return track["BeatGrid"]
+        if track and track.get("beatGrid"):
+            return track["beatGrid"]
         return []
 
 
