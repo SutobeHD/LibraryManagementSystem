@@ -169,7 +169,7 @@ const DjEditDaw = ({ track: initialTrack }) => {
         while (time < state.totalDuration) {
             dispatch({
                 type: 'ADD_MEMORY_CUE',
-                payload: { time, label: `16 Bar ${count + 1}` }
+                payload: { time, label: `16 Bar ${count + 1}` },
             });
             time += intervalSec;
             count++;
@@ -186,7 +186,10 @@ const DjEditDaw = ({ track: initialTrack }) => {
     const handlePlay = useCallback(async () => {
         // EC6: race-condition guard — block play if buffer not yet decoded
         if (!state.sourceBuffer) {
-            toast.error('Track still loading — please wait...', { id: 'play-guard', duration: 2000 });
+            toast.error('Track still loading — please wait...', {
+                id: 'play-guard',
+                duration: 2000,
+            });
             return;
         }
 
@@ -207,25 +210,24 @@ const DjEditDaw = ({ track: initialTrack }) => {
         dispatch({ type: 'SET_PLAYING', payload: false });
     }, []);
 
-    const handleJumpTo = useCallback((time) => {
-        const wasPlaying = state.isPlaying;
-        if (wasPlaying) {
-            DawEngine.stopPlayback();
-        }
-        dispatch({ type: 'SET_PLAYHEAD', payload: time });
-        if (wasPlaying) {
-            // Restart playback from new position
-            setTimeout(() => {
-                DawEngine.playRegions(
-                    state.regions,
-                    state.sourceBuffer,
-                    time,
-                    null,
-                    () => dispatch({ type: 'SET_PLAYING', payload: false })
-                );
-            }, 50);
-        }
-    }, [state.isPlaying, state.regions, state.sourceBuffer]);
+    const handleJumpTo = useCallback(
+        (time) => {
+            const wasPlaying = state.isPlaying;
+            if (wasPlaying) {
+                DawEngine.stopPlayback();
+            }
+            dispatch({ type: 'SET_PLAYHEAD', payload: time });
+            if (wasPlaying) {
+                // Restart playback from new position
+                setTimeout(() => {
+                    DawEngine.playRegions(state.regions, state.sourceBuffer, time, null, () =>
+                        dispatch({ type: 'SET_PLAYING', payload: false })
+                    );
+                }, 50);
+            }
+        },
+        [state.isPlaying, state.regions, state.sourceBuffer]
+    );
 
     const handleLoadTrack = useCallback((track) => {
         setActiveTrack(track);
@@ -249,8 +251,8 @@ const DjEditDaw = ({ track: initialTrack }) => {
         }
 
         // Find region at playhead
-        const region = state.regions.find(r =>
-            splitTime > r.timelineStart && splitTime < r.timelineStart + r.duration
+        const region = state.regions.find(
+            (r) => splitTime > r.timelineStart && splitTime < r.timelineStart + r.duration
         );
         if (!region) {
             toast.error('No region at playhead');
@@ -260,10 +262,18 @@ const DjEditDaw = ({ track: initialTrack }) => {
         dispatch({ type: 'PUSH_UNDO', payload: 'Split' });
         dispatch({
             type: 'SPLIT_REGION_AT',
-            payload: { regionId: region.id, splitTime }
+            payload: { regionId: region.id, splitTime },
         });
         toast.success('Region split', { duration: 1500 });
-    }, [state.regions, state.playhead, state.snapEnabled, state.slipMode, state.bpm, state.snapDivision, state.tempoMap]);
+    }, [
+        state.regions,
+        state.playhead,
+        state.snapEnabled,
+        state.slipMode,
+        state.bpm,
+        state.snapDivision,
+        state.tempoMap,
+    ]);
 
     const handleRippleDelete = useCallback(() => {
         if (state.selectedRegionIds.size === 0) {
@@ -288,7 +298,12 @@ const DjEditDaw = ({ track: initialTrack }) => {
     }, []);
 
     // ─── KEYBOARD SHORTCUTS ───────────────────────────────────────────────
-    const { handlers: keyHandlers, onShiftDown, onShiftUp, onHotcue } = useDawKeyhandlers({
+    const {
+        handlers: keyHandlers,
+        onShiftDown,
+        onShiftUp,
+        onHotcue,
+    } = useDawKeyhandlers({
         state,
         dispatch,
         pendingResumeAt,
@@ -347,16 +362,11 @@ const DjEditDaw = ({ track: initialTrack }) => {
                         onLoadTrack={handleLoadTrack}
                         onOpenProject={handleOpenProject}
                         isCollapsed={isLibraryCollapsed}
-                        onToggleCollapse={() => setIsLibraryCollapsed(prev => !prev)}
+                        onToggleCollapse={() => setIsLibraryCollapsed((prev) => !prev)}
                     />
                 }
                 exportModal={
-                    showExport && (
-                        <ExportModal
-                            state={state}
-                            onClose={() => setShowExport(false)}
-                        />
-                    )
+                    showExport && <ExportModal state={state} onClose={() => setShowExport(false)} />
                 }
                 fileInput={
                     <input
@@ -375,7 +385,9 @@ const DjEditDaw = ({ track: initialTrack }) => {
             <div className="flex items-center justify-center h-full text-red-500 bg-mx-deepest">
                 <div className="text-center">
                     <h3 className="font-bold text-xl">DAW Render Error</h3>
-                    <pre className="text-xs mt-2 text-left bg-black/50 p-4 rounded">{err.message}</pre>
+                    <pre className="text-xs mt-2 text-left bg-black/50 p-4 rounded">
+                        {err.message}
+                    </pre>
                 </div>
             </div>
         );

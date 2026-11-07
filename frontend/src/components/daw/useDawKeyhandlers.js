@@ -39,7 +39,8 @@ export default function useDawKeyhandlers({
         const handlers = {
             play_pause: (e) => {
                 e.preventDefault();
-                if (state.isPlaying) handleStop(); else handlePlay();
+                if (state.isPlaying) handleStop();
+                else handlePlay();
             },
 
             jump_start: (e) => {
@@ -66,17 +67,32 @@ export default function useDawKeyhandlers({
                 e.preventDefault();
                 const beatSec = state.bpm > 0 ? 60 / state.bpm : 0.5;
                 const delta = e.shiftKey ? beatSec * 4 : beatSec;
-                dispatch({ type: 'SET_PLAYHEAD', payload: Math.min(state.totalDuration, state.playhead + delta) });
+                dispatch({
+                    type: 'SET_PLAYHEAD',
+                    payload: Math.min(state.totalDuration, state.playhead + delta),
+                });
             },
 
-            split: (e) => { e.preventDefault(); handleSplit(); },
+            split: (e) => {
+                e.preventDefault();
+                handleSplit();
+            },
 
-            delete: (e) => { e.preventDefault(); handleRippleDelete(); },
+            delete: (e) => {
+                e.preventDefault();
+                handleRippleDelete();
+            },
 
             // Undo / Redo (caller must dispatch redo first because its combo
             // is the same key as undo with an additional Shift modifier).
-            undo: (e) => { e.preventDefault(); dispatch({ type: 'UNDO' }); },
-            redo: (e) => { e.preventDefault(); dispatch({ type: 'REDO' }); },
+            undo: (e) => {
+                e.preventDefault();
+                dispatch({ type: 'UNDO' });
+            },
+            redo: (e) => {
+                e.preventDefault();
+                dispatch({ type: 'REDO' });
+            },
 
             copy: (e) => {
                 e.preventDefault();
@@ -111,14 +127,20 @@ export default function useDawKeyhandlers({
                 toast.success('Duplicated selection');
             },
 
-            save: (e) => { e.preventDefault(); handleSave(); },
+            save: (e) => {
+                e.preventDefault();
+                handleSave();
+            },
 
-            open: (e) => { e.preventDefault(); handleOpen(); },
+            open: (e) => {
+                e.preventDefault();
+                handleOpen();
+            },
         };
 
         // ─── Slip-mode toggle (Shift held) ───────────────────────────────
         const onShiftDown = () => dispatch({ type: 'SET_SLIP_MODE', payload: true });
-        const onShiftUp   = () => dispatch({ type: 'SET_SLIP_MODE', payload: false });
+        const onShiftUp = () => dispatch({ type: 'SET_SLIP_MODE', payload: false });
 
         // ─── Hot-cue jump (numeric keys 1..8) ────────────────────────────
         const onHotcue = (num) => {
@@ -128,8 +150,19 @@ export default function useDawKeyhandlers({
 
         return { handlers, onShiftDown, onShiftUp, onHotcue };
     }, [
-        state.isPlaying, state.totalDuration, state.bpm, state.playhead, state.hotCues,
-        dispatch, pendingResumeAt,
-        handlePlay, handleStop, handleSplit, handleRippleDelete, handleSave, handleOpen, handleJumpTo,
+        state.isPlaying,
+        state.totalDuration,
+        state.bpm,
+        state.playhead,
+        state.hotCues,
+        dispatch,
+        pendingResumeAt,
+        handlePlay,
+        handleStop,
+        handleSplit,
+        handleRippleDelete,
+        handleSave,
+        handleOpen,
+        handleJumpTo,
     ]);
 }
