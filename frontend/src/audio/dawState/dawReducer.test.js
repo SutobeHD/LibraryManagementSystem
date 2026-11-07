@@ -124,6 +124,23 @@ test('SET_PLAYHEAD clamps negative values to 0', () => {
     assert.equal(next.playhead, 0);
 });
 
+test('SET_PLAYHEAD with an unchanged value returns the same state object', () => {
+    const s = dawReducer(createInitialState(), { type: 'SET_PLAYHEAD', payload: 12.5 });
+    assert.equal(dawReducer(s, { type: 'SET_PLAYHEAD', payload: 12.5 }), s);
+    // Clamped to the current value (0) counts as unchanged too.
+    const zero = createInitialState();
+    assert.equal(dawReducer(zero, { type: 'SET_PLAYHEAD', payload: -1 }), zero);
+});
+
+test('SET_SCROLL_X updates, clamps, and bails out on an unchanged value', () => {
+    const s = createInitialState();
+    const next = dawReducer(s, { type: 'SET_SCROLL_X', payload: 640 });
+    assert.equal(next.scrollX, 640);
+    assert.notEqual(next, s);
+    assert.equal(dawReducer(next, { type: 'SET_SCROLL_X', payload: 640 }), next);
+    assert.equal(dawReducer(s, { type: 'SET_SCROLL_X', payload: -999 }).scrollX, -200);
+});
+
 test('SET_BPM updates BPM', () => {
     const s = createInitialState();
     const next = dawReducer(s, { type: 'SET_BPM', payload: 130 });

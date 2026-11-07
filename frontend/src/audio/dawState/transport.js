@@ -58,8 +58,14 @@ export function transportReducer(state, action) {
             return { ...state, masterTempoMap: action.payload };
 
         // ── Transport ────────────────────────
-        case 'SET_PLAYHEAD':
-            return { ...state, playhead: Math.max(0, action.payload) };
+        // SET_PLAYHEAD / SET_SCROLL_X return `state` itself when the value
+        // is unchanged so React bails out of the re-render. The timeline's
+        // auto-follow re-sends scrollX several times per second during
+        // playback, often with the same value (view not moving yet).
+        case 'SET_PLAYHEAD': {
+            const playhead = Math.max(0, action.payload);
+            return playhead === state.playhead ? state : { ...state, playhead };
+        }
 
         case 'SET_PLAYING':
             return { ...state, isPlaying: action.payload };
@@ -83,8 +89,10 @@ export function transportReducer(state, action) {
         case 'SET_ZOOM':
             return { ...state, zoom: Math.max(10, Math.min(2000, action.payload)) };
 
-        case 'SET_SCROLL_X':
-            return { ...state, scrollX: Math.max(-200, action.payload) };
+        case 'SET_SCROLL_X': {
+            const scrollX = Math.max(-200, action.payload);
+            return scrollX === state.scrollX ? state : { ...state, scrollX };
+        }
 
         case 'SET_WAVEFORM_STYLE':
             return { ...state, waveformStyle: action.payload };
