@@ -1091,6 +1091,7 @@ phrase_generator.py — Phrase & Auto-Cue Generator
 - `generate_phrase_cues()` — Generate a list of cue point dicts at every N-bar phrase boundary.
 - `phrase_cues_to_memory_dicts()` — Map generate_phrase_cues() output to anlz_writer memory-cue dicts.
 - `resolve_anlz_dir()` — Find the existing ANLZ directory for a track via rbox, or None if the track
+- `resolve_anlz_dirs()` — Resolve the ANLZ directory of many tracks with ONE master.db open.
 - `commit_phrase_cues()` — Write phrase markers as Rekordbox MEMORY cues into the track's existing
 
 ### `app/playcount_sync.py`
@@ -4252,6 +4253,28 @@ PDB writer structural test against F: drive Pioneer reference.
 - `make_synthetic_input()` — Mimic the data shape that OneLibraryUsbWriter._write_pdb_from_db
 - `main()`
 - `test_export_pdb_invariants()` — pytest entry point — all export.pdb byte invariants must hold.
+
+### `tests/test_phrase_anlz_dirs.py`
+
+One master.db open per phrase batch via `resolve_anlz_dirs`.
+
+- `FakeMasterDb`
+- `  FakeMasterDb.get_content_by_id()`
+- `  FakeMasterDb.share_directory()`
+- `library()` — Fake rbox; every even id analysed, ANLZ dirs on disk up to ON_DISK.
+- `TestResolveAnlzDirs`
+- `  TestResolveAnlzDirs.test_one_open_for_5k_tracks()`
+- `  TestResolveAnlzDirs.test_same_answers_as_per_track_resolution()`
+- `  TestResolveAnlzDirs.test_open_failure_returns_empty_so_callers_fall_back()`
+- `  TestResolveAnlzDirs.test_dir_missing_on_disk_is_none()`
+- `TestPhraseBatchOpens`
+- `  TestPhraseBatchOpens.test_batch_with_prefetch_opens_once()`
+- `  TestPhraseBatchOpens.test_batch_without_prefetch_is_two_opens_per_analysed_track()`
+- `  TestPhraseBatchOpens.test_prefetch_and_fresh_lookup_write_the_same_dirs()`
+- `  TestPhraseBatchOpens.test_track_missing_from_map_falls_back_to_lookup()`
+- `  TestPhraseBatchOpens.test_empty_map_after_failed_prefetch_falls_back()`
+- `  TestPhraseBatchOpens.test_stale_map_entry_is_rechecked()`
+- `  TestPhraseBatchOpens.test_not_analysed_in_map_raises_without_open()`
 
 ### `tests/test_phrase_batch.py`
 
