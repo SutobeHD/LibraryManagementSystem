@@ -303,10 +303,9 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
             );
             const legacy = res.data?.legacy_by_artist;
             if (legacy) {
-                toast(
+                toast.info(
                     `An old "By Artist" folder with ${legacy.playlists} playlist(s) is still in ` +
-                        `your library. Nothing touched it — the Artist Hub replaces it.`,
-                    { icon: 'ℹ️' }
+                        `your library. Nothing touched it — the Artist Hub replaces it.`
                 );
             }
         } catch (err) {
