@@ -16,6 +16,8 @@
  *   • `pendingResumeAt` ref is injected from the container so the
  *     resume-playback effect on state.regions can pick up the captured time
  *     after PASTE_INSERT / DUPLICATE_SELECTION dispatches.
+ *   • `playheadStore` supplies the live position: the reducer's
+ *     `state.playhead` stays parked while playing.
  */
 import { useMemo } from 'react';
 import toast from 'react-hot-toast';
@@ -25,6 +27,7 @@ import * as DawEngine from '../../audio/DawEngine';
 export default function useDawKeyhandlers({
     state,
     dispatch,
+    playheadStore,
     pendingResumeAt,
     handlePlay,
     handleStop,
@@ -59,7 +62,10 @@ export default function useDawKeyhandlers({
                 e.preventDefault();
                 const beatSec = state.bpm > 0 ? 60 / state.bpm : 0.5;
                 const delta = e.shiftKey ? beatSec * 4 : beatSec;
-                dispatch({ type: 'SET_PLAYHEAD', payload: Math.max(0, state.playhead - delta) });
+                dispatch({
+                    type: 'SET_PLAYHEAD',
+                    payload: Math.max(0, playheadStore.getLiveTime() - delta),
+                });
             },
 
             scrub_fwd: (e) => {
@@ -69,7 +75,7 @@ export default function useDawKeyhandlers({
                 const delta = e.shiftKey ? beatSec * 4 : beatSec;
                 dispatch({
                     type: 'SET_PLAYHEAD',
-                    payload: Math.min(state.totalDuration, state.playhead + delta),
+                    payload: Math.min(state.totalDuration, playheadStore.getLiveTime() + delta),
                 });
             },
 
@@ -110,8 +116,11 @@ export default function useDawKeyhandlers({
             paste: (e) => {
                 e.preventDefault();
                 if (state.isPlaying) {
-                    pendingResumeAt.current = DawEngine.getCurrentTime();
+                    const at = playheadStore.getLiveTime();
+                    pendingResumeAt.current = at;
                     DawEngine.stopPlayback();
+                    // PASTE_INSERT inserts at the reducer playhead — parked while playing.
+                    dispatch({ type: 'SET_PLAYHEAD', payload: at });
                 }
                 dispatch({ type: 'PASTE_INSERT' });
                 toast.success('Pasted insert');
@@ -120,7 +129,7 @@ export default function useDawKeyhandlers({
             duplicate: (e) => {
                 e.preventDefault();
                 if (state.isPlaying) {
-                    pendingResumeAt.current = DawEngine.getCurrentTime();
+                    pendingResumeAt.current = playheadStore.getLiveTime();
                     DawEngine.stopPlayback();
                 }
                 dispatch({ type: 'DUPLICATE_SELECTION' });
@@ -153,9 +162,9 @@ export default function useDawKeyhandlers({
         state.isPlaying,
         state.totalDuration,
         state.bpm,
-        state.playhead,
         state.hotCues,
         dispatch,
+        playheadStore,
         pendingResumeAt,
         handlePlay,
         handleStop,

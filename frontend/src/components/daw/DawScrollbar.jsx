@@ -8,8 +8,7 @@
 
 import React, { useRef, useEffect, useCallback, useMemo } from 'react';
 
-const DawScrollbar = React.memo(({ state, dispatch }) => {
-    const { totalDuration, zoom, scrollX } = state;
+const DawScrollbar = React.memo(({ totalDuration, zoom, scrollX, dispatch }) => {
     const containerRef = useRef(null);
     const programmaticScroll = useRef(false);
     const rafRef = useRef(null);

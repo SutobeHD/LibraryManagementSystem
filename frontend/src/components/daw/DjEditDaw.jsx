@@ -4,7 +4,8 @@
  * Responsibilities (slim — heavy lifting lives in helpers under daw/):
  *   • Owns DAW state via useReducer(extendedReducer, …)
  *   • Loads / decodes / analyses audio for an active track
- *   • Drives the playhead animation + dead-reckoning sync
+ *   • Owns the live playhead store (usePlayheadClock): playback ticks
+ *     bypass the reducer, `state.playhead` is the parked cursor only
  *   • Wires transport / editing handlers used by both the toolbar and the
  *     keyboard-shortcut hook (split / ripple-delete / play / stop / jump-to /
  *     export / auto-cue)
@@ -32,6 +33,7 @@ import useDawProject from './useDawProject';
 import useDawKeyhandlers from './useDawKeyhandlers';
 import useDawShortcuts from './useDawShortcuts';
 import useTrackLoader from './useTrackLoader';
+import { usePlayheadClock } from './usePlayheadClock';
 import { log } from '../../utils/log';
 
 const DawScrollbar = lazy(() => import('./DawScrollbar'));
@@ -55,14 +57,22 @@ const DjEditDaw = ({ track: initialTrack }) => {
     // Diagnostic hook — exposes the live DAW state on `window.__dawState`
     // so the user can dump regions/clipboard from DevTools when debugging
     // visual-vs-audio mismatches. Read-only; mutations are not reflected.
-    if (typeof window !== 'undefined') {
+    // Assigned in an effect (not during render) and cleared on unmount so
+    // the global does not pin the decoded AudioBuffer after the DAW closes.
+    useEffect(() => {
         window.__dawState = state;
         window.__dawDispatch = dispatch;
-    }
+    }, [state]);
+    useEffect(
+        () => () => {
+            delete window.__dawState;
+            delete window.__dawDispatch;
+        },
+        []
+    );
     const [showExport, setShowExport] = useState(false);
     const [activeTrack, setActiveTrack] = useState(initialTrack);
     const [isLibraryCollapsed, setIsLibraryCollapsed] = useState(false);
-    const animFrameRef = useRef(null);
     const hasInitialized = useRef(false);
     // When set (to a timeline-time number), the next regions-changed effect
     // will resume playback from that position with the freshly-mutated
@@ -97,36 +107,21 @@ const DjEditDaw = ({ track: initialTrack }) => {
     // ── LOAD TRACK (audio decode + tempo map + waveform peaks) ──
     useTrackLoader({ activeTrack, dispatch, skipNextAutoLoad, hasInitialized });
 
-    // ── PLAYHEAD ANIMATION + DEAD RECKONING SYNC ──
-    useEffect(() => {
-        let lastSyncTime = 0;
-        const updatePlayhead = (timestamp) => {
-            if (state.isPlaying) {
-                // Throttle React state updates to ~15fps (66ms) — Canvas reads at 60fps directly
-                if (timestamp - lastSyncTime > 66) {
-                    const currentTime = DawEngine.getCurrentTime();
-                    dispatch({ type: 'SET_PLAYHEAD', payload: currentTime });
+    // ── LIVE PLAYHEAD (outside the reducer) ──
+    // Playback ticks go to this store, not to dispatch — the memoised DAW
+    // children only re-render on discrete changes. The canvas reads
+    // DawEngine directly; TimeChip / overview line subscribe to the store.
+    const playheadStore = usePlayheadClock({
+        isPlaying: state.isPlaying,
+        playhead: state.playhead,
+    });
 
-                    // Dead Reckoning sync: store wall-clock + audio time so Timeline can interpolate
-                    dispatch({
-                        type: 'SET_DEAD_RECKONING_SYNC',
-                        payload: {
-                            lastSyncWallClock: performance.now(),
-                            lastSyncAudioTime: currentTime,
-                        },
-                    });
-
-                    lastSyncTime = timestamp;
-                }
-            }
-            animFrameRef.current = requestAnimationFrame(updatePlayhead);
-        };
-
-        animFrameRef.current = requestAnimationFrame(updatePlayhead);
-        return () => {
-            if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
-        };
-    }, [state.isPlaying]);
+    // Playback stopped or ran out: park the reducer playhead where the
+    // audio was, so the next play resumes there.
+    const finishPlayback = useCallback(() => {
+        dispatch({ type: 'SET_PLAYHEAD', payload: playheadStore.getTime() });
+        dispatch({ type: 'SET_PLAYING', payload: false });
+    }, [playheadStore]);
 
     // ─── RESUME PLAYBACK AFTER MID-PLAYBACK PASTE / DUPLICATE ─────
     // The keyboard handler stops Web Audio + sets pendingResumeAt before
@@ -146,7 +141,7 @@ const DjEditDaw = ({ track: initialTrack }) => {
             state.sourceBuffer,
             resumeAt,
             state.loopEnabled ? state.loopEnd : null,
-            () => dispatch({ type: 'SET_PLAYING', payload: false })
+            finishPlayback
         );
         dispatch({ type: 'SET_PLAYING', payload: true });
     }, [state.regions]);
@@ -201,32 +196,47 @@ const DjEditDaw = ({ track: initialTrack }) => {
             state.sourceBuffer,
             state.playhead,
             state.loopEnabled ? state.loopEnd : null,
-            () => dispatch({ type: 'SET_PLAYING', payload: false })
+            finishPlayback
         );
-    }, [state.regions, state.sourceBuffer, state.playhead, state.loopEnabled, state.loopEnd]);
+    }, [
+        state.regions,
+        state.sourceBuffer,
+        state.playhead,
+        state.loopEnabled,
+        state.loopEnd,
+        finishPlayback,
+    ]);
 
     const handleStop = useCallback(() => {
+        // Capture before stopPlayback(): a stopped engine reports its start
+        // offset, not the position it stopped at.
+        playheadStore.setTime(playheadStore.getLiveTime());
         DawEngine.stopPlayback();
-        dispatch({ type: 'SET_PLAYING', payload: false });
-    }, []);
+        finishPlayback();
+    }, [playheadStore, finishPlayback]);
 
     const handleJumpTo = useCallback(
         (time) => {
             const wasPlaying = state.isPlaying;
             if (wasPlaying) {
                 DawEngine.stopPlayback();
+                playheadStore.setTime(time);
             }
             dispatch({ type: 'SET_PLAYHEAD', payload: time });
             if (wasPlaying) {
                 // Restart playback from new position
                 setTimeout(() => {
-                    DawEngine.playRegions(state.regions, state.sourceBuffer, time, null, () =>
-                        dispatch({ type: 'SET_PLAYING', payload: false })
+                    DawEngine.playRegions(
+                        state.regions,
+                        state.sourceBuffer,
+                        time,
+                        null,
+                        finishPlayback
                     );
                 }, 50);
             }
         },
-        [state.isPlaying, state.regions, state.sourceBuffer]
+        [state.isPlaying, state.regions, state.sourceBuffer, playheadStore, finishPlayback]
     );
 
     const handleLoadTrack = useCallback((track) => {
@@ -244,7 +254,7 @@ const DjEditDaw = ({ track: initialTrack }) => {
     // ── EDITING ACTIONS ──
     const handleSplit = useCallback(() => {
         // Snap playhead for split if enabled
-        let splitTime = state.playhead;
+        let splitTime = playheadStore.getLiveTime();
         if (state.snapEnabled && !state.slipMode && state.bpm > 0) {
             const firstBeatSec = (state.tempoMap?.[0]?.positionMs || 0) / 1000;
             splitTime = snapToGrid(splitTime, state.bpm, state.snapDivision, firstBeatSec);
@@ -267,7 +277,7 @@ const DjEditDaw = ({ track: initialTrack }) => {
         toast.success('Region split', { duration: 1500 });
     }, [
         state.regions,
-        state.playhead,
+        playheadStore,
         state.snapEnabled,
         state.slipMode,
         state.bpm,
@@ -306,6 +316,7 @@ const DjEditDaw = ({ track: initialTrack }) => {
     } = useDawKeyhandlers({
         state,
         dispatch,
+        playheadStore,
         pendingResumeAt,
         handlePlay,
         handleStop,
@@ -317,6 +328,13 @@ const DjEditDaw = ({ track: initialTrack }) => {
     });
     useDawShortcuts({ handlers: keyHandlers, onShiftDown, onShiftUp, onHotcue });
 
+    // Stable callbacks + sliced props below: inline lambdas or the whole
+    // `state` object would defeat React.memo on every reducer update.
+    const openExport = useCallback(() => setShowExport(true), []);
+    const closeExport = useCallback(() => setShowExport(false), []);
+    const toggleLibrary = useCallback(() => setIsLibraryCollapsed((prev) => !prev), []);
+    const firstBeatSec = (state.tempoMap?.[0]?.positionMs || 0) / 1000 + (state.gridOffsetSec || 0);
+
     // ── RENDER ──
     try {
         return (
@@ -326,7 +344,10 @@ const DjEditDaw = ({ track: initialTrack }) => {
                 onOpen={handleOpen}
                 toolbar={
                     <DawToolbar
-                        state={state}
+                        project={state.project}
+                        trackMeta={state.trackMeta}
+                        bpm={state.bpm}
+                        snapEnabled={state.snapEnabled}
                         dispatch={dispatch}
                         onSave={handleSave}
                         onOpen={handleOpen}
@@ -336,7 +357,17 @@ const DjEditDaw = ({ track: initialTrack }) => {
                         onAutoCue={handleAutoCue}
                     />
                 }
-                overview={<WaveformOverview state={state} dispatch={dispatch} />}
+                overview={
+                    <WaveformOverview
+                        fallbackPeaks={state.fallbackPeaks}
+                        bandPeaks={state.bandPeaks}
+                        totalDuration={state.totalDuration}
+                        zoom={state.zoom}
+                        scrollX={state.scrollX}
+                        playheadStore={playheadStore}
+                        dispatch={dispatch}
+                    />
+                }
                 timeline={
                     <DawTimeline
                         state={state}
@@ -344,17 +375,40 @@ const DjEditDaw = ({ track: initialTrack }) => {
                         onRegionClick={handleRegionClick}
                     />
                 }
-                scrollbar={<DawScrollbar state={state} dispatch={dispatch} />}
+                scrollbar={
+                    <DawScrollbar
+                        totalDuration={state.totalDuration}
+                        zoom={state.zoom}
+                        scrollX={state.scrollX}
+                        dispatch={dispatch}
+                    />
+                }
                 controlStrip={
                     <DawControlStrip
-                        state={state}
                         dispatch={dispatch}
+                        playheadStore={playheadStore}
+                        isPlaying={state.isPlaying}
+                        bpm={state.bpm}
+                        totalDuration={state.totalDuration}
+                        zoom={state.zoom}
+                        snapEnabled={state.snapEnabled}
+                        snapDivision={state.snapDivision}
+                        loopEnabled={state.loopEnabled}
+                        hotCues={state.hotCues}
+                        loops={state.loops}
+                        activeLoopIndex={state.activeLoopIndex}
+                        canUndo={state.undoStack.length > 0}
+                        canRedo={state.redoStack.length > 0}
+                        hasSelection={state.selectedRegionIds?.size > 0}
+                        clipboardEmpty={state.clipboard?.length === 0}
+                        waveformStyle={state.waveformStyle}
+                        firstBeatSec={firstBeatSec}
                         onPlay={handlePlay}
                         onStop={handleStop}
                         onSplit={handleSplit}
                         onRippleDelete={handleRippleDelete}
                         onJumpTo={handleJumpTo}
-                        onExport={() => setShowExport(true)}
+                        onExport={openExport}
                     />
                 }
                 browser={
@@ -362,12 +416,10 @@ const DjEditDaw = ({ track: initialTrack }) => {
                         onLoadTrack={handleLoadTrack}
                         onOpenProject={handleOpenProject}
                         isCollapsed={isLibraryCollapsed}
-                        onToggleCollapse={() => setIsLibraryCollapsed((prev) => !prev)}
+                        onToggleCollapse={toggleLibrary}
                     />
                 }
-                exportModal={
-                    showExport && <ExportModal state={state} onClose={() => setShowExport(false)} />
-                }
+                exportModal={showExport && <ExportModal state={state} onClose={closeExport} />}
                 fileInput={
                     <input
                         type="file"

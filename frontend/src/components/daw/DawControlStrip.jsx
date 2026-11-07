@@ -36,68 +36,48 @@ import {
     Crosshair,
 } from 'lucide-react';
 import { getPositionInfo, HOT_CUE_COLORS, snapToGrid } from '../../audio/DawState';
+import { usePlayheadTime } from './usePlayheadClock';
 
+// Props are sliced primitives / stable references — never the whole DAW
+// state — so React.memo holds while the playhead advances. The live
+// position comes from `playheadStore`: TimeChip subscribes to it, the
+// handlers read it on demand.
 const DawControlStrip = React.memo(
-    ({ state, dispatch, onPlay, onStop, onSplit, onRippleDelete, onJumpTo, onExport }) => {
-        const {
-            isPlaying,
-            playhead,
-            bpm,
-            totalDuration,
-            zoom,
-            snapEnabled,
-            snapDivision,
-            slipMode,
-            loopEnabled,
-            hotCues,
-            loops,
-            activeLoopIndex,
-            undoStack,
-            redoStack,
-            selectedRegionIds,
-            waveformStyle,
-            clipboard,
-            gridOffsetSec,
-        } = state;
-        const firstBeatSec = (state.tempoMap?.[0]?.positionMs || 0) / 1000 + (gridOffsetSec || 0);
-
-        const hasSelection = selectedRegionIds && selectedRegionIds.size > 0;
-        const canUndo = undoStack.length > 0;
-        const canRedo = redoStack.length > 0;
-
-        // ── TIME MODE TOGGLE (Elapsed ↔ Remaining) ──
-        const [timeMode, setTimeMode] = useState('elapsed'); // 'elapsed' | 'remaining'
-        const toggleTimeMode = useCallback(
-            () => setTimeMode((m) => (m === 'elapsed' ? 'remaining' : 'elapsed')),
-            []
-        );
-
+    ({
+        dispatch,
+        playheadStore,
+        isPlaying,
+        bpm,
+        totalDuration,
+        zoom,
+        snapEnabled,
+        snapDivision,
+        loopEnabled,
+        hotCues,
+        loops,
+        activeLoopIndex,
+        canUndo,
+        canRedo,
+        hasSelection,
+        clipboardEmpty,
+        waveformStyle,
+        firstBeatSec,
+        onPlay,
+        onStop,
+        onSplit,
+        onRippleDelete,
+        onJumpTo,
+        onExport,
+    }) => {
         // ── ADAPTIVE ZOOM-TO-PLAYHEAD ──
         const handleZoomToPlayhead = useCallback(() => {
             const containerWidth = window.innerWidth * 0.6; // rough estimate of timeline width
-            const newScrollX = Math.max(0, state.playhead * state.zoom - containerWidth * 0.5);
+            const newScrollX = Math.max(
+                0,
+                playheadStore.getLiveTime() * zoom - containerWidth * 0.5
+            );
             dispatch({ type: 'SET_SCROLL_X', payload: newScrollX });
-        }, [state.playhead, state.zoom, dispatch]);
-
-        // ── FORMAT ──
-        const formatTime = useCallback((seconds) => {
-            if (!seconds || seconds < 0) return '00:00.0';
-            const m = Math.floor(seconds / 60);
-            const s = seconds % 60;
-            return `${m.toString().padStart(2, '0')}:${s.toFixed(1).padStart(4, '0')}`;
-        }, []);
-
-        const formatRemaining = useCallback(
-            (seconds) => {
-                const rem = Math.max(0, (totalDuration || 0) - seconds);
-                const m = Math.floor(rem / 60);
-                const s = rem % 60;
-                return `-${m.toString().padStart(2, '0')}:${s.toFixed(1).padStart(4, '0')}`;
-            },
-            [totalDuration]
-        );
-
-        const posInfo = useMemo(() => getPositionInfo(playhead, bpm), [playhead, bpm]);
+        }, [playheadStore, zoom, dispatch]);
 
         // ── TRANSPORT ──
         const handleGoToStart = useCallback(() => {
@@ -138,7 +118,7 @@ const DawControlStrip = React.memo(
                 if (cue) {
                     onJumpTo?.(cue.time);
                 } else {
-                    let time = playhead;
+                    let time = playheadStore.getLiveTime();
                     if (snapEnabled) time = snapToGrid(time, bpm, snapDivision, firstBeatSec);
                     dispatch({
                         type: 'SET_HOT_CUE',
@@ -155,7 +135,16 @@ const DawControlStrip = React.memo(
                     });
                 }
             },
-            [hotCues, playhead, bpm, snapEnabled, snapDivision, firstBeatSec, dispatch, onJumpTo]
+            [
+                hotCues,
+                playheadStore,
+                bpm,
+                snapEnabled,
+                snapDivision,
+                firstBeatSec,
+                dispatch,
+                onJumpTo,
+            ]
         );
 
         const handleDeleteHotCue = useCallback(
@@ -172,7 +161,7 @@ const DawControlStrip = React.memo(
 
         // ── LOOP ──
         const handleLoopIn = useCallback(() => {
-            let time = playhead;
+            let time = playheadStore.getLiveTime();
             if (snapEnabled) time = snapToGrid(time, bpm, snapDivision, firstBeatSec);
             dispatch({ type: 'PUSH_UNDO', payload: 'Set Loop In' });
             if (loops.length === 0 || loops[loops.length - 1].endTime != null) {
@@ -194,10 +183,10 @@ const DawControlStrip = React.memo(
                     payload: { index: loops.length - 1, updates: { startTime: time } },
                 });
             }
-        }, [playhead, bpm, snapEnabled, snapDivision, firstBeatSec, loops, dispatch]);
+        }, [playheadStore, bpm, snapEnabled, snapDivision, firstBeatSec, loops, dispatch]);
 
         const handleLoopOut = useCallback(() => {
-            let time = playhead;
+            let time = playheadStore.getLiveTime();
             if (snapEnabled) time = snapToGrid(time, bpm, snapDivision, firstBeatSec);
             if (loops.length > 0) {
                 const lastLoop = loops[loops.length - 1];
@@ -212,7 +201,7 @@ const DawControlStrip = React.memo(
                     dispatch({ type: 'SET_ACTIVE_LOOP', payload: loops.length - 1 });
                 }
             }
-        }, [playhead, bpm, snapEnabled, snapDivision, firstBeatSec, loops, dispatch]);
+        }, [playheadStore, bpm, snapEnabled, snapDivision, firstBeatSec, loops, dispatch]);
 
         const handleShiftGrid = useCallback(
             (delta) => {
@@ -227,6 +216,14 @@ const DawControlStrip = React.memo(
             },
             [dispatch]
         );
+
+        // ── CLIPBOARD ──
+        // PASTE_INSERT inserts at the reducer playhead, which stays parked
+        // during playback — pin it to the live position first.
+        const handlePaste = useCallback(() => {
+            if (isPlaying) dispatch({ type: 'SET_PLAYHEAD', payload: playheadStore.getLiveTime() });
+            dispatch({ type: 'PASTE_INSERT' });
+        }, [isPlaying, playheadStore, dispatch]);
 
         const handleWaveformCycle = useCallback(() => {
             const styles = ['3band', 'mono', 'bass'];
@@ -271,24 +268,11 @@ const DawControlStrip = React.memo(
 
                     {/* Time + BPM — Studio stat chips */}
                     <div className="flex items-stretch gap-1.5 shrink-0">
-                        <div
-                            onClick={toggleTimeMode}
-                            title="Click to toggle Elapsed / Remaining"
-                            className="flex flex-col items-center justify-center px-3 py-1 bg-mx-card border border-white/10 rounded-sm cursor-pointer select-none min-w-[92px]"
-                        >
-                            <span
-                                className={`text-[13px] font-mono font-bold leading-none ${timeMode === 'remaining' ? 'text-amber2-hover' : 'text-white'}`}
-                            >
-                                {timeMode === 'remaining'
-                                    ? formatRemaining(playhead)
-                                    : formatTime(playhead)}
-                            </span>
-                            <span className="text-[8px] text-ink-muted font-mono uppercase tracking-wider mt-1">
-                                {timeMode === 'remaining'
-                                    ? 'Remaining'
-                                    : `Bar ${posInfo.bar} · Beat ${posInfo.beat}`}
-                            </span>
-                        </div>
+                        <TimeChip
+                            playheadStore={playheadStore}
+                            totalDuration={totalDuration}
+                            bpm={bpm}
+                        />
                         <div className="flex flex-col items-center justify-center px-2 py-1 bg-mx-card border border-white/10 rounded-sm">
                             <div className="flex items-center gap-1">
                                 <button
@@ -400,8 +384,8 @@ const DawControlStrip = React.memo(
                             <Copy size={14} />
                         </TBtn>
                         <TBtn
-                            onClick={() => dispatch({ type: 'PASTE_INSERT' })}
-                            disabled={state.clipboard?.length === 0}
+                            onClick={handlePaste}
+                            disabled={clipboardEmpty}
                             title="Paste Insert (Ctrl+V)"
                         >
                             <Clipboard size={14} />
@@ -513,6 +497,52 @@ const DawControlStrip = React.memo(
     }
 );
 
+// ── TIME CHIP — the only part of the strip that renders per playback tick ──
+const formatTime = (seconds) => {
+    if (!seconds || seconds < 0) return '00:00.0';
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m.toString().padStart(2, '0')}:${s.toFixed(1).padStart(4, '0')}`;
+};
+
+const formatRemaining = (seconds, totalDuration) => {
+    const rem = Math.max(0, (totalDuration || 0) - seconds);
+    const m = Math.floor(rem / 60);
+    const s = rem % 60;
+    return `-${m.toString().padStart(2, '0')}:${s.toFixed(1).padStart(4, '0')}`;
+};
+
+const TimeChip = React.memo(({ playheadStore, totalDuration, bpm }) => {
+    const playhead = usePlayheadTime(playheadStore);
+    const [timeMode, setTimeMode] = useState('elapsed'); // 'elapsed' | 'remaining'
+    const toggleTimeMode = useCallback(
+        () => setTimeMode((m) => (m === 'elapsed' ? 'remaining' : 'elapsed')),
+        []
+    );
+    const posInfo = useMemo(() => getPositionInfo(playhead, bpm), [playhead, bpm]);
+
+    return (
+        <div
+            onClick={toggleTimeMode}
+            title="Click to toggle Elapsed / Remaining"
+            className="flex flex-col items-center justify-center px-3 py-1 bg-mx-card border border-white/10 rounded-sm cursor-pointer select-none min-w-[92px]"
+        >
+            <span
+                className={`text-[13px] font-mono font-bold leading-none ${timeMode === 'remaining' ? 'text-amber2-hover' : 'text-white'}`}
+            >
+                {timeMode === 'remaining'
+                    ? formatRemaining(playhead, totalDuration)
+                    : formatTime(playhead)}
+            </span>
+            <span className="text-[8px] text-ink-muted font-mono uppercase tracking-wider mt-1">
+                {timeMode === 'remaining'
+                    ? 'Remaining'
+                    : `Bar ${posInfo.bar} · Beat ${posInfo.beat}`}
+            </span>
+        </div>
+    );
+});
+
 // Small transport-style button
 const TBtn = React.memo(({ onClick, children, disabled, active, danger, title }) => (
     <button
@@ -534,6 +564,7 @@ const TBtn = React.memo(({ onClick, children, disabled, active, danger, title })
 ));
 
 DawControlStrip.displayName = 'DawControlStrip';
+TimeChip.displayName = 'TimeChip';
 TBtn.displayName = 'TBtn';
 
 export default DawControlStrip;

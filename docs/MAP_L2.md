@@ -1553,6 +1553,16 @@ historyReducer — undo / redo full-state snapshots + HYDRATE.
 
 - `historyReducer()` — History-domain reducer.
 
+### `frontend/src/audio/dawState/playheadStore.js`
+
+playheadStore — live transport position, kept outside the DAW reducer.
+
+- `createPlayheadStore()` — playheadStore — live transport position, kept outside the DAW reducer.
+
+### `frontend/src/audio/dawState/playheadStore.test.js`
+
+Tests for the live playhead store (playheadStore.js).
+
 ### `frontend/src/audio/dawState/regions.js`
 
 regionsReducer — region create / split / move / delete / resize / clipboard.
@@ -1755,6 +1765,13 @@ useDawShortcuts — keyboard-shortcut binding for the DJ Edit DAW.
 
 - `matches()` — Returns true if a KeyboardEvent matches a combo string.
 - `useDawShortcuts()`
+
+### `frontend/src/components/daw/usePlayheadClock.js`
+
+usePlayheadClock — owns the live playhead store for one DAW instance.
+
+- `usePlayheadClock()` — @param {Object} args @param {boolean} args.isPlaying reducer `isPlaying` @param {number} args.playh…
+- `usePlayheadTime()` — Subscribe a component to the live playhead (seconds).
 
 ### `frontend/src/components/daw/useTrackLoader.js`
 

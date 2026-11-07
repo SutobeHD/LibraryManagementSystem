@@ -18,18 +18,28 @@ import {
 } from 'lucide-react';
 
 const DawToolbar = React.memo(
-    ({ state, dispatch, onSave, onOpen, onExport, onSplit, onRippleDelete, onAutoCue }) => {
-        const isDirty = state.project.dirty;
-        const bpm = state.bpm;
-        const snapEnabled = state.snapEnabled;
+    ({
+        project,
+        trackMeta,
+        bpm,
+        snapEnabled,
+        dispatch,
+        onSave,
+        onOpen,
+        onExport,
+        onSplit,
+        onRippleDelete,
+        onAutoCue,
+    }) => {
+        const isDirty = project.dirty;
 
         const [isEditingName, setIsEditingName] = React.useState(false);
-        const [tempName, setTempName] = React.useState(state.project.name || 'Untitled Project');
+        const [tempName, setTempName] = React.useState(project.name || 'Untitled Project');
 
         const handleNameDoubleClick = useCallback(() => {
-            setTempName(state.project.name || 'Untitled Project');
+            setTempName(project.name || 'Untitled Project');
             setIsEditingName(true);
-        }, [state.project.name]);
+        }, [project.name]);
 
         const handleNameChange = useCallback((e) => {
             setTempName(e.target.value);
@@ -37,23 +47,23 @@ const DawToolbar = React.memo(
 
         const handleNameBlur = useCallback(() => {
             setIsEditingName(false);
-            if (tempName.trim() !== state.project.name) {
+            if (tempName.trim() !== project.name) {
                 dispatch({
                     type: 'SET_PROJECT',
                     payload: { name: tempName.trim() || 'Untitled Project', dirty: true },
                 });
             }
-        }, [tempName, state.project.name, dispatch]);
+        }, [tempName, project.name, dispatch]);
 
         const handleNameKeyDown = useCallback(
             (e) => {
                 if (e.key === 'Enter') handleNameBlur();
                 if (e.key === 'Escape') {
-                    setTempName(state.project.name || 'Untitled Project');
+                    setTempName(project.name || 'Untitled Project');
                     setIsEditingName(false);
                 }
             },
-            [handleNameBlur, state.project.name]
+            [handleNameBlur, project.name]
         );
 
         return (
@@ -77,7 +87,7 @@ const DawToolbar = React.memo(
                             onDoubleClick={handleNameDoubleClick}
                             title="Double-click to rename"
                         >
-                            {state.project.name || 'Untitled Project'}
+                            {project.name || 'Untitled Project'}
                         </span>
                     )}
                     {isDirty && (
@@ -157,18 +167,16 @@ const DawToolbar = React.memo(
                 collapse to "Ti..." but also can't crowd the buttons on narrow
                 windows. `flex-shrink min-w-0` lets the inner ellipsis trigger
                 instead of truncating the parent's box. */}
-                {state.trackMeta.title && (
+                {trackMeta.title && (
                     <div
                         className="flex items-center text-right min-w-0 shrink"
                         style={{ maxWidth: '35%' }}
-                        title={`${state.trackMeta.artist || ''} — ${state.trackMeta.title || ''}`}
+                        title={`${trackMeta.artist || ''} — ${trackMeta.title || ''}`}
                     >
                         <div className="truncate text-xs">
-                            <span className="text-ink-secondary">{state.trackMeta.artist}</span>
+                            <span className="text-ink-secondary">{trackMeta.artist}</span>
                             <span className="text-ink-placeholder mx-1">—</span>
-                            <span className="text-ink-primary font-medium">
-                                {state.trackMeta.title}
-                            </span>
+                            <span className="text-ink-primary font-medium">{trackMeta.title}</span>
                         </div>
                     </div>
                 )}

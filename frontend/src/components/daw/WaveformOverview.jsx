@@ -5,19 +5,44 @@
  * Shows the currently visible portion as a semi-transparent viewport window.
  * Clicking/dragging pans the main timeline by dispatching SET_SCROLL_X.
  *
- * Performance: redraws only on data change (no RAF loop needed).
+ * Performance: the minimap canvas redraws only on data / viewport change.
+ * The playhead line is a separate overlay subscribed to the live playhead
+ * store, so playback ticks move one div instead of repainting the peaks.
  */
 
 import React, { useRef, useCallback, useEffect } from 'react';
 import WaveformMiniCanvas from '../shared/WaveformMiniCanvas';
+import { usePlayheadTime } from './usePlayheadClock';
 
 const OVERVIEW_HEIGHT = 44;
+// Same look as WaveformMiniCanvas' own playhead stroke.
+const OVERVIEW_PLAYHEAD_COLOR = 'rgba(255,255,255,0.95)';
+const OVERVIEW_PLAYHEAD_WIDTH_PX = 1.5;
 
-const WaveformOverview = React.memo(({ state, dispatch }) => {
+const OverviewPlayhead = React.memo(({ playheadStore, totalDuration }) => {
+    const playhead = usePlayheadTime(playheadStore);
+    if (!(totalDuration > 0) || playhead < 0) return null;
+    return (
+        <div
+            className="absolute top-0 bottom-0 pointer-events-none"
+            style={{
+                left: `${(playhead / totalDuration) * 100}%`,
+                width: OVERVIEW_PLAYHEAD_WIDTH_PX,
+                background: OVERVIEW_PLAYHEAD_COLOR,
+            }}
+        />
+    );
+});
+
+OverviewPlayhead.displayName = 'OverviewPlayhead';
+
+// `view` = the sliced reducer fields this component draws — never the
+// whole DAW state, so React.memo holds during playback.
+const WaveformOverview = React.memo(({ playheadStore, dispatch, ...view }) => {
     const containerRef = useRef(null);
     const isDragging = useRef(false);
 
-    const { fallbackPeaks, bandPeaks, totalDuration, zoom, scrollX, playhead } = state;
+    const { fallbackPeaks, bandPeaks, totalDuration, zoom, scrollX } = view;
 
     // ── Viewport window calculation ────────────────────────────────────────────
     // Convert scroll/zoom from DAW pixel space to time-space for WaveformMiniCanvas
@@ -123,12 +148,13 @@ const WaveformOverview = React.memo(({ state, dispatch }) => {
                 peaks={fallbackPeaks}
                 bandPeaks={bandPeaks}
                 totalDuration={totalDuration}
-                playhead={playhead}
+                playhead={null}
                 viewportStart={viewportStart}
                 viewportEnd={viewportEnd}
                 height={OVERVIEW_HEIGHT}
                 className="absolute inset-0"
             />
+            <OverviewPlayhead playheadStore={playheadStore} totalDuration={totalDuration} />
             {/* Label */}
             <div className="absolute left-2 top-0.5 text-[8px] text-ink-placeholder font-bold uppercase tracking-widest pointer-events-none select-none z-10">
                 OVERVIEW

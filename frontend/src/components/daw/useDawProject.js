@@ -13,7 +13,7 @@
  * The hook does NOT manage <input> rendering — the container is still
  * responsible for mounting the hidden file input and wiring fileInputRef.
  */
-import { useCallback, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
 
 import * as DawEngine from '../../audio/DawEngine';
@@ -70,6 +70,15 @@ function buildProjectFromState(state) {
 
 export default function useDawProject({ state, dispatch, setActiveTrack }) {
     const fileInputRef = useRef(null);
+
+    // handleSave reads the latest state through this ref: depending on
+    // `state` directly gave it a new identity on every reducer update,
+    // which re-rendered the memoised toolbar and re-bound the keyboard
+    // shortcuts several times per second during playback.
+    const stateRef = useRef(state);
+    useEffect(() => {
+        stateRef.current = state;
+    }, [state]);
 
     // Set to true when handleFileSelect has loaded a .rbep project — tells the
     // activeTrack loadTrack useEffect to skip re-initializing the regions/audio,
@@ -265,6 +274,7 @@ export default function useDawProject({ state, dispatch, setActiveTrack }) {
     );
 
     const handleSave = useCallback(async () => {
+        const state = stateRef.current;
         try {
             // Prompt for name if missing or untitiled
             let projectName = state.project.name || 'Untitled Project';
@@ -301,7 +311,7 @@ export default function useDawProject({ state, dispatch, setActiveTrack }) {
             console.error(err);
             toast.error(`Save failed: ${err.message}`);
         }
-    }, [state, dispatch]);
+    }, [dispatch]);
 
     const handleOpenProject = useCallback(
         (_filepath) => {
