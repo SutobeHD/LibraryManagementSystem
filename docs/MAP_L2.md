@@ -1917,6 +1917,18 @@ Tag chips for the Ranking view.
 
 node --test frontend/src/config/tagTaxonomy.test.js Pure module, imports carry extensions — no resolver needed.
 
+### `frontend/src/hooks/useVirtualRows.js`
+
+Row windowing for long tables: only the rows in (and near) the viewport are mounted; spacers above and below stand in for the rest.
+
+- `VIRTUAL_OVERSCAN_ROWS()` — Row windowing for long tables: only the rows in (and near) the viewport are mounted; spacers above …
+- `computeVirtualRange()` — Which rows to mount for a viewport.
+- `useVirtualRows()` — @param {object} opts @param {number} opts.rowCount total rows @param {number} [opts.overscan] rows …
+
+### `frontend/src/hooks/useVirtualRows.test.js`
+
+Range math of the TrackTable row windowing (computeVirtualRange).
+
 ### `frontend/src/store/authStore.js`
 
 Tiny module-level auth state shared across the frontend.
