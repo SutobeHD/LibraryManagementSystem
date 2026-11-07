@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import api, { getScAuthMode } from '../api/api';
 import { log } from '../utils/log';
@@ -204,6 +204,16 @@ const PlaylistNode = ({
     );
 };
 
+// Non-folder, non-intelligent playlists for the "Add to Playlist" submenu.
+const flattenPlaylists = (nodes) => {
+    let result = [];
+    for (const n of nodes) {
+        if (n.Type === '1') result.push(n);
+        if (n.Children) result = result.concat(flattenPlaylists(n.Children));
+    }
+    return result;
+};
+
 const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatus }) => {
     const toast = useToast();
     const [tree, setTree] = useState([]);
@@ -225,18 +235,14 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
     const [renameNode, setRenameNode] = useState(null);
     const [collectionSearch, setCollectionSearch] = useState('');
     const [playlistSearch, setPlaylistSearch] = useState('');
-    const [displayTracks, setDisplayTracks] = useState([]);
+    // TrackTable's sorted order, read only by the SoundCloud export. A ref, not
+    // state: storing it re-rendered this view and the whole table again.
+    const displayTracksRef = useRef([]);
+    const handleSortedTracksChange = useCallback((sorted) => {
+        displayTracksRef.current = sorted;
+    }, []);
 
-    // Flatten tree to get all non-folder, non-intelligent playlists for "Add to Playlist" submenu
-    const flattenPlaylists = (nodes) => {
-        let result = [];
-        for (const n of nodes) {
-            if (n.Type === '1') result.push(n);
-            if (n.Children) result = result.concat(flattenPlaylists(n.Children));
-        }
-        return result;
-    };
-    const allPlaylists = flattenPlaylists(tree);
+    const allPlaylists = useMemo(() => flattenPlaylists(tree), [tree]);
 
     const loadTree = () => {
         setLoading(true);
@@ -573,7 +579,8 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
                 return;
             }
             const { invoke } = await import('@tauri-apps/api/core');
-            const exportTracks = displayTracks.length > 0 ? displayTracks : tracks;
+            const sorted = displayTracksRef.current;
+            const exportTracks = sorted.length > 0 ? sorted : tracks;
             const scTracks = exportTracks.map((t) => ({
                 artist: t.Artist || '',
                 title: t.Title || '',
@@ -1099,7 +1106,7 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
                                     onEditTrack={onEditTrack}
                                     onPlay={onPlayTrack}
                                     variant="minimal"
-                                    onSortedTracksChange={setDisplayTracks}
+                                    onSortedTracksChange={handleSortedTracksChange}
                                     onReorder={
                                         selectedPlaylist && !isIntelligentSelected
                                             ? (trackId, newIndex) => {
