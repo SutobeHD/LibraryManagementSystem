@@ -24,6 +24,9 @@ SessionStart hook prints `feature_map.py --brief`: status counts, active constru
 - Branch finished but not merged → `unmerged` + `branch` (+ `pr`).
 - User mentions an idea in chat → `idea` entry right away. Ideas never live only in chat.
 - Decided against → `dropped` + reason in `notes` (keeps it from being re-proposed).
+- Code done, user must check it (every `unmerged`, or `shipped` with an untested main path) → `--mark testen <id>`.
+- User confirms it works / real end-to-end proof (real app, real library, real stick — not unit tests, not mocked preview) → `--mark getestet <id>` (sets `tested` = today). Unknown → leave untagged (= Fertig). Never `getestet` on a green type-check.
+- Feature reworked (status back to `in_progress`) → `--mark fertig <id>` once done again; a stale `test` on unfinished status is a `--check` warning.
 - Before commit: `python scripts/feature_map.py --check` (CI runs it; fails on bad ids/refs or `shipped`/`partial` paths that match nothing).
 
 ## Status values
@@ -39,6 +42,22 @@ SessionStart hook prints `feature_map.py --brief`: status counts, active constru
 | `idea` | backlog only |
 | `dropped` | deliberately not doing — reason in `notes` |
 
+## Tag (phase) — shown per feature, derived
+
+One lifecycle tag per feature. Mindmap colours/filters by it (switch "Farbe nach Tag / Status"), `--list` + `--who` print it.
+
+| Tag | From |
+|---|---|
+| Idee | `status = idea` |
+| Geplant | `research`, `planned` |
+| Angefangen | `in_progress` |
+| Fertig | `shipped` / `partial` / `unmerged` without `test` — test state unknown |
+| Testen | finished + `test = "testen"` — test pending, user's to-do |
+| Getestet | finished + `test = "getestet"` (+ `tested` date) |
+| Verworfen | `dropped` |
+
+Only `test` / `tested` are stored; never write a phase into the TOML.
+
 ## Entry schema (`[[feature]]` in `docs/features/<area>.toml`)
 
 | Key | Req | Notes |
@@ -47,6 +66,8 @@ SessionStart hook prints `feature_map.py --brief`: status counts, active constru
 | `group` | ✓ | sub-category inside the area file; reuse existing group names |
 | `name` | ✓ | short German label (the map is the user's view) |
 | `status` | ✓ | see table |
+| `test` | | `testen` / `getestet`, finished statuses only — set via `--mark` |
+| `tested` | | `YYYY-MM-DD` (or `YYYY-MM`) of the getestet evidence |
 | `desc` | | one sentence, what it does for the user |
 | `paths` | | owned files/globs; `dir/` = everything below. Never hub files |
 | `routes` | | API prefixes |
@@ -65,7 +86,9 @@ Area files carry `[area]` (`id`, `name`, `order`, `desc`). Global settings (hubs
 ```bash
 python scripts/feature_map.py --who <id|path|text>   # before touching X
 python scripts/feature_map.py --active               # all construction sites + overlaps
-python scripts/feature_map.py --list [--status S] [--area A]
+python scripts/feature_map.py --list [--status S] [--phase P] [--area A]
+python scripts/feature_map.py --list --phase testen  # what the user still has to test
+python scripts/feature_map.py --mark <testen|getestet|fertig> <id> [<id> ...]   # set test tag (edits TOML)
 python scripts/feature_map.py --html --open          # interactive mindmap -> tmp/feature-map.html
 python scripts/feature_map.py --check                # validate (CI)
 python scripts/feature_map.py --coverage             # source files no feature owns
