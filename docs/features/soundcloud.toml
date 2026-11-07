@@ -11,10 +11,12 @@ id = "sc-oauth-pkce"
 group = "Login"
 name = "SoundCloud OAuth (PKCE)"
 status = "shipped"
-test = "testen"
+test = "getestet"
+tested = "2026-11-07"
 desc = "OAuth 2.1 + PKCE, Consent im In-App-Webview oder OS-Browser (sc_auth_mode)."
 paths = ["src-tauri/src/soundcloud_client.rs"]
-todo = ["In-App-Login (sc_auth_mode gui): 'Weiter mit Google' gesperrt ('Aktiviere Popup-Fenster') - Login-Webview erlaubt keine Popups, keine New-Window-Behandlung in soundcloud_client.rs", "Browser-Modus 2026-11-07: Callback auf 127.0.0.1:5001 kam nicht an - Ursache offen (Login evtl. nicht abgeschlossen)", "Log schreibt den OAuth-state-Parameter mit"]
+todo = ["In-App-Login (sc_auth_mode gui): 'Weiter mit Google' gesperrt ('Aktiviere Popup-Fenster') - Login-Webview erlaubt keine Popups, keine New-Window-Behandlung in soundcloud_client.rs", "Log schreibt den OAuth-state-Parameter mit", "Login öffnet sich beim App-Start ungefragt im Browser, wenn der gespeicherte Token tot ist (401 -> Refresh 401 -> scLogin) - Hinweis/Knopf statt Auto-Popup"]
+notes = "2026-11-07 tauri dev, Browser-Modus: Consent -> Callback 127.0.0.1:5001 -> Code-Tausch -> Token mit Refresh-Hälfte -> Keyring (persistent=True). Erster Versuch: Token kam an, Übergabe ans Backend brach ab (Ursache: Library-Stall, siehe perf-backend-quickwins)."
 
 [[feature]]
 id = "sc-session-status"
@@ -39,8 +41,8 @@ desc = "Refresh-Token im Keyring, stilles Single-Flight-Refresh im Backend - Log
 paths = ["app/soundcloud_auth.py", "tests/test_soundcloud_auth.py", "tests/test_soundcloud_refresh_route.py"]
 routes = ["/api/soundcloud/refresh"]
 depends_on = ["sc-session-status", "rate-limiter"]
-todo = ["nach #58-Merge Doc -> archived/implemented_", "Keyring-Blob chunken, falls > 1280 Zeichen", "Refresh in Tauri real testen", "Bestandsuser müssen sich einmal neu einloggen", "auth-status meldet authenticated:true bei abgelaufenem Legacy-Token (source=legacy, refreshable=false, SC antwortet 401) - UI zeigt trotzdem 'Not connected'"]
-notes = "Gebaut als Artist-Hub T-19. Doc steht noch auf evaluated_."
+todo = ["nach #58-Merge Doc -> archived/implemented_", "Keyring-Blob chunken, falls > 1280 Zeichen", "Stilles Refresh mit echtem SC testen - im Worktree nicht möglich: Backend liest .env nur aus dem eigenen Repo-Root (app/main.py load_dotenv), POST /api/soundcloud/refresh -> 503 'client id not set'; Rust findet die .env per dotenvy im Haupt-Checkout", "Prüfen: findet das gebündelte Backend (PyInstaller) seine .env? Pfad ist Path(__file__).parent.parent", "Bestandsuser müssen sich einmal neu einloggen", "auth-status meldet authenticated:true bei abgelaufenem Legacy-Token (source=legacy, refreshable=false, SC antwortet 401) - UI zeigt trotzdem 'Not connected'"]
+notes = "Gebaut als Artist-Hub T-19. Doc steht noch auf evaluated_. 2026-11-07 tauri dev: Login -> App komplett beendet + neu gestartet -> auth-status source=oauth refreshable=true, /me + Playlists 200, kein neuer Login."
 
 [[feature]]
 id = "sc-refresh-interceptor"
@@ -53,7 +55,8 @@ branch = "claude/dreamy-planck-w7771v"
 pr = 60
 desc = "401 -> stilles Refresh -> Tauri-Login; unterscheidet tote Session von abgelaufenem SC-Login."
 paths = ["frontend/src/api/scRefreshClassification.js", "frontend/src/api/scRefreshClassification.test.js"]
-notes = "2026-11-07 Browser-Dev mit echter abgelaufener Session: 401 -> /api/soundcloud/refresh 401 -> UI 'session expired, sign in again'. Tauri-Login-Schritt ungetestet."
+todo = ["Erfolgspfad (401 -> Refresh 200 -> Retry) testen - braucht Backend mit SC-Credentials (siehe sc-persistent-login)"]
+notes = "2026-11-07 Browser-Dev mit echter abgelaufener Session: 401 -> /api/soundcloud/refresh 401 -> UI 'session expired, sign in again'. 2026-11-07 tauri dev: 401 -> Refresh 401 -> Tauri-Login öffnet Browser -> Token gespeichert."
 
 # ── Sync ──────────────────────────────────────────────────────────────────
 
