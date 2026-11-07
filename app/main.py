@@ -88,6 +88,7 @@ KEYRING_SC_TOKEN = "sc_token"
 from . import audio_tags, download_registry, folder_watcher
 from . import soundcloud_api as sc_api
 from . import soundcloud_auth as sc_auth
+from .analysis_cache import get_waveform_cache
 from .artist_store import attribution as artist_attribution
 from .artist_store import catalogue as artist_catalogue
 from .artist_store import discovery as artist_discovery
@@ -897,15 +898,73 @@ async def stream_audio(path: str, request: Request):
     )
 
 
+def _waveform_body(file_path: Path, pps: int) -> bytes:
+    """Waveform response JSON for ``file_path`` (blocking: stat, cache I/O, DSP).
+
+    Serialized with JSONResponse's json.dumps settings, so a cached body is
+    byte-identical to what returning the dict produced.
+    """
+    cache = get_waveform_cache()
+    st = file_path.stat()
+    path_str = str(file_path)
+    t0 = time.monotonic()
+    body = cache.get(path_str, pps, st)
+    if body is not None:
+        logger.info(
+            "waveform cache HIT pps=%d %.0fms path=%s",
+            pps,
+            (time.monotonic() - t0) * 1000,
+            path_str,
+        )
+        return body
+    data = AudioEngine.generate_multiband_waveform(path_str, pixels_per_second=pps)
+    body = json.dumps(
+        data, ensure_ascii=False, allow_nan=False, indent=None, separators=(",", ":")
+    ).encode("utf-8")
+    cache.put(path_str, pps, st, body)
+    logger.info(
+        "waveform cache MISS pps=%d computed in %.2fs path=%s",
+        pps,
+        time.monotonic() - t0,
+        path_str,
+    )
+    return body
+
+
+# (normcase path, pps) -> running computation; concurrent opens of one track
+# share it. Entries drop out when the task finishes.
+_waveform_inflight: dict[tuple[str, int], asyncio.Task[bytes]] = {}
+
+
+def _waveform_task_done(key: tuple[str, int], task: asyncio.Task[bytes]) -> None:
+    if _waveform_inflight.get(key) is task:
+        del _waveform_inflight[key]
+    if not task.cancelled():
+        task.exception()  # retrieved: every waiter may have disconnected
+
+
 @app.get("/api/audio/waveform")
-async def get_multiband_waveform(path: str, pps: int = 50):
-    """Returns 3-band waveform data for professional visualization."""
+async def get_multiband_waveform(path: str, pps: int = Query(50, ge=1)):
+    """Returns 3-band waveform data for professional visualization.
+
+    DSP + cache I/O run in a worker thread. Disk cache keyed on
+    (file, mtime, size, pps) -> reopening a track skips librosa entirely.
+    """
     file_path = validate_audio_path(path)
+    key = (os.path.normcase(str(file_path)), pps)
+    task = _waveform_inflight.get(key)
+    if task is None:
+        task = asyncio.create_task(asyncio.to_thread(_waveform_body, file_path, pps))
+        _waveform_inflight[key] = task
+        task.add_done_callback(functools.partial(_waveform_task_done, key))
     try:
-        return AudioEngine.generate_multiband_waveform(str(file_path), pixels_per_second=pps)
+        # shield: a disconnecting client must not cancel a computation that
+        # other requests are awaiting.
+        body = await asyncio.shield(task)
     except Exception as e:
         logger.error(f"Waveform generation failed: {e}")
         raise HTTPException(500, safe_error_message(e))
+    return Response(content=body, media_type="application/json")
 
 
 class FileRevealReq(BaseModel):
