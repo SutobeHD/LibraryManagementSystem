@@ -197,12 +197,22 @@ class TestCalculateDiffBatching:
         diff = engine.calculate_diff()
 
         assert fake_rbox["opens"] == 1  # was 2 (tracks reader + playlists reader)
+        assert db.calls["get_artists"] == 1
         assert db.calls["get_artist_by_id"] == 0
         assert db.calls["get_contents"] == 1
         assert db.calls["get_playlists"] == 1
         assert diff["total_local"] == N_TRACKS
         assert diff["tracks"]["to_add"] == N_TRACKS  # empty stick
         assert diff["playlists"]["local_total"] == 1
+
+    def test_local_tracks_carry_real_artist_names(self, tmp_path: Path, fake_rbox) -> None:
+        contents, artists, albums = _library(n=14)
+        fake_rbox["db"] = FakeMasterDb(contents, artists, albums)
+        engine = UsbSyncEngine(str(tmp_path / "master.db"), str(tmp_path / "usb"))
+        tracks = engine._read_local_tracks()
+        assert tracks["1"]["ArtistName"] == "Artist 2"
+        assert tracks["7"]["ArtistName"] == ""
+        assert tracks["7"]["ArtistID"] == ""
 
     def test_open_failure_returns_empty_without_second_open(
         self, tmp_path: Path, fake_rbox
@@ -493,3 +503,59 @@ class TestLegacyExportGolden:
         xml, files = _golden_snapshot(legacy_engine, audio)
         assert xml == _GOLDEN_XML
         assert files == _GOLDEN_FILES
+
+
+# ---------------------------------------------------------------------------
+# calculate_diff end-to-end — real artist names make hashes line up
+# ---------------------------------------------------------------------------
+
+
+def _write_plain_stick_db(path: Path, rows: list[tuple[str, str, str | None, int, int]]) -> None:
+    """Unencrypted stand-in for exportLibrary.db with the columns `_read_usb_tracks` reads."""
+    import sqlite3
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(path))
+    conn.execute(
+        "CREATE TABLE djmdContent (ID TEXT, Title TEXT, ArtistID TEXT, AlbumID TEXT, "
+        "GenreID TEXT, BPM INTEGER, Rating INTEGER, ColorID INTEGER, Key TEXT, "
+        "Duration INTEGER, FolderPath TEXT, FileNameL TEXT)"
+    )
+    conn.execute("CREATE TABLE djmdArtist (ID TEXT, Name TEXT)")
+    for tid, title, artist, duration, bpm in rows:
+        aid = f"a{tid}" if artist is not None else None
+        conn.execute(
+            "INSERT INTO djmdContent (ID, Title, ArtistID, BPM, Duration) VALUES (?, ?, ?, ?, ?)",
+            (tid, title, aid, bpm, duration),
+        )
+        if aid:
+            conn.execute("INSERT INTO djmdArtist VALUES (?, ?)", (aid, artist))
+    conn.commit()
+    conn.close()
+
+
+class TestCalculateDiffEndToEnd:
+    def test_same_artist_on_both_sides_is_unchanged(self, tmp_path: Path, fake_rbox) -> None:
+        artists = [SimpleNamespace(id="1", name="Artist A"), SimpleNamespace(id="2", name="B")]
+        contents = [
+            SimpleNamespace(id="1", title="Drift", artist_id="1", length=300, bpm=12800),
+            SimpleNamespace(id="2", title="Bloom", artist_id="2", length=200, bpm=12000),
+            SimpleNamespace(id="3", title="New One", artist_id="1", length=100, bpm=12500),
+        ]
+        fake_rbox["db"] = FakeMasterDb(contents, artists, [])
+        engine = UsbSyncEngine(str(tmp_path / "master.db"), str(tmp_path / "usb"))
+        _write_plain_stick_db(
+            engine.usb_db_path,
+            [
+                ("10", "Drift", "Artist A", 300, 12800),  # identical → hash match
+                ("11", "bloom", "b", 999, 12000),  # same name, other length → update
+                ("12", "Gone", "X", 1, 1),  # not local → remove
+            ],
+        )
+
+        diff = engine.calculate_diff()
+
+        # Before the fix every local ArtistName was "", so "Drift" never
+        # hash-matched and to_add was 3. `unchanged` = local - to_add - to_update
+        # subtracts "Bloom" twice (to_update is a subset of to_add) — pre-existing.
+        assert diff["tracks"] == {"to_add": 2, "to_remove": 2, "to_update": 1, "unchanged": 0}

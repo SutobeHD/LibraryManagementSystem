@@ -4920,6 +4920,7 @@ Batched master.db lookups in the USB scan / diff / legacy-export paths.
 - `  TestNameLookup.test_by_id_failure_in_fallback_is_empty_and_memoised()`
 - `TestCalculateDiffBatching`
 - `  TestCalculateDiffBatching.test_one_open_and_constant_getter_calls()`
+- `  TestCalculateDiffBatching.test_local_tracks_carry_real_artist_names()`
 - `  TestCalculateDiffBatching.test_open_failure_returns_empty_without_second_open()`
 - `TestMatchUpdatesEquivalence`
 - `  TestMatchUpdatesEquivalence.test_randomised_fixture_matches_old_loop()`
@@ -4933,6 +4934,8 @@ Batched master.db lookups in the USB scan / diff / legacy-export paths.
 - `  TestLegacyExportBatching.test_playlist_filter_still_resolves()`
 - `TestLegacyExportGolden`
 - `  TestLegacyExportGolden.test_output_matches_pre_batching_export()`
+- `TestCalculateDiffEndToEnd`
+- `  TestCalculateDiffEndToEnd.test_same_artist_on_both_sides_is_unchanged()`
 
 ### `tests/test_usb_manager.py`
 

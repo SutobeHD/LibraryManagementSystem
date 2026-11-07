@@ -1219,21 +1219,13 @@ class UsbSyncEngine:
             if db is None:
                 return tracks
         try:
+            # rbox has no `get_artist()` — the old per-row call raised
+            # AttributeError every time, so ArtistName was always "".
+            artist_name_of = _NameLookup(db, "get_artists", "get_artist_by_id")
             for c in db.get_contents():
                 tid = str(c.id)
-                a_name = ""
                 artist_id = getattr(c, "artist_id", None)
-                if artist_id:
-                    try:
-                        a = db.get_artist(artist_id)
-                        if a:
-                            a_name = getattr(a, "name", "")
-                    except Exception as e:
-                        logger.debug(
-                            "usb_manager: rbox.get_artist(%s) failed (%s)",
-                            artist_id,
-                            e,
-                        )
+                a_name = artist_name_of(artist_id)
 
                 r = {
                     "ID": tid,
