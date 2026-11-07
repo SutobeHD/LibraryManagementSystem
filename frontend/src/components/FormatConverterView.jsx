@@ -15,7 +15,7 @@
  *   5. Manifests panel allows rollback of any prior batch.
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
     RefreshCw,
     Loader2,
@@ -28,6 +28,7 @@ import {
     FileText,
 } from 'lucide-react';
 import api from '../api/api';
+import { useTaskPolling } from '../hooks/useTaskPolling';
 import { useToast } from './ToastContext';
 import { confirmModal } from './ConfirmModal';
 import ScopeBucketPicker from './format-swap/ScopeBucketPicker';
@@ -38,6 +39,8 @@ const TARGETS = [
     { value: 'wav', label: 'WAV (uncompressed PCM)' },
     { value: 'mp3', label: 'MP3 (LAME -q:a 0, lossy)' },
 ];
+
+const isBatchRunning = (status) => !status?.finished;
 
 const FormatConverterView = () => {
     const toast = useToast();
@@ -157,44 +160,6 @@ const FormatConverterView = () => {
         }
     };
 
-    // ── Poll batch status while running ──────────────────────────────────────
-    useEffect(() => {
-        if (!batchId) return;
-        let cancelled = false;
-        const tick = async () => {
-            try {
-                const res = await api.get(`/api/library/format-swap/batch/${batchId}`);
-                if (cancelled) return;
-                setBatchStatus(res.data);
-                if (res.data.finished) {
-                    if (res.data.error) {
-                        toast.error(`Batch ${batchId}: ${res.data.error}`);
-                    } else if (res.data.aborted) {
-                        toast.warning
-                            ? toast.warning(
-                                  `Batch ${batchId} aborted (${res.data.tracks_converted}/${res.data.tracks_planned})`
-                              )
-                            : toast.info(`Batch aborted.`);
-                    } else {
-                        toast.success(
-                            `Batch done: ${res.data.tracks_converted}/${res.data.tracks_planned} converted, ${res.data.tracks_failed} failed.`
-                        );
-                    }
-                    // Refresh manifest list after a batch finishes
-                    fetchManifests();
-                }
-            } catch (err) {
-                console.error('[FormatConverter] batch poll failed', err);
-            }
-        };
-        tick();
-        const id = setInterval(tick, 1500);
-        return () => {
-            cancelled = true;
-            clearInterval(id);
-        };
-    }, [batchId]);
-
     // ── Manifest list + rollback ──────────────────────────────────────────────
     const fetchManifests = useCallback(async () => {
         try {
@@ -208,6 +173,44 @@ const FormatConverterView = () => {
     useEffect(() => {
         fetchManifests();
     }, [fetchManifests]);
+
+    // ── Poll batch status while running ──────────────────────────────────────
+    // Shared poller (useTaskPolling); the URL drops to null once the batch is
+    // announced finished, which ends polling for it.
+    const [finishedBatchId, setFinishedBatchId] = useState(null);
+    const announcedBatchRef = useRef(null);
+    const batchPollUrl =
+        batchId && finishedBatchId !== batchId ? `/api/library/format-swap/batch/${batchId}` : null;
+    const { data: polledBatch, error: batchPollError } = useTaskPolling(batchPollUrl, {
+        isActive: isBatchRunning,
+    });
+
+    useEffect(() => {
+        if (batchPollError) console.error('[FormatConverter] batch poll failed', batchPollError);
+    }, [batchPollError]);
+
+    useEffect(() => {
+        if (!polledBatch || !batchId) return;
+        setBatchStatus(polledBatch);
+        if (!polledBatch.finished || announcedBatchRef.current === batchId) return;
+        announcedBatchRef.current = batchId;
+        setFinishedBatchId(batchId);
+        if (polledBatch.error) {
+            toast.error(`Batch ${batchId}: ${polledBatch.error}`);
+        } else if (polledBatch.aborted) {
+            toast.warning
+                ? toast.warning(
+                      `Batch ${batchId} aborted (${polledBatch.tracks_converted}/${polledBatch.tracks_planned})`
+                  )
+                : toast.info(`Batch aborted.`);
+        } else {
+            toast.success(
+                `Batch done: ${polledBatch.tracks_converted}/${polledBatch.tracks_planned} converted, ${polledBatch.tracks_failed} failed.`
+            );
+        }
+        // Refresh manifest list after a batch finishes
+        fetchManifests();
+    }, [polledBatch, batchId, toast, fetchManifests]);
 
     const runRollback = async () => {
         if (!rollbackTarget) {

@@ -2,14 +2,15 @@
  * Sticky progress banner — visible on every screen while local-file or
  * SoundCloud imports are running. Auto-hides when nothing is active.
  *
- * Polls /api/import/tasks + /api/soundcloud/tasks every 1.5s and renders
+ * Subscribes to the shared /api/import/tasks + /api/soundcloud/tasks pollers
+ * (useTaskPolling: fast while a task runs, slow when idle) and renders
  *   • aggregate progress bar (% of currently active tasks completed)
  *   • current track filename + per-task stage
  *   • click → Sidebar → Sync → Downloads (full Import Manager view)
  */
 import React, { useEffect, useMemo, useState } from 'react';
-import { Loader2, CheckCircle, AlertTriangle, X, ChevronRight } from 'lucide-react';
-import api from '../api/api';
+import { Loader2, X, ChevronRight } from 'lucide-react';
+import { useTaskPolling, IMPORT_TASKS_ENDPOINT, SC_TASKS_ENDPOINT } from '../hooks/useTaskPolling';
 
 const ACTIVE_STATES = new Set([
     'Queued',
@@ -25,32 +26,14 @@ const ACTIVE_STATES = new Set([
 const FAIL_STATES = new Set(['Failed', 'Error', 'Analysis Failed']);
 
 const ImportProgressBanner = ({ onOpenManager }) => {
-    const [importTasks, setImportTasks] = useState({});
-    const [scTasks, setScTasks] = useState({});
+    const { data: importTasks } = useTaskPolling(IMPORT_TASKS_ENDPOINT);
+    const { data: scTasks } = useTaskPolling(SC_TASKS_ENDPOINT);
     const [dismissed, setDismissed] = useState(false);
-
-    useEffect(() => {
-        const tick = async () => {
-            try {
-                const [imp, sc] = await Promise.all([
-                    api.get('/api/import/tasks').catch(() => ({ data: {} })),
-                    api.get('/api/soundcloud/tasks').catch(() => ({ data: {} })),
-                ]);
-                setImportTasks(imp.data || {});
-                setScTasks(sc.data || {});
-            } catch (e) {
-                /* ignore */
-            }
-        };
-        tick();
-        const t = setInterval(tick, 1500);
-        return () => clearInterval(t);
-    }, []);
 
     const stats = useMemo(() => {
         const all = [
-            ...Object.values(importTasks).map((t) => ({ ...t, _src: 'import' })),
-            ...Object.values(scTasks).map((t) => ({ ...t, _src: 'sc' })),
+            ...Object.values(importTasks || {}).map((t) => ({ ...t, _src: 'import' })),
+            ...Object.values(scTasks || {}).map((t) => ({ ...t, _src: 'sc' })),
         ];
         const total = all.length;
         const active = all.filter((t) => ACTIVE_STATES.has(t.status));

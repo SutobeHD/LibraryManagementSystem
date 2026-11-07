@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import api, { scAuthTokenBody, scLogin } from '../api/api';
+import { useTaskPolling, SC_TASKS_ENDPOINT } from '../hooks/useTaskPolling';
 import {
     Download,
     Cloud,
@@ -16,6 +17,8 @@ import {
 import { toast } from 'react-hot-toast';
 import { listen } from '@tauri-apps/api/event';
 
+const NO_TASKS = {};
+
 const SoundCloudView = () => {
     const [url, setUrl] = useState('');
     // PRIVACY: do not hold the actual OAuth token in React state — the real
@@ -28,7 +31,7 @@ const SoundCloudView = () => {
     // session renews itself — an unrefreshable session expires within the hour.
     const [renews, setRenews] = useState(false);
     const [isDownloading, setIsDownloading] = useState(false);
-    const [tasks, setTasks] = useState({});
+    const tasks = useTaskPolling(SC_TASKS_ENDPOINT).data || NO_TASKS;
     const [isLoggingIn, setIsLoggingIn] = useState(false);
     const [loginMessage, setLoginMessage] = useState('');
 
@@ -49,21 +52,6 @@ const SoundCloudView = () => {
                 setRenews(false);
             });
 
-        // EC12: Poll for tasks; .catch() ensures a failed request never freezes the spinner.
-        const interval = setInterval(() => {
-            api.get('/api/soundcloud/tasks')
-                .then((res) => {
-                    setTasks(res.data ?? {});
-                    const active = Object.values(res.data ?? {}).some(
-                        (t) => t.status === 'Downloading' || t.status === 'Starting'
-                    );
-                    if (!active) setIsDownloading(false);
-                })
-                .catch(() => {
-                    // Silently ignore polling errors — avoids frozen spinner (EC12)
-                });
-        }, 3000);
-
         // Listen to native auth events (only available in Tauri desktop context)
         let unlisten = null;
         if (window.__TAURI__) {
@@ -82,11 +70,19 @@ const SoundCloudView = () => {
         window.addEventListener('sc:auth-expired', onAuthExpired);
 
         return () => {
-            clearInterval(interval);
             if (unlisten) unlisten.then((f) => f());
             window.removeEventListener('sc:auth-expired', onAuthExpired);
         };
     }, []);
+
+    // Clear the button spinner once no download is starting or running. A
+    // failed poll leaves `tasks` untouched, so it never freezes the spinner (EC12).
+    useEffect(() => {
+        const active = Object.values(tasks).some(
+            (t) => t.status === 'Downloading' || t.status === 'Starting'
+        );
+        if (!active) setIsDownloading(false);
+    }, [tasks]);
 
     const handleDownload = async () => {
         if (!url) {

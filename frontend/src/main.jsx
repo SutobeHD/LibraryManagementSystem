@@ -83,6 +83,7 @@ const UtilitiesView = lazy(() => import('./components/UtilitiesView'));
 const InsightsView = lazy(() => import('./components/InsightsView'));
 
 import api from './api/api';
+import { connectTaskPolling } from './hooks/useTaskPolling';
 
 // Error Boundary Configuration
 class ErrorBoundary extends Component {
@@ -1236,6 +1237,7 @@ window.addEventListener('unhandledrejection', (event) => {
 });
 
 applyTheme(getStoredTheme());
+connectTaskPolling(api);
 
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(

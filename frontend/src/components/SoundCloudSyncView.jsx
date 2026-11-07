@@ -25,6 +25,7 @@ import {
     FolderOpen,
 } from 'lucide-react';
 import api, { scAuthTokenBody, scLogin } from '../api/api';
+import { useTaskPolling, SC_TASKS_ENDPOINT } from '../hooks/useTaskPolling';
 import toast from 'react-hot-toast';
 import { listen } from '@tauri-apps/api/event';
 import MatchInspectorModal from './MatchInspectorModal';
@@ -47,23 +48,9 @@ const formatTotalDuration = (ms) => {
 };
 
 const DownloadQueueWidget = () => {
-    const [tasks, setTasks] = useState({});
+    const { data: tasks } = useTaskPolling(SC_TASKS_ENDPOINT);
 
-    useEffect(() => {
-        const fetchTasks = async () => {
-            try {
-                const res = await api.get('/api/soundcloud/tasks');
-                setTasks(res.data);
-            } catch (e) {
-                // Ignore errors
-            }
-        };
-        fetchTasks();
-        const interval = setInterval(fetchTasks, 2000);
-        return () => clearInterval(interval);
-    }, []);
-
-    const activeTasks = Object.values(tasks);
+    const activeTasks = Object.values(tasks || {});
     if (activeTasks.length === 0) return null;
 
     return (
