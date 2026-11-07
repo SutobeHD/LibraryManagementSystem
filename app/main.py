@@ -810,6 +810,11 @@ def _content_disposition_inline(filename: str) -> str:
         return f"inline; filename=\"{_quoted(ascii_fallback)}\"; filename*=utf-8''{quote(filename)}"
 
 
+# Blocking file reads per chunk; sync generators make Starlette iterate them
+# in its threadpool instead of on the event loop.
+_STREAM_CHUNK_BYTES = 1024 * 1024
+
+
 @app.get("/api/stream")
 async def stream_audio(path: str, request: Request):
     """Streams audio file with HTTP Range support — required for browser seeking."""
@@ -833,10 +838,10 @@ async def stream_audio(path: str, request: Request):
     # No Range header → still expose Accept-Ranges so browsers know seeking is possible
     if not range_header:
 
-        async def _full():
+        def _full() -> Iterator[bytes]:
             with open(file_path, "rb") as f:
                 while True:
-                    chunk = f.read(64 * 1024)
+                    chunk = f.read(_STREAM_CHUNK_BYTES)
                     if not chunk:
                         break
                     yield chunk
@@ -872,13 +877,12 @@ async def stream_audio(path: str, request: Request):
 
     chunk_size = end - start + 1
 
-    async def _ranged():
+    def _ranged() -> Iterator[bytes]:
         with open(file_path, "rb") as f:
             f.seek(start)
             remaining = chunk_size
-            buf = 64 * 1024
             while remaining > 0:
-                data = f.read(min(buf, remaining))
+                data = f.read(min(_STREAM_CHUNK_BYTES, remaining))
                 if not data:
                     break
                 remaining -= len(data)
