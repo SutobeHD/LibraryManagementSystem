@@ -8,7 +8,7 @@
  *   • low_quality / lost / no_artwork        — Library-Health track lists
  */
 
-import React, { useState, useEffect, useMemo, Suspense, lazy } from 'react';
+import React, { useState, useEffect, useMemo, useDeferredValue, Suspense, lazy } from 'react';
 import {
     Loader2,
     TrendingDown,
@@ -76,15 +76,20 @@ const UtilitiesView = ({
             });
     }, [mode, isHealth, libraryStatus?.loaded]);
 
+    // Lower-cased once per loaded list, not per track per keystroke. '\n' joins the
+    // fields so a query never matches across them (an input value has no '\n').
+    const hays = useMemo(
+        () => tracks.map((t) => `${t.Title || ''}\n${t.Artist || ''}`.toLowerCase()),
+        [tracks]
+    );
+    // Keystroke render reuses the old result; the re-filter runs in the background.
+    const deferredSearch = useDeferredValue(searchTerm);
+
     const filteredTracks = useMemo(() => {
-        if (!searchTerm) return tracks;
-        const q = searchTerm.toLowerCase();
-        return tracks.filter(
-            (t) =>
-                (t.Title && t.Title.toLowerCase().includes(q)) ||
-                (t.Artist && t.Artist.toLowerCase().includes(q))
-        );
-    }, [tracks, searchTerm]);
+        if (!deferredSearch) return tracks;
+        const q = deferredSearch.toLowerCase();
+        return tracks.filter((t, i) => hays[i].includes(q));
+    }, [tracks, hays, deferredSearch]);
 
     // ── Tools — render the selected tool directly (it's its own tab now) ─────────
     if (!isHealth) {
