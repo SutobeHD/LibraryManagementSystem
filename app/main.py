@@ -17,7 +17,7 @@ import uuid
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO
 
 import uvicorn
 from fastapi import (
@@ -1054,6 +1054,18 @@ async def file_write(r: FileWriteReq):
         raise HTTPException(500, safe_error_message(e))
 
 
+def _replace_and_load_xml(src: BinaryIO, target_path: Path) -> None:
+    """Overwrite ``target_path`` with the upload and reload the library from it.
+
+    Under db_lock: once loaded, target_path *is* the library file, so the
+    overwrite must not interleave with a save_xml from another thread.
+    """
+    with db_lock():
+        with open(target_path, "wb") as f:
+            shutil.copyfileobj(src, f, _STREAM_CHUNK_BYTES)
+        db.load_library(str(target_path))
+
+
 @app.post("/api/xml/clean", dependencies=[Depends(require_session)])
 async def clean_xml(
     file: UploadFile = File(...),
@@ -1067,11 +1079,7 @@ async def clean_xml(
 
         # SECURITY: Fixed target path — no user-controlled filename
         target_path = Path("rekordbox.xml")
-        with open(target_path, "wb") as f:
-            shutil.copyfileobj(file.file, f)
-
-        # Reload DB
-        db.load_library(str(target_path))
+        await asyncio.to_thread(_replace_and_load_xml, file.file, target_path)
 
         return {
             "status": "success",
