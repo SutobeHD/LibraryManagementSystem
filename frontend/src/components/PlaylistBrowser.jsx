@@ -1,4 +1,12 @@
-import { useState, useEffect, useRef, useCallback, useMemo, useDeferredValue } from 'react';
+import {
+    useState,
+    useEffect,
+    useLayoutEffect,
+    useRef,
+    useCallback,
+    useMemo,
+    useDeferredValue,
+} from 'react';
 import { createPortal } from 'react-dom';
 import api, { getScAuthMode } from '../api/api';
 import { log } from '../utils/log';
@@ -753,6 +761,80 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
         [tracks, deferredPlaylistSearch]
     );
 
+    const currentViewTracks = showCollection ? filteredCollectionTracks : filteredPlaylistTracks;
+    const isIntelligentSelected = selectedPlaylist?.Type === '4';
+    const canEditPlaylist = !!selectedPlaylist && !isIntelligentSelected;
+    const tablePlaylistId = showCollection ? 'COLLECTION' : selectedPlaylist?.ID;
+
+    const handleReorderTrack = (trackId, newIndex) => {
+        api.post('/api/playlists/reorder', {
+            pid: selectedPlaylist.ID,
+            track_id: trackId,
+            target_index: newIndex,
+        })
+            .then(() => {
+                toast.success('Track reordered');
+                handleSelect(selectedPlaylist);
+            })
+            .catch(() => toast.error('Reorder failed'));
+    };
+
+    // Latest handlers behind stable wrappers, so the memoised table below keeps
+    // its props across renders that change nothing it shows.
+    const tableHandlersRef = useRef(null);
+    useLayoutEffect(() => {
+        tableHandlersRef.current = {
+            reorder: handleReorderTrack,
+            remove: handleRemoveTrack,
+            deleteFromCollection: handleDeleteFromCollection,
+            addToPlaylist: handleAddToPlaylist,
+        };
+    });
+    const tableHandlers = useMemo(
+        () => ({
+            reorder: (...args) => tableHandlersRef.current.reorder(...args),
+            remove: (...args) => tableHandlersRef.current.remove(...args),
+            deleteFromCollection: (...args) =>
+                tableHandlersRef.current.deleteFromCollection(...args),
+            addToPlaylist: (...args) => tableHandlersRef.current.addToPlaylist(...args),
+        }),
+        []
+    );
+
+    // TrackTable renders every row and is not memoised itself. As a memoised
+    // element React skips it on renders that leave its inputs alone: the
+    // keystroke render before the deferred search lands (~600 ms per key at
+    // 4.7k rows otherwise), context-menu / modal / spinner state, etc.
+    const trackTable = useMemo(
+        () => (
+            <TrackTable
+                tracks={currentViewTracks}
+                onSelectTrack={onSelectTrack}
+                onEditTrack={onEditTrack}
+                onPlay={onPlayTrack}
+                variant="minimal"
+                onSortedTracksChange={handleSortedTracksChange}
+                onReorder={canEditPlaylist ? tableHandlers.reorder : undefined}
+                onRemove={canEditPlaylist ? tableHandlers.remove : undefined}
+                onDelete={tableHandlers.deleteFromCollection}
+                onAddToPlaylist={tableHandlers.addToPlaylist}
+                availablePlaylists={allPlaylists}
+                playlistId={tablePlaylistId}
+            />
+        ),
+        [
+            currentViewTracks,
+            onSelectTrack,
+            onEditTrack,
+            onPlayTrack,
+            handleSortedTracksChange,
+            canEditPlaylist,
+            tableHandlers,
+            allPlaylists,
+            tablePlaylistId,
+        ]
+    );
+
     if (!loading && tree.length === 0 && !dbLoaded) {
         return (
             <div className="flex h-full flex-col items-center justify-center text-ink-muted bg-mx-deepest/50">
@@ -775,10 +857,8 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
     }
 
     // Determine what to show in the main content area
-    const currentViewTracks = showCollection ? filteredCollectionTracks : filteredPlaylistTracks;
     const currentViewTitle = showCollection ? 'Collection' : selectedPlaylist?.Name || '';
     const currentViewCount = showCollection ? allTracks.length : tracks.length;
-    const isIntelligentSelected = selectedPlaylist?.Type === '4';
 
     return (
         <div className="flex h-full relative">
@@ -1111,41 +1191,7 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
                             </div>
                         ) : (
                             <div className="flex-1 overflow-hidden flex flex-col p-3 pt-1">
-                                <TrackTable
-                                    tracks={currentViewTracks}
-                                    onSelectTrack={onSelectTrack}
-                                    onEditTrack={onEditTrack}
-                                    onPlay={onPlayTrack}
-                                    variant="minimal"
-                                    onSortedTracksChange={handleSortedTracksChange}
-                                    onReorder={
-                                        selectedPlaylist && !isIntelligentSelected
-                                            ? (trackId, newIndex) => {
-                                                  api.post('/api/playlists/reorder', {
-                                                      pid: selectedPlaylist.ID,
-                                                      track_id: trackId,
-                                                      target_index: newIndex,
-                                                  })
-                                                      .then(() => {
-                                                          toast.success('Track reordered');
-                                                          handleSelect(selectedPlaylist);
-                                                      })
-                                                      .catch(() => toast.error('Reorder failed'));
-                                              }
-                                            : undefined
-                                    }
-                                    onRemove={
-                                        selectedPlaylist && !isIntelligentSelected
-                                            ? handleRemoveTrack
-                                            : undefined
-                                    }
-                                    onDelete={handleDeleteFromCollection}
-                                    onAddToPlaylist={handleAddToPlaylist}
-                                    availablePlaylists={allPlaylists}
-                                    playlistId={
-                                        showCollection ? 'COLLECTION' : selectedPlaylist?.ID
-                                    }
-                                />
+                                {trackTable}
                             </div>
                         )}
                     </div>
