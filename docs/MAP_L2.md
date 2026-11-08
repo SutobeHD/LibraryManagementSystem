@@ -1865,7 +1865,7 @@ localStorage auto-save + restore for per-track edits (cuts + hot cues).
 
 ### `frontend/src/components/waveform/useMultibandLayers.js`
 
-Owns the slave WaveSurfer instances that render the LOW/MID/HIGH bands, plus the RAF sync
+Owns the slave WaveSurfers that render the LOW/MID/HIGH bands from precomputed peaks.
 
 - `useMultibandLayers()` — Owns the slave WaveSurfer instances that render the LOW/MID/HIGH bands, plus the RAF sync loop that…
 
@@ -1877,8 +1877,10 @@ Debounced non-destructive preview rebuild — whenever cuts change, splice the A
 
 ### `frontend/src/components/waveform/useWaveSurfer.js`
 
-Owns the master WaveSurfer + Overview lifecycle:
+Owns the master WaveSurfer + overview lifecycle: one fetch + one decode per track.
 
+- `OVERVIEW_PEAK_COUNT()` — Overview strip resolution — wavesurfer's own exportPeaks() default; enough for a 4K-wide strip.
+- `streamUrlFor()`
 - `useWaveSurfer()` — Owns the master WaveSurfer + Overview lifecycle: - mount-once init (registers regions/timeline plug…
 
 ### `frontend/src/components/waveform/useWaveformInteractions.js`
@@ -2140,7 +2142,10 @@ UtilitiesView — router for the Utilities workspace.
 
 ### `frontend/src/components/WaveformEditor.jsx`
 
-*(no module docstring)*
+Waveform editor used by Ranking mode (simpleMode): master + overview WaveSurfer, 3-band layers.
+
+- `BAND_PEAKS_PER_SECOND()` — 3-band RMS envelope resolution requested from /api/audio/waveform: 2 px per point at ZOOM_DEFAULT (…
+- `BAND_FETCH_TIMEOUT_MS()` — Uncached analysis of a long track (librosa load + 3 Butterworth passes) can exceed axios' 10 s defa…
 
 ### `frontend/src/components/XmlCleanView.jsx`
 

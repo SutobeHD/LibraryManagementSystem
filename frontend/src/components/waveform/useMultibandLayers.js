@@ -1,3 +1,4 @@
+// Owns the slave WaveSurfers that render the LOW/MID/HIGH bands from precomputed peaks.
 import { useEffect, useRef } from 'react';
 import { log } from '../../utils/log';
 

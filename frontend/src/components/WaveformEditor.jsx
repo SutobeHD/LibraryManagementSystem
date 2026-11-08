@@ -1,3 +1,4 @@
+// Waveform editor used by Ranking mode (simpleMode): master + overview WaveSurfer, 3-band layers.
 import {
     useRef,
     useEffect,

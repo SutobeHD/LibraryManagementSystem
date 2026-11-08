@@ -1,3 +1,4 @@
+// Owns the master WaveSurfer + overview lifecycle: one fetch + one decode per track.
 import { useCallback, useEffect, useRef } from 'react';
 import api from '../../api/api';
 import { log } from '../../utils/log';

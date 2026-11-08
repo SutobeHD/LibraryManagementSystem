@@ -145,9 +145,9 @@
 | `frontend/src/components/waveform/persistence.js` | localStorage auto-save (cuts + cues, keyed by track.id) |
 | `frontend/src/components/waveform/previewBuffer.js` | --- Shared decode context (reused, not recreated per insert) --- |
 | `frontend/src/components/waveform/useEditPersistence.js` | localStorage auto-save + restore for per-track edits (cuts + hot cues). |
-| `frontend/src/components/waveform/useMultibandLayers.js` | Owns the slave WaveSurfer instances that render the LOW/MID/HIGH bands, plus the RAF sync |
+| `frontend/src/components/waveform/useMultibandLayers.js` | Owns the slave WaveSurfers that render the LOW/MID/HIGH bands from precomputed peaks. |
 | `frontend/src/components/waveform/useVisualPreview.js` | Debounced non-destructive preview rebuild — whenever cuts change, splice the AudioBuffer |
-| `frontend/src/components/waveform/useWaveSurfer.js` | Owns the master WaveSurfer + Overview lifecycle: |
+| `frontend/src/components/waveform/useWaveSurfer.js` | Owns the master WaveSurfer + overview lifecycle: one fetch + one decode per track. |
 | `frontend/src/components/waveform/useWaveformInteractions.js` | Imperative editing + hotkey wiring extracted from WaveformEditor. |
 | `frontend/src/config/constants.js` | Frontend-wide constants. |
 | `frontend/src/config/tagTaxonomy.js` | Tag chips for the Ranking view. |
@@ -192,7 +192,7 @@
 | `frontend/src/components/UsbSettingsView.jsx` | UsbSettingsView — edit MYSETTING.DAT / MYSETTING2.DAT / DJMMYSETTING.DAT Per-stick CDJ + DJM hardware setting… |
 | `frontend/src/components/UsbView.jsx` | UsbView — Melodex-styled USB device manager (container). |
 | `frontend/src/components/UtilitiesView.jsx` | UtilitiesView — router for the Utilities workspace. |
-| `frontend/src/components/WaveformEditor.jsx` | *(no module docstring)* |
+| `frontend/src/components/WaveformEditor.jsx` | Waveform editor used by Ranking mode (simpleMode): master + overview WaveSurfer, 3-band layers. |
 | `frontend/src/components/XmlCleanView.jsx` | Using existing endpoint but improved backend logic |
 | `frontend/src/components/artistHub/ArtistDetail.jsx` | *(no module docstring)* |
 | `frontend/src/components/artistHub/ArtistLinks.jsx` | *(no module docstring)* |
