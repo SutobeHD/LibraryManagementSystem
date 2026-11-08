@@ -24,9 +24,12 @@ export default function useMultibandLayers({
         const cleanupSlaves = () => {
             // Revoke object URLs to avoid memory leaks?
             // Not strictly necessary as refs are destroyed, but good practice.
-            wsLow.current?.destroy(); wsLow.current = null;
-            wsMid.current?.destroy(); wsMid.current = null;
-            wsHigh.current?.destroy(); wsHigh.current = null;
+            wsLow.current?.destroy();
+            wsLow.current = null;
+            wsMid.current?.destroy();
+            wsMid.current = null;
+            wsHigh.current?.destroy();
+            wsHigh.current = null;
         };
 
         const initLayers = async () => {
@@ -36,12 +39,18 @@ export default function useMultibandLayers({
                 wavesurfer.current.setOptions({
                     waveColor: 'rgba(59, 130, 246, 0.8)',
                     progressColor: 'rgba(59, 130, 246, 0.8)',
-                    cursorColor: 'rgba(255, 255, 255, 0.5)'
+                    cursorColor: 'rgba(255, 255, 255, 0.5)',
                 });
                 return;
             }
 
-            if (!multibandBuffers || !waveLowRef.current || !waveMidRef.current || !waveHighRef.current) return;
+            if (
+                !multibandBuffers ||
+                !waveLowRef.current ||
+                !waveMidRef.current ||
+                !waveHighRef.current
+            )
+                return;
 
             // Always cleanup old slaves when switching modes (colors differ)
             cleanupSlaves();
@@ -77,9 +86,24 @@ export default function useMultibandLayers({
             };
 
             // Create fresh instances with correct colors
-            wsLow.current = WaveSurfer.create({ ...options, container: waveLowRef.current, waveColor: colLow, progressColor: colLow });
-            wsMid.current = WaveSurfer.create({ ...options, container: waveMidRef.current, waveColor: colMid, progressColor: colMid });
-            wsHigh.current = WaveSurfer.create({ ...options, container: waveHighRef.current, waveColor: colHigh, progressColor: colHigh });
+            wsLow.current = WaveSurfer.create({
+                ...options,
+                container: waveLowRef.current,
+                waveColor: colLow,
+                progressColor: colLow,
+            });
+            wsMid.current = WaveSurfer.create({
+                ...options,
+                container: waveMidRef.current,
+                waveColor: colMid,
+                progressColor: colMid,
+            });
+            wsHigh.current = WaveSurfer.create({
+                ...options,
+                container: waveHighRef.current,
+                waveColor: colHigh,
+                progressColor: colHigh,
+            });
 
             // Load Blobs
             const loadBlob = (ws, blob) => {
@@ -100,7 +124,7 @@ export default function useMultibandLayers({
 
             // Initial Sync (Might be too early, but good backup)
             const t = wavesurfer.current.getCurrentTime();
-            [wsLow, wsMid, wsHigh].forEach(ws => {
+            [wsLow, wsMid, wsHigh].forEach((ws) => {
                 if (ws.current) {
                     // ws.current.setTime(t); // Removed here, moved to ready
                     // ws.current.zoom(zoom);
@@ -136,7 +160,10 @@ export default function useMultibandLayers({
                     if (master.isPlaying()) {
                         const cursorPx = (time / dur) * totalWidth;
                         const targetScroll = cursorPx - containerWidth / 2;
-                        scrollEl.scrollLeft = Math.max(0, Math.min(targetScroll, totalWidth - containerWidth));
+                        scrollEl.scrollLeft = Math.max(
+                            0,
+                            Math.min(targetScroll, totalWidth - containerWidth)
+                        );
                     }
 
                     const scroll = scrollEl.scrollLeft;
@@ -149,7 +176,7 @@ export default function useMultibandLayers({
                         lastSyncScroll = scroll;
 
                         // Sync Slaves
-                        [wsLow, wsMid, wsHigh].forEach(ws => {
+                        [wsLow, wsMid, wsHigh].forEach((ws) => {
                             if (ws.current && !ws.current.isDestroyed) {
                                 if (Math.abs(ws.current.getCurrentTime() - time) > 0.05) {
                                     ws.current.setTime(time);
@@ -171,11 +198,20 @@ export default function useMultibandLayers({
         return () => {
             if (rafId) cancelAnimationFrame(rafId);
         };
-    }, [visualMode, multibandBuffers, zoom, wavesurfer, waveLowRef, waveMidRef, waveHighRef, trackBlobUrl]); // re-run on zoom to recalc widths
+    }, [
+        visualMode,
+        multibandBuffers,
+        zoom,
+        wavesurfer,
+        waveLowRef,
+        waveMidRef,
+        waveHighRef,
+        trackBlobUrl,
+    ]); // re-run on zoom to recalc widths
 
     // Sync zoom to slaves when state changes
     useEffect(() => {
-        [wsLow, wsMid, wsHigh].forEach(ws => {
+        [wsLow, wsMid, wsHigh].forEach((ws) => {
             if (ws.current && !ws.current.isDestroyed) {
                 ws.current.zoom(zoom);
             }
