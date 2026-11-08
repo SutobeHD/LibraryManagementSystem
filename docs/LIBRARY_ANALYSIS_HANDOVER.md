@@ -471,6 +471,71 @@ Ask the 8 questions as **one numbered list** in German; the user answers numbere
 | Ground truth | The user's rule is to measure, not assume. No labelled set exists | First plan step: collect from the user 10-20 example tracks per wish (and pairs that "sound alike") and keep them as the evaluation set. Store only track IDs, never audio, in the repo |
 | UI fit | TrackTable sorts by one value per column (`SORT_VALUES` in `frontend/src/utils/trackSort.js` on `feat/sortable-columns`) | Value wishes (W2, W3, W4, W6) become columns. Similarity wishes (W1, W5, W8) need a new action, "Nach Ähnlichkeit zu diesem Track sortieren" (bass / hats / melody). Category W7 becomes a filter or column. Plan both paths |
 
+#### 9.2.1 Hurdles measured (2026-11-08, read-only, nothing installed)
+
+Setup: `.venv` py3.11, librosa 0.10.1, scipy 1.11.4, numpy 1.26.4, `*_NUM_THREADS=1`, mono 44.1 kHz. CPU ≈ wall everywhere (single-thread). Tracks: Delusion (SERA J, ID 58442992, 294 s AIFF 48k), Onyra (Triptykh, 177985252, 286 s WAV), Initial Spark (Kobosil, 6009916, 300 s AIFF 48k).
+
+**Baseline "no new dependency", CPU seconds per track (3 tracks, min-max):**
+
+| Step | CPU s | Note |
+|---|---|---|
+| `librosa.load` mono 44.1k | 0.1-0.2 (1.4 first call, JIT) | |
+| `librosa.effects.hpss` full track | 18.9-20.3 | **peak RSS 1.86-1.91 GB** per process (STFT + median filter) → 12 workers ≈ 23 GB (estimate) |
+| `hpss` 60 s excerpt | 3.4 | |
+| 4-band butterworth + RMS env + onsets | 2.7-2.9 | |
+| `librosa.pyin` 30 s (65-2093 Hz) | 7.6-8.4 | full track = 73-83 s (estimate, linear) |
+| `chroma_cqt` + `mfcc` 44.1k | 1.8-1.9 | at 22.05k: 0.9. The similar-tracks doc's "+0.30-0.45 s/track" (`accepted_recommender-similar-tracks.md:75`) is ~2× too optimistic |
+
+Band raw values (hats proxy): > 6 kHz RMS share -16 … -18.5 dB; high-band onsets/s 6.0 / 5.3 / 2.6 (at 145-157 BPM 8ths ≈ 5/s, 16ths ≈ 10/s → plausible density scale). Sub < 60 Hz gave 10.8-13.4 onsets/s against a 4/4 kick at 2.5/s → the default onset picker **massively over-fires in the lowpass band**; tune peak picking per band. `pyin` voiced share 0.39 / 0.59 / 0.39 — in the mix the kick/bass region dominates, so pyin on the mix is no melody measure without isolation.
+
+**Library extrapolation (estimate; 392.9 h / 4633 files / Ø 305 s; linear, ideal parallel):**
+
+| Step | CPU-h @1 worker | wall-h @12 |
+|---|---|---|
+| hpss full | 26.4 | 2.2 |
+| hpss 60 s/file | 4.4 | 0.4 |
+| 4-band split + env + onsets | 3.8 | 0.3 |
+| pyin full track | **103** | 8.6 |
+| pyin 30 s/file | 10.2 | 0.9 |
+| chroma_cqt + mfcc 44.1k / 22.05k | 2.4 / 1.2 | 0.2 / 0.1 |
+| **Combo A** load + bands + hpss full + chroma/mfcc 44k | 33 | 2.8 |
+| **Combo B** = A + pyin full | 137 | 11.4 |
+| **Combo C** load + bands + hpss 60 s + chroma/mfcc 22k + pyin 30 s | 20 | 1.7 |
+
+Reference: base audio pass (§3.5) 53 CPU-h → Combo A = +63 %, Combo B = ×2.6. pyin on full tracks is out; use excerpts or an isolated melody part.
+
+**Dependency facts (PyPI JSON + wheel HEAD, exact unless marked):**
+
+| Package | Latest stable | Win cp311 wheel | Notes |
+|---|---|---|---|
+| torch (PyPI) | 2.15.0 (2026-10-28), py ≥ 3.11 | 120.8 MiB **CPU-only** | CUDA wheels only on download.pytorch.org |
+| torch +cu130 | 2.14.1 | **1.99 GB** | matches the driver |
+| torch +cu128 / +cu126 | 2.9.1 | 2.86 GB / 2.58 GB | Windows bundles the CUDA DLLs in the wheel |
+| torch +cpu (index) | 2.9.1 | 111 MB | |
+| torchaudio | 2.11.1 | 2.2 MB | needs torch ≥ 2.11 |
+| demucs | 4.1.0 (2026-07) | 0.1 MiB | deps torch ≥ 2.1, einops, huggingface-hub, julius, lameenc, safetensors, sphn; weights download at runtime, htdemucs ~80 MB, `_ft` ~320 MB (estimate) |
+| onnxruntime | 1.31.1 | 14.2 MiB (CPU EP) | GPU EP = `onnxruntime-gpu` + external CUDA/cuDNN DLLs, not checked |
+| openunmix | 1.3.0 (2024-04) | < 0.1 MiB | needs torch + torchaudio; umxhq weights ~140 MB (estimate) |
+
+- `nvidia-smi`: driver 617.14, **CUDA UMD 13.4** → cu126-cu130 all runnable. RTX 2070 SUPER = Turing sm_75; CUDA 13 dropped only sm_50-70, so cu130 should work (from memory; verify with `torch.cuda.get_arch_list()` after any install).
+- A GPU pin needs `--extra-index-url` + `==X.Y.Z+cu130`; plain `requirements.txt` pinning against PyPI yields the CPU wheel.
+- `backend.spec`: `collect_all` for REQUIRED (`librosa, numba, scipy, sklearn, soundfile, audioread, lazy_loader`, line 52) + OPTIONAL (`madmom, essentia`) into a **one-file EXE** (`runtime_tmpdir=None`, `upx=False`, lines 172-183); `release.yml` ships it as `src-tauri/binaries/RB_Backend-<target>`. One-file = full extraction to temp at every start → +2-2.9 GB torch-cu doubles disk and hurts boot; the taste doc's gate "sidecar cold-boot ≤ +5 s" (`inprogress_recommender-taste-llm-audio.md:305`) is directly affected. Missing REQUIRED → `SystemExit` (line 76), so torch would have to be OPTIONAL with a loud warning or every CI build runner pulls the 2 GB wheel. Site-packages today 512 MB (scipy 104, llvmlite 78, sklearn 34).
+
+**Research-doc facts to reuse:**
+
+- torch gate: `inprogress_recommender-taste-llm-audio.md:80` "M2 benchmark gates Option B swap-in"; thresholds :300-307 (installer delta ≤ +400 MB, p95 CPU ≤ 3.0 s, cold scan ≤ 30 h, boot ≤ +5 s, NDCG ≥ +0.10, PyInstaller Win+macOS green); :309 "Any-of-above fail → stay on Option A indefinitely"; :127 assumes "torch wheel ~180 MB" = the CPU wheel. **With a GPU wheel (2.0-2.9 GB) the +400 MB gate is unreachable**; only CPU-torch + model can pass it. :289 benchmark plan assumes "no discrete GPU" — it does not know the RTX 2070 SUPER. Status: `inprogress_` since 2026-05-29, only T1 shipped, M2 never run.
+- Named slices: `accepted_recommender-similar-tracks.md:434` "4 named slices (mfcc26/chroma12/spectral4/dynamics4)", columns `mfcc_blob, chroma_blob, spectral_blob, dynamics_blob, vector_version, computed_at` (:450-457), store `app_data/track_vectors.db` (:435), reasons = per-slice cosine subscores (:439, :57, :492), weights :297, `VECTOR_VERSION` bump on any new slice (:484). Task queue :526-537 = **0/12**, none of `app/track_vector_builder.py`, `_store.py`, `recommender_similar.py` exists yet.
+- Conflicts to plan around: the backfill "re-decodes via `librosa.load(sr=22050, mono=True)`" (:438) → Nyquist 11 kHz, **hats band 10-16 kHz cut off**; component slices need the 44.1k path. :59 "zero new librosa/numpy feature extraction calls inside the recommender module" → extraction belongs in `track_vector_builder.py`. :445 "Out: sklearn/FAISS/PyTorch (M2/M3)". Taste :67 "GPU optional" → GPU must never be mandatory. Neither doc mentions bass / hi-hat / melody / stems.
+- Registry: `sound-component-sorting` exists (`docs/features/analysis.toml`, status `idea`, 4 todos); `recommender-similar-tracks` planned 0/12; `recommender-taste` partial, todo "M2 torch-Dep-Freigabe". `_INDEX.md` has no sound-component doc.
+
+**Instrument detection without a new dependency (sketch, untested):**
+
+- Bells: harmonic part from hpss, STFT peaks 2-6 kHz, partials vs integer multiples of f0 → inharmonicity index; spectral flatness + decay time per peak track (> 300 ms) → "long + metallic"; aggregate share of frames with bell signature → column value; later an sklearn classifier on these features.
+- Hi-hat amount: > 6 kHz onset density normalised to BPM (onsets per beat → 8ths / 16ths / offbeat) with per-band tuned peak picking; high-band RMS share (measured -16 … -18.5 dB) + percussive share of hpss in the high band; open vs closed from onset decay length.
+- Ground truth from the user: 10-20 track IDs per wish (bells: which sounds count), hats: 5 "many" + 5 "few" + 5 pairs "same hats". IDs only in the repo.
+
+Scratch scripts and raw numbers of this measurement: session scratchpad (`bench_components.py`, `bench_results.json`, `extrapolate.py`), not in the repo.
+
 ### 9.3 What the plan must deliver (P7)
 
 - A research doc via `/research-new sound-component-sorting` (`docs/research/README.md`). Put the user's quote above, verbatim, as `## Original Idea`. The remote research routines are dead (memory note 2026-09-03), so run the stages interactively.
