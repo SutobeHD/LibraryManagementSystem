@@ -20,7 +20,7 @@
  */
 
 import React, { useState, useEffect, useMemo } from 'react';
-import api from '../api/api';
+import { fetchLibraryTracks } from '../api/api';
 import {
     BarChart3,
     Music,
@@ -46,7 +46,7 @@ const InsightsView = ({ libraryStatus }) => {
         setError(null);
         // No aggregated insights endpoint exists in app/ (the old dj_stats call
         // always 404'd) — derive the stats from the library track list.
-        api.get('/api/library/tracks')
+        fetchLibraryTracks()
             .then((r) => {
                 setStats(deriveStatsFromTracks(r.data || []));
                 setLoading(false);

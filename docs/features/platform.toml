@@ -190,7 +190,7 @@ branch = "claude/dreamy-planck-w7771v"
 pr = 60
 desc = "Mappings-Cache, memoisiertes resolve() im Import-Dedup, Light-Projektion für GET /api/library/tracks."
 paths = ["tests/test_import_dedup.py", "tests/test_library_tracks_light.py"]
-notes = "In PR #60 enthalten. Frontend-Umstellung auf den Light-Fetch liegt uncommittet im Worktree feat/light-library-tracks."
+notes = "In PR #60 enthalten. Frontend-Nutzung der Light-Projektion in PR #75 (feat/light-library-tracks): fetchLibraryTracks() in api.js, alle Listen-Aufrufer umgestellt. Gemessen 2026-11-07, 4760 Tracks: voll 140,7 MB / 17,7-19,2 s, light 3,2 MB / 0,19-0,29 s. Editoren lasen die schweren Felder nie aus der Liste."
 
 [[feature]]
 id = "perf-frontend-virtualization"

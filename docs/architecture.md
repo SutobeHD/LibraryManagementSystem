@@ -105,7 +105,7 @@ RB_Editor_Pro/
 ### 1. Library Loading
 ```
 User opens app
-  → Frontend: GET /api/library/tracks
+  → Frontend: GET /api/library/tracks?light=true  (fetchLibraryTracks — no beatGrid/Cues/positionMarks/phrases)
   → app/database.py: RekordboxXMLDB.get_tracks()
     → Parse Pioneer Rekordbox XML (or SQLite in Live Mode)
   → Returns: [{id, title, artist, bpm, key, path, ...}]
