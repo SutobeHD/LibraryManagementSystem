@@ -21,6 +21,7 @@ superseded_by: []
 ## Lifecycle
 
 - 2026-11-08 — `research/idea_` — created from template; Original Idea = user quote of 2026-11-08 (docs/LIBRARY_ANALYSIS_HANDOVER.md §9)
+- 2026-11-08 — `research/idea_` — user answered OQ 1-10 (recorded inline), added W9 similar song structure; §D of the handover still open
 
 ## Original Idea (verbatim — never edit)
 
@@ -87,15 +88,27 @@ Stage 1 Worker. Numbered. Each resolvable (yes/no or X vs Y), not philosophy. Ea
 Fragen an den User (Handover §9.1, offen seit 2026-11-08). Antworten hier eintragen, nummeriert. Hürden + Messwerte: Handover §9.2 / §9.2.1.
 
 1. **W1 gleiche Bässe** — ähnlicher *Klang* (Timbre), ähnliche *Linie* (Rhythmus/Noten) oder beides? Kick mitzählen oder nicht?
+   → **Antwort tb 2026-11-08:** beides (Klang und Linie). Kick: nicht beantwortet, beide Varianten vorsehen.
 2. **W2 Bass-Tiefe** — „Tiefe“ = Tonhöhe in Hz, Sub-Bass-Anteil (< 60 Hz) oder Länge/Wucht des Basses?
+   → **Antwort tb 2026-11-08:** alles drei (Tonhöhe, Sub-Anteil, Länge/Wucht).
 3. **W3 Bells** — welche Klänge zählen (Bell-Synth, Röhrenglocke, metallischer Pluck, Cowbell)? Bitte 5 Beispiel-Tracks mit, 5 ohne (nur Track-IDs).
+   → **Antwort tb 2026-11-08:** verallgemeinern: alles, was sich als eigenes Geräusch definieren lässt, soll eine Klasse sein (Bell nur ein Beispiel, viele weitere). → benutzerdefinierte Klangklassen aus Beispielen. Beispiel-IDs noch offen.
 4. **W4 Hi-Hat-Anteil** — Lautstärke, Dichte (8tel / 16tel / Offbeat) oder offen vs. geschlossen?
+   → **Antwort tb 2026-11-08:** eher offene Hats; zusätzlich sortierbar nach Offbeat / Onbeat / 8tel / 16tel; ein Track trägt diese Eigenschaften gekreuzt (mehrere Attribute).
 5. **W5 gleiche Hi-Hats** — Klang oder Pattern? Bitte 5 Paare „gleiche Hats“.
+   → **Antwort tb 2026-11-08:** Klang und Pattern, beides. Paare noch offen.
 6. **W6 wie melodisch** — zählt ein Pad / Akkordbett als melodisch, oder nur eine Lead-Linie?
+   → **Antwort tb 2026-11-08:** eher Lead-Melodie zählt, nicht Pad/Akkordbett (Spracheingabe „Delete-Melodie“ = Lead).
 7. **W7 Melodie-Art** — welche Kategorien (Arpeggio, Lead, Chords/Pad, Acid-Linie, Vocal-Hook, …)? Du benennst sie.
+   → **Antwort tb 2026-11-08:** Lead, Acid-Linie (Spracheingabe „Unassed“, unsicher — nachfragen), Vocal-Hook „maybe“.
 8. **W8 ähnliche Melodien** — gleiche Noten oder gleiches Gefühl? Zählt eine transponierte Melodie als ähnlich?
+   → **Antwort tb 2026-11-08:** gleiche Noten; transponiert zählt als ähnlich.
 9. **Neue Dependency** — torch / Source-Separation-Modell OK? Darf es die GPU nutzen? Fakt: GPU-torch für Windows = 2,0–2,9 GB Wheel, CPU-torch 111–121 MB; das Installer-Gate von `recommender-taste` (+400 MB) schafft nur CPU-torch. Eine torch-Entscheidung für beide Features.
+   → **Antwort tb 2026-11-08:** erlaubt (torch und GPU). Plan: CPU-torch gepinnt, GPU optional.
 10. **Tiefe** — gehört das zur Analysetiefe „Hoch“ (Handover §3.6) oder zu einer dritten Stufe „Maximal“?
+   → **Antwort tb 2026-11-08:** im Prinzip eigene Stufe „Maximal“; bei ~33 CPU-h Baseline erst optimieren und nochmal reden.
+
+11. **W9 ähnlicher Aufbau (neu 2026-11-08)** — „nach ähnlichen Segmenten sortieren, also nach ähnlichen Aufbauen vom Song“: alle Songs mit gleichem Aufbau, nach verschiedenen Aufbauten sortieren, oder zu einem Seed-Track Songs mit gleichem / ähnlichem Aufbau sehen. Signal liegt schon vor: Rekordbox-PSSI-Phrasenfolge für 4744 Tracks (Stage D) + LMS-Phrasen. Offen: Ähnlichkeit auf Phrasen-Kinds, Bar-Längen oder beidem? Zählt die Reihenfolge strikt (Sequenz) oder nur die Anteile (Intro-Länge, Chorus-Anzahl)?
 
 ## Research Plan
 

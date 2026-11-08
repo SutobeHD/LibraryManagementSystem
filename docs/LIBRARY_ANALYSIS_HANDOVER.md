@@ -415,7 +415,7 @@ This touches backend, engine, cache and settings UI:
 - Analysis runs in worker processes; reading `settings.json` there depends on the relative cwd. Read `depth` **once per job in the main process** and pass it: `analyze_batch` / `analyze_and_save`, import path `services.py` ~:1263 / :1382 (PR #60), SC download, sidecar. `write_companion_anlz` (`services.py:1451`) re-analyses with `None` → becomes a cache hit with the depth-aware cache.
 - `audio_analyzer` `mode` speed/accuracy is a **second half-dead quality knob** (120 s cap, no cache). Merge into depth or remove — decision needed.
 
-**Open decisions for the user (§3.6)**
+**Open decisions for the user (§3.6) — answered 2026-11-08, see §5 B5-B12**
 
 1. Keep `peak` in the RB level (near-free, feeds import "Peak")?
 2. Import "Loudness" at RB depth: write 0 or compute lufs anyway?
@@ -471,6 +471,26 @@ These are optional and not started without the user's say:
 - Paper-only count from 2026-10-24: A 301, B 4240, C 35, D 126, 112 streams. B is an upper bound until the spectral run.
 
 **MP3 export ceiling:** 320 CBR. Never inflate lossy sources.
+
+**Decisions of 2026-11-08 (second round, after the spikes):**
+
+| # | Topic | Decision |
+|---|---|---|
+| A1 | Tier rule | Tier only from a hard spectral edge (or a digital-zero floor < -100 dB rel); no edge → no D, flag `prüfen`. The user's premise "too quiet tracks" does not apply (cutoff is relative to the loudest bin); their wish behind it is recorded as idea `download-loudness-normalize` |
+| A2 | Edge band | Test 300 / 500 / 1000 / 2000 Hz on the 50 measured tracks, pick by separation |
+| A3 | fpcalc | **Install** (winget `AcoustID.Chromaprint`). E8 fingerprint goes into the high level |
+| A4 | Full run | **Not yet.** User decides when |
+| B5 | Default depth | **`rekordbox`** (what Rekordbox itself produces) |
+| B6 | Peak | stays in the Rekordbox level |
+| B7 | LUFS at Rekordbox depth | computed anyway (0.5 s) |
+| B8 | Old cache entries | **re-analyse**: bump `ANALYSIS_VERSION` 3 → 4 |
+| B9 | `audio_analyzer` mode speed/accuracy | user delegated → **remove the knob**, route through `depth`; the 120 s duration cap stays only as an explicit internal argument |
+| B10 | Cue-toggle cache bug | fix in the same change (recompute cues from cached phrases/beats with the current toggles on a hit) |
+| B11 | `analysis_quality` | strip from existing `settings.json` on load |
+| B12 | Per-run override | **Build it:** pressing "Analyse" opens a small dialog preset to the global depth, overridable per run |
+| C | Sound-component questions | answers recorded in `docs/research/research/idea_sound-component-sorting.md` → Open Questions; new wish W9 "similar song structure" (sort by same / similar / different phrase structure, seed track → similar builds) added there; W3 generalised to **user-definable sound classes** (bells are one example of many) |
+| D | §D questions (screenshots, atlas fallback, old branch, Stage F, P6) | **answered later** |
+
 
 ---
 
