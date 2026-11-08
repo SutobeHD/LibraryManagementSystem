@@ -1098,6 +1098,7 @@ phrase_generator.py — Phrase & Auto-Cue Generator
 - `generate_phrase_cues()` — Generate a list of cue point dicts at every N-bar phrase boundary.
 - `phrase_cues_to_memory_dicts()` — Map generate_phrase_cues() output to anlz_writer memory-cue dicts.
 - `resolve_anlz_dir()` — Find the existing ANLZ directory for a track via rbox, or None if the track
+- `resolve_anlz_dirs()` — Resolve the ANLZ directory of many tracks with ONE master.db open.
 - `commit_phrase_cues()` — Write phrase markers as Rekordbox MEMORY cues into the track's existing
 
 ### `app/playcount_sync.py`
@@ -1560,6 +1561,16 @@ historyReducer — undo / redo full-state snapshots + HYDRATE.
 
 - `historyReducer()` — History-domain reducer.
 
+### `frontend/src/audio/dawState/playheadStore.js`
+
+playheadStore — live transport position, kept outside the DAW reducer.
+
+- `createPlayheadStore()` — playheadStore — live transport position, kept outside the DAW reducer.
+
+### `frontend/src/audio/dawState/playheadStore.test.js`
+
+Tests for the live playhead store (playheadStore.js).
+
 ### `frontend/src/audio/dawState/regions.js`
 
 regionsReducer — region create / split / move / delete / resize / clipboard.
@@ -1763,6 +1774,13 @@ useDawShortcuts — keyboard-shortcut binding for the DJ Edit DAW.
 - `matches()` — Returns true if a KeyboardEvent matches a combo string.
 - `useDawShortcuts()`
 
+### `frontend/src/components/daw/usePlayheadClock.js`
+
+usePlayheadClock — owns the live playhead store for one DAW instance.
+
+- `usePlayheadClock()` — @param {Object} args @param {boolean} args.isPlaying reducer `isPlaying` @param {number} args.playh…
+- `usePlayheadTime()` — Subscribe a component to the live playhead (seconds).
+
 ### `frontend/src/components/daw/useTrackLoader.js`
 
 useTrackLoader — Effect hook that hydrates DAW state when activeTrack changes.
@@ -1923,6 +1941,18 @@ Tag chips for the Ranking view.
 ### `frontend/src/config/tagTaxonomy.test.js`
 
 node --test frontend/src/config/tagTaxonomy.test.js Pure module, imports carry extensions — no resolver needed.
+
+### `frontend/src/hooks/useVirtualRows.js`
+
+Row windowing for long tables: only the rows in (and near) the viewport are mounted; spacers above and below stand in for the rest.
+
+- `VIRTUAL_OVERSCAN_ROWS()` — Row windowing for long tables: only the rows in (and near) the viewport are mounted; spacers above …
+- `computeVirtualRange()` — Which rows to mount for a viewport.
+- `useVirtualRows()` — @param {object} opts @param {number} opts.rowCount total rows @param {number} [opts.overscan] rows …
+
+### `frontend/src/hooks/useVirtualRows.test.js`
+
+Range math of the TrackTable row windowing (computeVirtualRange).
 
 ### `frontend/src/store/authStore.js`
 
@@ -4281,6 +4311,28 @@ PDB writer structural test against F: drive Pioneer reference.
 - `main()`
 - `test_export_pdb_invariants()` — pytest entry point — all export.pdb byte invariants must hold.
 
+### `tests/test_phrase_anlz_dirs.py`
+
+One master.db open per phrase batch via `resolve_anlz_dirs`.
+
+- `FakeMasterDb`
+- `  FakeMasterDb.get_content_by_id()`
+- `  FakeMasterDb.share_directory()`
+- `library()` — Fake rbox; every even id analysed, ANLZ dirs on disk up to ON_DISK.
+- `TestResolveAnlzDirs`
+- `  TestResolveAnlzDirs.test_one_open_for_5k_tracks()`
+- `  TestResolveAnlzDirs.test_same_answers_as_per_track_resolution()`
+- `  TestResolveAnlzDirs.test_open_failure_returns_empty_so_callers_fall_back()`
+- `  TestResolveAnlzDirs.test_dir_missing_on_disk_is_none()`
+- `TestPhraseBatchOpens`
+- `  TestPhraseBatchOpens.test_batch_with_prefetch_opens_once()`
+- `  TestPhraseBatchOpens.test_batch_without_prefetch_is_two_opens_per_analysed_track()`
+- `  TestPhraseBatchOpens.test_prefetch_and_fresh_lookup_write_the_same_dirs()`
+- `  TestPhraseBatchOpens.test_track_missing_from_map_falls_back_to_lookup()`
+- `  TestPhraseBatchOpens.test_empty_map_after_failed_prefetch_falls_back()`
+- `  TestPhraseBatchOpens.test_stale_map_entry_is_rechecked()`
+- `  TestPhraseBatchOpens.test_not_analysed_in_map_raises_without_open()`
+
 ### `tests/test_phrase_batch.py`
 
 Tests for the phrase-batch backend (app/main.py):
@@ -4452,6 +4504,26 @@ Routing-table invariant: no duplicate (method, path) registrations.
 
 - `test_no_duplicate_method_path()`
 - `test_deduplicated_path_has_single_handler()`
+
+### `tests/test_sc_fuzzy_index.py`
+
+SoundCloud sync matcher: the indexed matcher answers exactly like the old brute force.
+
+- `engine()`
+- `TestMatchesBruteForce`
+- `  TestMatchesBruteForce.test_synthetic_library_with_edge_cases()`
+- `  TestMatchesBruteForce.test_near_duplicate_library_ties_and_close_scores()` — One artist, numbered titles, shared suffix: many candidates with equal
+- `  TestMatchesBruteForce.test_exact_title_hit_takes_first_in_dict_order()`
+- `  TestMatchesBruteForce.test_equal_ratio_tie_takes_first_in_dict_order()`
+- `  TestMatchesBruteForce.test_empty_library()`
+- `test_lcs_bound_exact_up_to_64_chars_and_upper_bound_beyond()`
+- `counting_index()`
+- `TestIndexReuse`
+- `  TestIndexReuse.test_same_mapping_builds_once()`
+- `  TestIndexReuse.test_resized_mapping_rebuilds_and_sees_new_track()`
+- `  TestIndexReuse.test_other_mapping_rebuilds()`
+- `  TestIndexReuse.test_preview_and_sync_index_once_per_engine()`
+- `test_benchmark_20k_library_500_track_playlist()`
 
 ### `tests/test_security_compare.py`
 
@@ -4937,6 +5009,45 @@ USB audio copies must not leave a truncated file that never self-heals.
 - `  TestNeedsCopy.test_unreadable_source_errs_toward_copying()`
 - `TestEndToEndHealing`
 - `  TestEndToEndHealing.test_a_truncated_track_is_repaired_on_the_next_sync()`
+
+### `tests/test_usb_lookup_batching.py`
+
+Batched master.db lookups in the USB scan / diff / legacy-export paths.
+
+- `FakeMasterDb` — Counts every getter call; mirrors the rbox 0.1.7 MasterDb read surface.
+- `  FakeMasterDb.get_contents()`
+- `  FakeMasterDb.get_artists()`
+- `  FakeMasterDb.get_albums()`
+- `  FakeMasterDb.get_artist_by_id()`
+- `  FakeMasterDb.get_album_by_id()`
+- `  FakeMasterDb.get_playlists()`
+- `  FakeMasterDb.get_playlist_by_id()`
+- `  FakeMasterDb.get_playlist_contents()`
+- `fake_rbox()` — Install a fake `rbox` module whose `MasterDb(...)` returns `state["db"]`.
+- `TestNameLookup`
+- `  TestNameLookup.test_one_bulk_call_for_many_lookups()`
+- `  TestNameLookup.test_unknown_and_falsy_ids_are_empty()`
+- `  TestNameLookup.test_int_and_str_ids_hit_the_same_entry()`
+- `  TestNameLookup.test_bulk_failure_falls_back_to_memoised_by_id()`
+- `  TestNameLookup.test_by_id_failure_in_fallback_is_empty_and_memoised()`
+- `TestCalculateDiffBatching`
+- `  TestCalculateDiffBatching.test_one_open_and_constant_getter_calls()`
+- `  TestCalculateDiffBatching.test_local_tracks_carry_real_artist_names()`
+- `  TestCalculateDiffBatching.test_open_failure_returns_empty_without_second_open()`
+- `TestMatchUpdatesEquivalence`
+- `  TestMatchUpdatesEquivalence.test_randomised_fixture_matches_old_loop()`
+- `  TestMatchUpdatesEquivalence.test_first_usb_match_in_stick_order_wins()`
+- `  TestMatchUpdatesEquivalence.test_none_artist_on_stick_no_longer_crashes()`
+- `  TestMatchUpdatesEquivalence.test_key_computed_once_per_track()` — O(local + usb) — not O(to_add x usb).
+- `legacy_engine()`
+- `TestLegacyExportBatching`
+- `  TestLegacyExportBatching.test_constant_lookups_for_5k_tracks()`
+- `  TestLegacyExportBatching.test_copied_files_land_under_the_artist_folder()`
+- `  TestLegacyExportBatching.test_playlist_filter_still_resolves()`
+- `TestLegacyExportGolden`
+- `  TestLegacyExportGolden.test_output_matches_pre_batching_export()`
+- `TestCalculateDiffEndToEnd`
+- `  TestCalculateDiffEndToEnd.test_same_artist_on_both_sides_is_unchanged()`
 
 ### `tests/test_usb_manager.py`
 
