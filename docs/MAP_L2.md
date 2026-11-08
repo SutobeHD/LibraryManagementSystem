@@ -4121,6 +4121,62 @@ Tests for app.library_format_swap.
 - `  TestMasterDbWriteLock.test_every_master_db_mutation_holds_the_lock()`
 - `  TestMasterDbWriteLock.test_rollback_db_restore_holds_the_lock()` — rollback() overwrites master.db wholesale via shutil.copy2.
 
+### `tests/test_library_measure_anlz.py`
+
+Tests for scripts/library_measure_anlz.py on synthetic ANLZ bytes.
+
+- `test_mask_roundtrip_and_detection()`
+- `test_mask_key_depends_on_entry_count()`
+- `test_short_tag_is_neither_plain_nor_masked()`
+- `test_unmask_anlz_bytes_splices_only_pssi()`
+- `test_parse_anlz_reads_masked_pssi_as_plain()`
+- `test_load_anlz_reads_file_without_touching_it()`
+- `test_distinct_tempos_and_switches()`
+- `test_grid_summary()`
+- `test_grid_summary_first_downbeat_can_be_later_than_first_beat()`
+- `test_phrase_summary_high_mood()`
+- `test_phrase_summary_runs_and_trailing_outros()`
+- `test_phrase_labels_per_mood()`
+- `test_band_summary_low_mid_high_order()`
+- `test_color_detail_summary_bit_layout()`
+- `test_color_preview_summary()`
+- `test_ppth_match()`
+- `test_writer_guess()`
+- `test_measure_track_anlz_synthetic()`
+- `test_measure_track_anlz_plain_pssi_and_missing_ex2()`
+- `test_measure_track_anlz_records_parse_errors()`
+- `test_summarize_counts()`
+- `test_tolerant_parse_keeps_other_tags()`
+- `test_measure_track_partial_on_tag_errors()`
+
+### `tests/test_library_measure_audio.py`
+
+Tests for scripts/library_measure_audio.py: the Stage-E extras (E1-E7) on synthetic signals,
+
+- `test_e1_brickwall_16k_is_hard_edge_tier_d()`
+- `test_e1_brickwall_19500_is_tier_b_lame_256()`
+- `test_e1_brickwall_20500_hard_edge_is_b_not_a()`
+- `test_e1_full_band_noise_is_tier_a_no_edge()`
+- `test_e1_tier_thresholds_unit()`
+- `test_e2_clipped_square_counts_runs_sine_does_not()`
+- `test_e2_short_runs_below_three_are_ignored()`
+- `test_e2_true_peak_of_sine_matches_amplitude()`
+- `test_e3_dynamics_plr_and_crest()`
+- `test_e3_loudness_range_steady_tone_is_near_zero_and_short_is_none()`
+- `test_e4_silence_leading_and_trailing()`
+- `test_e5_dc_offset_per_channel()`
+- `test_e6_bass_share_of_50hz_tone()`
+- `test_e7_low_band_correlation_same_inverted_mono()`
+- `test_plan_tracks_splits_streams_missing_local_and_skips_done()`
+- `test_plan_tracks_seeded_sample_is_stable()`
+- `test_key_changes_when_file_changes()`
+- `test_load_done_keys_ignores_garbage_lines()`
+- `test_track_budget()`
+- `test_measure_task_turns_undecodable_file_into_error_row()`
+- `mocked_engine()`
+- `test_measure_track_high_and_rekordbox()`
+- `test_measure_task_keeps_resume_key_separate_from_musical_key()`
+
 ### `tests/test_library_source.py`
 
 Tests for app/library_source.py — the Live/XML normalization layer.
@@ -5471,6 +5527,68 @@ Whole-library analysis: which track fields are filled, how the Genre field is us
 - `render_md()`
 - `analysis_cache_report()` — Read-only look at the LMS analysis cache: which library files already have features.
 - `analyse()`
+- `main()`
+
+### `scripts/library_measure_anlz.py`
+
+Stage D of docs/LIBRARY_ANALYSIS_HANDOVER.md: read Rekordbox's own ANLZ analysis files.
+
+- `pssi_is_plain()`
+- `pssi_is_masked()`
+- `mask_pssi()` — Plain PSSI -> masked (the USB-export form).
+- `unmask_pssi()` — Masked PSSI -> plain.
+- `unmask_anlz_bytes()` — `data` with every PSSI tag unmasked, plus True (was masked) / False (plain) / None (no PSSI).
+- `parse_anlz()` — Unmask PSSI, then parse with pyrekordbox.
+- `load_anlz()` — Read an ANLZ file (mode "rb"), unmask PSSI if needed, parse with pyrekordbox.
+- `distinct_tempos()` — Sorted cluster starts; a value opens a new cluster when it is more than `tol` BPM above
+- `tempo_switches()` — How often the tempo changes along the grid (runs - 1); 0 for a constant grid.
+- `grid_summary()` — `entries` = (beat_in_bar, bpm, time_ms) in grid order.
+- `pqt2_summary()` — PQT2 from raw bytes: pyrekordbox pins `u1` to 0x01000002, but Rekordbox also writes
+- `pcob_counts()` — (hot, memory, loops) from a raw PCOB tag.
+- `cue_summary()` — Counts from raw PCOB tags (hot / memory / loop); colours + comments from parsed PCO2.
+- `phrase_label()`
+- `phrase_summary()` — `phrases` = (start_beat, kind) in file order; `end_beat` closes the last phrase.
+- `band_summary()` — 3-byte frames [low, mid, high]; byte order measured against PWV5 RGB (module docstring).
+- `color_detail_summary()` — PWV5: 3-bit red / green / blue + 5-bit height per 16-bit entry (pyrekordbox layout).
+- `color_preview_summary()` — PWV4: 6 bytes per column; d3 red, d4 green, d5 blue (& 0x7F), as pyrekordbox reads them.
+- `ppth_match()` — 'empty' | 'basename' (Rekordbox 7 writes '?/<file name>') | 'full' | 'ext_mismatch'
+- `writer_guess()` — Who wrote the ANLZ set, from fields app/anlz_writer.py fills differently than Rekordbox.
+- `measure_track_anlz()` — Measure one track's DAT / EXT / EX2.
+- `summarize()`
+- `run()`
+- `main()`
+
+### `scripts/library_measure_audio.py`
+
+Decode-once audio measurement runner: Stage E of docs/LIBRARY_ANALYSIS_HANDOVER.md (§3.5).
+
+- `power_spectrum_stats()` — Hann STFT; returns (freqs_hz, median magnitude per bin in dBFS, mean power per bin).
+- `spectral_cutoff()` — E1.
+- `cutoff_tier()` — Measured tier from the cutoff (handover §5).
+- `bass_share()` — E6.
+- `clipping_stats()` — E2.
+- `true_peak_dbtp()` — 4x oversampled peak (chunked so hi-res files don't quadruple in RAM).
+- `dynamics_stats()` — E3.
+- `loudness_range()` — E3 optional.
+- `silence_stats()` — E4.
+- `dc_offset()` — E5.
+- `low_band_correlation()` — E7.
+- `compact_phrases()`
+- `compact_anchors()`
+- `measure_track()` — Decode once; run the engine blocks in run_full_analysis order; add E1-E7 at depth 'high'.
+- `make_key()`
+- `base_row()`
+- `error_row()`
+- `measure_task()` — Pool entry point.
+- `load_done_keys()`
+- `Plan`
+- `plan_tracks()` — Split the snapshot into streams / missing / local; sample; drop rows already measured.
+- `track_budget_s()`
+- `RunStats`
+- `  RunStats.as_dict()`
+- `run_inline()`
+- `run_pool()` — Submit one task per worker, watch deadlines, recycle the whole pool on a timeout or a
+- `parse_args()`
 - `main()`
 
 ### `scripts/pipeline_dashboard.py`

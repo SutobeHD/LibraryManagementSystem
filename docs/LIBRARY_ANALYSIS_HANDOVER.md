@@ -248,6 +248,69 @@ New measurements in the same pass (cheap once decoded):
 - **Progress:** print a one-line progress every 50 tracks with the rate and ETA.
 - **Sleep:** Windows sleep kills the night run. Tell the user to keep the machine awake, or use the app's keep-awake tool (`mcp__ccd_host__request_keep_awake` exists in the desktop app's tool list, checked 2026-11-08).
 
+#### 3.5.1 Built and measured (2026-11-08) — `scripts/library_measure_audio.py`
+
+Spike exists: `measure_track(path, depth)` (decode once, engine order, no waveform/pvbr/cues) + extras E1-E7 (E3 includes loudness range via pyloudnorm filters, 3 s / 100 ms, R128 gating; E2 true peak via 4× `resample_poly`), runner `run_pool` (`ProcessPoolExecutor(max_tasks_per_child=20)`, deadline 10 × duration min 120 s, pool kill + restart on timeout / broken pool, 1 retry), resumable JSONL keyed by `ID + path + mtime + size` (field `track_key` — the engine's `key` is the musical key and overwrote it once; fixed + regression test), CLI `--input --out --limit --seed --workers --only-ids --depth --progress-every --inline`. Thread env vars are set before `import numpy` so they hold in spawned workers. 22 tests in `tests/test_library_measure_audio.py` (brickwall 16k → D, 19.5k → B + LAME 256, 20.5k + edge → B, full band → A; clipping; E3-E7 synthetic; plan / key / resume / seed; error row; `measure_track` high + rekordbox with mocked engine blocks). ruff + mypy clean (`mypy --follow-imports=silent`; without it mypy reports 62 pre-existing errors in `app/analysis_engine.py` etc.). Outputs: `tmp/library-analysis/measure/{audio.jsonl (50), audio_w8.jsonl, resume_test.jsonl}`.
+
+**Single process, 3 files, `use_cache=False` (CPU s / wall s):**
+
+| File | baseline `run_full_analysis` | `measure_track high` | `measure_track rekordbox` | waveform + pvbr alone |
+|---|---|---|---|---|
+| AIFF 48k 5:00 | 36.8 / 37.2 | 40.2 / 40.3 | 33.1 / 33.2 | 0.36 + 0.00 |
+| MP3 320 5:00 | 35.3 / 35.9 | 37.5 / 37.8 | 33.8 / 33.9 | 0.31 + 0.00 |
+| FLAC 44.1k 5:01 | 36.0 / 36.3 | 48.4 / 48.9 | 47.4 / 47.6 | 0.36 + 0.00 |
+
+- **The decode-once assumption above is refuted:** waveform / pvbr / cues cost ~0.4 s per track (≈ 1 %). Skipping them buys nothing.
+- `t_stage` high (AIFF): beats 28.4 · key 5.3 · tempo_grid 1.2 · clipping 1.3 (true peak) · mood 0.9 · lowband + silence + dc 0.8 · dynamics 0.6 · lufs 0.5 · stereo 0.4 · onset 0.3 · phrases 0.3 · spectrum 0.2 · load 0.03 · resample 0.06. **madmom beats = 64 % of CPU, key 15 %.**
+- **Extras E1-E7 ≈ 4.5 s/track (+12 %); high vs rekordbox ≈ +5-7 s.** This answers §3.6 point 1: high costs little extra.
+- The FLAC run's beats took 34-38 s vs 25-28 s otherwise on the same file → CPU time fluctuates under foreign load (SMT); treat single-run numbers as ±20 %.
+
+**Sanity BPM / key vs the Rekordbox snapshot:** 3 files 139.53 vs 140 / 143.0 vs 142 / 154.0 vs 154; key agreed 1 of 3 (K-S fallback). On the 50: BPM ±0.5 → 17/50, same Camelot → 19/50. madmom BPM sits on the `6000/n` grid (139.53, 153.85, 157.89, 166.67, 187.5) → above 150 BPM systematically ±1-2 BPM off Rekordbox. Report the method next to these numbers (§8).
+
+**Parallel, 50 tracks (`--seed 1 --depth high`), 0 errors, 0 timeouts:**
+
+| | 12 workers | 8 workers |
+|---|---|---|
+| Wall | 255 s | 368 s |
+| Tracks/min | 11.75 | 8.15 |
+| CPU sum | 2608 s | 2656 s |
+| CPU/track median | 53.3 s (**0.18 s per audio second**, handover said 0.136) | 53.6 s |
+| Ideal CPU/N → efficiency | 217 s → 85 % | 332 s → 90 % |
+| Peak RSS per worker | 5.7-8.9 GB, median 7.4 | 6.5-8.9 GB |
+
+- w12 and w8 results bit-identical (0 differences in bpm / key / tier) → deterministic.
+- **RAM hog = `detect_beats` (madmom): +5.0 GB peak** on a 5-min 48k track; `compute_stereo_features` +0.55 GB; the extras +0. 12 × 7-9 GB > 62 GB nominal — it only worked because peaks did not coincide; 7-min tracks are a risk. **Use 8-10 workers** (or chunk the RNN activations in the engine — separate fix).
+- **ETA for 4633 files:** 52 s CPU/track → **67 CPU-h** (handover: 53). w12 → 6.6 h, w8 → 9.5 h, w16 ≈ 5 h (estimate, RAM!).
+
+**Resume test:** run 1 (`--limit 20 --seed 2`) killed after 51 s with 2 rows written (parent + 13 workers via psutil, no orphans). Run 2: `already_done=2 todo=18`, 149 s. Final 20 rows, 20 unique `track_key`, 0 double measurements.
+
+**Distribution on the 50 (min / median / max):** grid_confidence 0.064 / 0.224 / 0.534 (p10 0.11, p90 0.37 → **0.2 is normal, not a warning**) · key_confidence 0.224 / 0.476 / 0.893 · cutoff 9.56 / 20.19 / 21.11 kHz · clipping samples (runs ≥ 3) 0 / 0 / 3854 (21 of 50 > 0) · true peak -0.89 / 0.82 / 3.10 dBTP · PLR 4.4 / 7.8 / 15.5 · LUFS -15.3 / -7.8 / -4.4 · LRA 0.8 / 5.0 / 17.2 · phase_correlation 0.76 / 0.94 / 0.995 · low_band_corr 0.87 / 0.999 / 1.0 · bass share < 60 Hz 0.02 / 0.34 / 0.80, < 120 Hz 0.35 / 0.72 / 0.91.
+
+- Measured tier on the 50: **B 34, D 14, C 1, A 1**; hard edge in 38/50; LAME estimate 320 × 25, 256 × 8, 128 × 1.
+- **22 of 31 lossless containers (AIFF/WAV/FLAC) have a hard edge → `konvertiert` candidates (71 %).**
+- 12 tracks without an edge: 11 of them land in D via the -60 dB relative threshold (cutoff 9.6-16.9 kHz, floor -72 … -88 dB rel, drop 2.5-19.7 dB) → probably dark masters, not lossy sources. **The threshold produces false D.** All are marked `pruefen/rolloff`.
+
+**Known rough edges in the spike:** `audioread.NoBackendError` has an empty `str()` → `error_message` falls back to `repr`; `_kill_pool` uses the private `executor._processes` (no public per-worker kill); `max_tasks_per_child` is 3.11-only while mypy targets 3.10 → kwargs-dict workaround.
+
+**Change before the full run (not done — needs the user's eye on the tier rule):**
+
+1. Tier only from a hard edge (or `floor_rel_db < -100` = digital zero = lossy, catches soft lowpass like the "So Get Up" MP3); without an edge no D but `pruefen`. Test the edge band 300 → 500-1000 Hz.
+2. Keep the threshold cutoff as `cutoff_thr_hz`, but don't derive the tier from it.
+3. Workers 8-10, `max_tasks_per_child` 10, progress every 50, summary also as `audio.summary.json`.
+4. Keep-awake for the ~7 h. Paste-ready, one command per block:
+
+```bash
+cd C:\Users\tb\Documents\GitHub\LibraryManagementSystem\.claude\worktrees\library-analysis
+```
+
+```bash
+set PYTHONIOENCODING=utf-8
+```
+
+```bash
+.venv\Scripts\python.exe scripts\library_measure_audio.py --workers 10 --depth high
+```
+
 ### 3.6 Analysis depth setting — Rekordbox level vs high level (user requirement 2026-11-08)
 
 The user's words: "Man soll einstellen können, wie intensiv analysiert werden soll beim Track-Analysieren, ob Rekordbox-Level oder High-Level."
@@ -432,8 +495,8 @@ These are optional and not started without the user's say:
 | P0 | Branch decision (§1.2), registry entry `in_progress` with branch | committed + pushed |
 | P1 | Stage B in `library_analysis.py` | tests on synthetic tracks, real run, numbers in report |
 | P2 | Stage C port | real run over all files, error list, paper tier per file |
-| P3 | Stage D ANLZ reader incl. PSSI unmask | unit test with a masked + plain PSSI fixture built in the test (no user files in the repo); real run; phrase-kind mapping checked against Rekordbox UI on 3 tracks (ask the user for a screenshot) |
-| P4 | Stage E runner | `--limit 50` run with timing + peak RSS; then the full run in the background; resume tested by killing it once |
+| P3 | Stage D ANLZ reader incl. PSSI unmask | unit test with a masked + plain PSSI fixture built in the test (no user files in the repo); real run; phrase-kind mapping checked against Rekordbox UI on 3 tracks (ask the user for a screenshot). **2026-11-08: reader + 23 tests + full run done (§3.4.1); UI check of the 3 tracks still open** |
+| P4 | Stage E runner | `--limit 50` run with timing + peak RSS; then the full run in the background; resume tested by killing it once. **2026-11-08: runner + 22 tests + 50-track runs (w12/w8) + resume test done (§3.5.1); full run not started — fix the tier rule and worker count first** |
 | P5 | Cross-checks + report sections + CSV columns | report renders; every section has real numbers |
 | P5b | Analysis depth setting (§3.6) | engine `depth` argument, depth-aware cache, setting in `/api/settings`, settings UI replaces the dead "Analysis Quality" block; per-stage timing at both levels measured on 50 tracks and written into §3.6; engine tests + `audio-stack-reviewer` + `e2e-tester` green |
 | P7 (plan only) | Sound-component sorting (§9): research doc, user's answers, measured isolation choice, per-wish feature definitions | doc reaches the approval gate; no code before the user approves |
