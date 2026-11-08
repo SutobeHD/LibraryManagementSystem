@@ -11,17 +11,11 @@ import {
     ChevronDown,
     Tag,
     Disc,
-    PlayCircle,
     Pause,
     Play,
     ListMusic,
-    Save,
     Search,
-    Filter,
     ArrowRight,
-    ArrowLeft,
-    Check,
-    Hash,
     User,
     Volume2,
 } from 'lucide-react';
@@ -139,16 +133,9 @@ const RankingView = ({ libraryStatus, appMode }) => {
         // Let's just create a DOM event to pause others?
         const audioElements = document.querySelectorAll('audio');
         audioElements.forEach((a) => a.pause());
+        // No explicit stop on unmount: WaveformEditor's own unmount stops + destroys its WaveSurfer.
         return () => {
             isMountedRef.current = false;
-            // Force stop
-            if (wavesurferRef.current && wavesurferRef.current.stop) {
-                try {
-                    wavesurferRef.current.stop();
-                } catch (e) {
-                    log.debug('RankingView wavesurfer stop on unmount failed', e);
-                }
-            }
         };
     }, []);
 
