@@ -49,7 +49,7 @@ paths = ["app/usb_manager.py", "frontend/src/components/usb/UsbSyncPanel.jsx", "
 routes = ["/api/usb/sync", "/api/usb/sync/all", "/api/usb/diff", "/api/usb/history"]
 depends_on = ["usb-profiles", "usb-onelibrary-export"]
 related = ["performance-overhaul"]
-notes = "Blockierender POST mit Fake-Progress; Scan/Diff mit N+1 (Perf-Overhaul)."
+notes = "Blockierender POST mit Fake-Progress (offen). Scan/Diff-N+1 seit PR #70 (in #60) behoben. Altfund: exportLibrary.db wird mit plain sqlite3 gelesen, Stick-Seite der Diff leer, Datei bei jedem Sync-Start gelöscht."
 
 [[feature]]
 id = "usb-onelibrary-export"
