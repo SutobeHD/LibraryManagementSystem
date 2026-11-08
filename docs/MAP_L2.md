@@ -438,7 +438,12 @@ Batch comment edits over the live library (``POST /api/tools/batch-comment``).
 *(no module docstring)*
 
 - `db_lock()` — Acquire `_db_write_lock` for the duration of the `with` block.
+- `flush_pending_saves()` — Write every XML library with unsaved changes.
 - `RekordboxXMLDB`
+- `  RekordboxXMLDB.xml_path()` — Library file path.
+- `  RekordboxXMLDB.xml_path()`
+- `  RekordboxXMLDB.pending_save()` — True while a mutation is in memory but not yet in the library file.
+- `  RekordboxXMLDB.flush()` — Write pending changes now.
 - `  RekordboxXMLDB.load_xml()`
 - `  RekordboxXMLDB.get_playlist_tracks()`
 - `  RekordboxXMLDB.get_track_details()`
@@ -468,10 +473,10 @@ Batch comment edits over the live library (``POST /api/tools/batch-comment``).
 - `  RekordboxXMLDB.get_track_mytags()`
 - `  RekordboxXMLDB.set_track_mytags()`
 - `  RekordboxXMLDB.delete_track()`
-- `  RekordboxXMLDB.save_xml()`
+- `  RekordboxXMLDB.save_xml()` — Write the library file now, pending debounce or not.
 - `RekordboxDB`
 - `  RekordboxDB.ensure_standalone_master_db()` — Create an empty master.db at our private location if Rekordbox isn't installed.
-- `  RekordboxDB.tracks()`
+- `  RekordboxDB.tracks()` — Track dict of the active backend, minus streaming tracks when hidden.
 - `  RekordboxDB.playlists()`
 - `  RekordboxDB.artists()`
 - `  RekordboxDB.genres()`
@@ -1872,7 +1877,7 @@ localStorage auto-save + restore for per-track edits (cuts + hot cues).
 
 ### `frontend/src/components/waveform/useMultibandLayers.js`
 
-Owns the slave WaveSurfer instances that render the LOW/MID/HIGH bands, plus the RAF sync
+Owns the slave WaveSurfers that render the LOW/MID/HIGH bands from precomputed peaks.
 
 - `useMultibandLayers()` — Owns the slave WaveSurfer instances that render the LOW/MID/HIGH bands, plus the RAF sync loop that…
 
@@ -1884,8 +1889,10 @@ Debounced non-destructive preview rebuild — whenever cuts change, splice the A
 
 ### `frontend/src/components/waveform/useWaveSurfer.js`
 
-Owns the master WaveSurfer + Overview lifecycle:
+Owns the master WaveSurfer + overview lifecycle: one fetch + one decode per track.
 
+- `OVERVIEW_PEAK_COUNT()` — Overview strip resolution — wavesurfer's own exportPeaks() default; enough for a 4K-wide strip.
+- `streamUrlFor()`
 - `useWaveSurfer()` — Owns the master WaveSurfer + Overview lifecycle: - mount-once init (registers regions/timeline plug…
 
 ### `frontend/src/components/waveform/useWaveformInteractions.js`
@@ -1941,6 +1948,26 @@ Tag chips for the Ranking view.
 ### `frontend/src/config/tagTaxonomy.test.js`
 
 node --test frontend/src/config/tagTaxonomy.test.js Pure module, imports carry extensions — no resolver needed.
+
+### `frontend/src/hooks/useTaskPolling.js`
+
+useTaskPolling — one shared poller per endpoint for background-task status.
+
+- `TASK_POLL_ACTIVE_MS()`
+- `TASK_POLL_IDLE_MS()`
+- `TASK_POLL_KICK_WINDOW_MS()`
+- `SC_TASKS_ENDPOINT()`
+- `IMPORT_TASKS_ENDPOINT()`
+- `TERMINAL_TASK_STATES()` — End states of import_tracker + SoundCloud downloader tasks.
+- `TASK_START_URL_PREFIXES()` — Mutating requests that register import / download tasks on the backend.
+- `isTaskStartRequest()` — export const isAnyTaskRunning = (snapshot) => !!snapshot && typeof snapshot === 'object' && Object.…
+- `createTaskPollingStore()` — Framework-free poller registry.
+- `connectTaskPolling()` — const refresh = (endpoint) => { const p = pollers.get(endpoint); if (!p) return Promise.resolve(EMP…
+- `useTaskPolling()` — Subscribe a component to the shared poller for `endpoint`.
+
+### `frontend/src/hooks/useTaskPolling.test.js`
+
+node:test for the shared task-polling store (refcount, back-off, pause, kick).
 
 ### `frontend/src/hooks/useVirtualRows.js`
 
@@ -2147,7 +2174,10 @@ UtilitiesView — router for the Utilities workspace.
 
 ### `frontend/src/components/WaveformEditor.jsx`
 
-*(no module docstring)*
+Waveform editor used by Ranking mode (simpleMode): master + overview WaveSurfer, 3-band layers.
+
+- `BAND_PEAKS_PER_SECOND()` — 3-band RMS envelope resolution requested from /api/audio/waveform: 2 px per point at ZOOM_DEFAULT (…
+- `BAND_FETCH_TIMEOUT_MS()` — Uncached analysis of a long track (librosa load + 3 Butterworth passes) can exceed axios' 10 s defa…
 
 ### `frontend/src/components/XmlCleanView.jsx`
 
@@ -3742,6 +3772,45 @@ Tests for `app/database.py`.
 - `  TestFilterTracks.test_unknown_scheme_preserved()` — Only the four explicit prefixes are filtered.
 - `  TestFilterTracks.test_unknown_input_type_passed_through()` — If the caller hands a non-dict / non-list we just return it.
 
+### `tests/test_database_save_cache.py`
+
+Perf contracts of `app/database.py`: cached settings read + coalesced XML saves.
+
+- `settings_file()`
+- `load_calls()`
+- `TestHideStreamingCache`
+- `  TestHideStreamingCache.test_unchanged_file_is_read_at_most_once()`
+- `  TestHideStreamingCache.test_missing_file_is_read_at_most_once()`
+- `  TestHideStreamingCache.test_flag_flips_on_first_access_after_mtime_change()`
+- `  TestHideStreamingCache.test_settings_manager_save_takes_effect_on_next_access()`
+- `TestFilteredTracksMemo`
+- `  TestFilteredTracksMemo.strip_calls()`
+- `  TestFilteredTracksMemo.hidden()`
+- `  TestFilteredTracksMemo.test_filtered_view_is_built_once()`
+- `  TestFilteredTracksMemo.test_facade_add_and_delete_invalidate()`
+- `  TestFilteredTracksMemo.test_path_change_invalidates()`
+- `  TestFilteredTracksMemo.test_swapped_or_resized_source_invalidates()`
+- `writes()` — Every target `_write_atomically` was called with (stray writes included).
+- `fake_clock()` — Distinct, repeatable millisecond ids for create_playlist / create_smart_playlist.
+- `make_xml()`
+- `TestXmlBytes`
+- `  TestXmlBytes.test_output_matches_pre_change_implementation()`
+- `  TestXmlBytes.test_coalesced_equals_save_after_every_mutation()`
+- `TestCoalescedSave`
+- `  TestCoalescedSave.test_hundred_mutations_write_at_most_twice()`
+- `  TestCoalescedSave.test_explicit_save_writes_immediately()`
+- `  TestCoalescedSave.test_reading_xml_path_flushes()`
+- `  TestCoalescedSave.test_facade_xml_path_flushes()`
+- `  TestCoalescedSave.test_repointing_xml_path_flushes_to_old_file()`
+- `  TestCoalescedSave.test_load_library_flushes_pending_first()`
+- `  TestCoalescedSave.test_unload_flushes_and_never_writes_the_empty_library()`
+- `  TestCoalescedSave.test_unload_after_failed_flush_leaves_the_file_alone()`
+- `  TestCoalescedSave.test_exit_flush_writes_pending_libraries()`
+- `  TestCoalescedSave.test_exit_flush_gives_up_on_a_wedged_writer()`
+- `  TestCoalescedSave.test_steady_mutations_are_saved_by_the_max_delay()`
+- `  TestCoalescedSave.test_failed_write_stays_dirty_until_a_later_flush()`
+- `  TestCoalescedSave.test_mutation_during_write_keeps_library_dirty()`
+
 ### `tests/test_db_taste.py`
 
 taste-vector store tests (recommender-taste-llm-audio T1 — app/db_taste.py).
@@ -4526,6 +4595,13 @@ SoundCloud sync matcher: the indexed matcher answers exactly like the old brute 
 - `  TestIndexReuse.test_other_mapping_rebuilds()`
 - `  TestIndexReuse.test_preview_and_sync_index_once_per_engine()`
 - `test_benchmark_20k_library_500_track_playlist()`
+
+### `tests/test_sc_lazy_numpy.py`
+
+``import app.soundcloud_api`` must not import numpy.
+
+- `test_import_soundcloud_api_does_not_load_numpy()`
+- `test_index_still_matches_after_lazy_import()`
 
 ### `tests/test_security_compare.py`
 

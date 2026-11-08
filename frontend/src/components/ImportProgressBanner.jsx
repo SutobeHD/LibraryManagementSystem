@@ -2,53 +2,53 @@
  * Sticky progress banner — visible on every screen while local-file or
  * SoundCloud imports are running. Auto-hides when nothing is active.
  *
- * Polls /api/import/tasks + /api/soundcloud/tasks every 1.5s and renders
+ * Subscribes to the shared /api/import/tasks + /api/soundcloud/tasks pollers
+ * (useTaskPolling: fast while a task runs, slow when idle) and renders
  *   • aggregate progress bar (% of currently active tasks completed)
  *   • current track filename + per-task stage
  *   • click → Sidebar → Sync → Downloads (full Import Manager view)
  */
 import React, { useEffect, useMemo, useState } from 'react';
-import { Loader2, CheckCircle, AlertTriangle, X, ChevronRight } from 'lucide-react';
-import api from '../api/api';
+import { Loader2, X, ChevronRight } from 'lucide-react';
+import { useTaskPolling, IMPORT_TASKS_ENDPOINT, SC_TASKS_ENDPOINT } from '../hooks/useTaskPolling';
 
 const ACTIVE_STATES = new Set([
-    'Queued', 'Starting', 'Resolving', 'Downloading', 'Downloaded',
-    'Analyzing', 'Importing', 'ANLZ', 'Sorting',
+    'Queued',
+    'Starting',
+    'Resolving',
+    'Downloading',
+    'Downloaded',
+    'Analyzing',
+    'Importing',
+    'ANLZ',
+    'Sorting',
 ]);
 const FAIL_STATES = new Set(['Failed', 'Error', 'Analysis Failed']);
 
 const ImportProgressBanner = ({ onOpenManager }) => {
-    const [importTasks, setImportTasks] = useState({});
-    const [scTasks, setScTasks] = useState({});
+    const { data: importTasks } = useTaskPolling(IMPORT_TASKS_ENDPOINT);
+    const { data: scTasks } = useTaskPolling(SC_TASKS_ENDPOINT);
     const [dismissed, setDismissed] = useState(false);
-
-    useEffect(() => {
-        const tick = async () => {
-            try {
-                const [imp, sc] = await Promise.all([
-                    api.get('/api/import/tasks').catch(() => ({ data: {} })),
-                    api.get('/api/soundcloud/tasks').catch(() => ({ data: {} })),
-                ]);
-                setImportTasks(imp.data || {});
-                setScTasks(sc.data || {});
-            } catch (e) { /* ignore */ }
-        };
-        tick();
-        const t = setInterval(tick, 1500);
-        return () => clearInterval(t);
-    }, []);
 
     const stats = useMemo(() => {
         const all = [
-            ...Object.values(importTasks).map(t => ({ ...t, _src: 'import' })),
-            ...Object.values(scTasks).map(t => ({ ...t, _src: 'sc' })),
+            ...Object.values(importTasks || {}).map((t) => ({ ...t, _src: 'import' })),
+            ...Object.values(scTasks || {}).map((t) => ({ ...t, _src: 'sc' })),
         ];
         const total = all.length;
-        const active = all.filter(t => ACTIVE_STATES.has(t.status));
-        const done = all.filter(t => t.status === 'Completed' || t.status === 'Linked' || t.status === 'Skipped');
-        const failed = all.filter(t => FAIL_STATES.has(t.status));
+        const active = all.filter((t) => ACTIVE_STATES.has(t.status));
+        const done = all.filter(
+            (t) => t.status === 'Completed' || t.status === 'Linked' || t.status === 'Skipped'
+        );
+        const failed = all.filter((t) => FAIL_STATES.has(t.status));
         const inflight = active[0] || null;
-        return { total, activeCount: active.length, doneCount: done.length, failedCount: failed.length, inflight };
+        return {
+            total,
+            activeCount: active.length,
+            doneCount: done.length,
+            failedCount: failed.length,
+            inflight,
+        };
     }, [importTasks, scTasks]);
 
     // Reset dismiss when a new import starts
@@ -62,9 +62,7 @@ const ImportProgressBanner = ({ onOpenManager }) => {
         return null;
     }
 
-    const overallPct = stats.total > 0
-        ? Math.round((stats.doneCount / stats.total) * 100)
-        : 0;
+    const overallPct = stats.total > 0 ? Math.round((stats.doneCount / stats.total) * 100) : 0;
 
     return (
         <div
@@ -84,13 +82,17 @@ const ImportProgressBanner = ({ onOpenManager }) => {
                                 {stats.doneCount}/{stats.total}
                             </span>{' '}
                             <span className="text-ink-muted text-[11px] font-normal">
-                                ({stats.activeCount} aktiv{stats.failedCount ? `, ${stats.failedCount} Fehler` : ''})
+                                ({stats.activeCount} aktiv
+                                {stats.failedCount ? `, ${stats.failedCount} Fehler` : ''})
                             </span>
                         </span>
                         <div className="flex items-center gap-2 shrink-0">
                             <span className="font-mono text-xs text-amber2">{overallPct}%</span>
                             <button
-                                onClick={(e) => { e.stopPropagation(); setDismissed(true); }}
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    setDismissed(true);
+                                }}
                                 className="p-1 rounded hover:bg-white/10 text-ink-muted hover:text-white"
                                 title="Schließen"
                             >
@@ -111,21 +113,29 @@ const ImportProgressBanner = ({ onOpenManager }) => {
                     {/* Currently active track */}
                     {stats.inflight && (
                         <div className="flex items-center gap-2 mt-2 text-[11px] text-ink-muted truncate">
-                            <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold uppercase tracking-wider shrink-0 ${
-                                stats.inflight._src === 'import'
-                                    ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
-                                    : 'bg-orange-500/20 text-orange-300 border border-orange-500/30'
-                            }`}>
+                            <span
+                                className={`px-1.5 py-0.5 rounded text-[8px] font-bold uppercase tracking-wider shrink-0 ${
+                                    stats.inflight._src === 'import'
+                                        ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
+                                        : 'bg-orange-500/20 text-orange-300 border border-orange-500/30'
+                                }`}
+                            >
                                 {stats.inflight._src === 'import' ? 'Lokal' : 'SC'}
                             </span>
-                            <span className="text-amber2 font-mono shrink-0">{stats.inflight.status}</span>
+                            <span className="text-amber2 font-mono shrink-0">
+                                {stats.inflight.status}
+                            </span>
                             <span className="text-ink-placeholder">·</span>
-                            <span className="truncate">{stats.inflight.title || stats.inflight.file_path}</span>
+                            <span className="truncate">
+                                {stats.inflight.title || stats.inflight.file_path}
+                            </span>
                             {(stats.inflight.bpm || stats.inflight.key) && (
                                 <>
                                     <span className="text-ink-placeholder shrink-0">·</span>
                                     <span className="font-mono text-purple-300 shrink-0">
-                                        {stats.inflight.bpm ? `${Math.round(stats.inflight.bpm)} BPM` : ''}
+                                        {stats.inflight.bpm
+                                            ? `${Math.round(stats.inflight.bpm)} BPM`
+                                            : ''}
                                         {stats.inflight.bpm && stats.inflight.key ? ' · ' : ''}
                                         {stats.inflight.key || ''}
                                     </span>

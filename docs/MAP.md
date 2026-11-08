@@ -145,13 +145,15 @@
 | `frontend/src/components/waveform/persistence.js` | localStorage auto-save (cuts + cues, keyed by track.id) |
 | `frontend/src/components/waveform/previewBuffer.js` | --- Shared decode context (reused, not recreated per insert) --- |
 | `frontend/src/components/waveform/useEditPersistence.js` | localStorage auto-save + restore for per-track edits (cuts + hot cues). |
-| `frontend/src/components/waveform/useMultibandLayers.js` | Owns the slave WaveSurfer instances that render the LOW/MID/HIGH bands, plus the RAF sync |
+| `frontend/src/components/waveform/useMultibandLayers.js` | Owns the slave WaveSurfers that render the LOW/MID/HIGH bands from precomputed peaks. |
 | `frontend/src/components/waveform/useVisualPreview.js` | Debounced non-destructive preview rebuild — whenever cuts change, splice the AudioBuffer |
-| `frontend/src/components/waveform/useWaveSurfer.js` | Owns the master WaveSurfer + Overview lifecycle: |
+| `frontend/src/components/waveform/useWaveSurfer.js` | Owns the master WaveSurfer + overview lifecycle: one fetch + one decode per track. |
 | `frontend/src/components/waveform/useWaveformInteractions.js` | Imperative editing + hotkey wiring extracted from WaveformEditor. |
 | `frontend/src/config/constants.js` | Frontend-wide constants. |
 | `frontend/src/config/tagTaxonomy.js` | Tag chips for the Ranking view. |
 | `frontend/src/config/tagTaxonomy.test.js` | node --test frontend/src/config/tagTaxonomy.test.js Pure module, imports carry extensions — no resolver neede… |
+| `frontend/src/hooks/useTaskPolling.js` | useTaskPolling — one shared poller per endpoint for background-task status. |
+| `frontend/src/hooks/useTaskPolling.test.js` | node:test for the shared task-polling store (refcount, back-off, pause, kick). |
 | `frontend/src/hooks/useVirtualRows.js` | Row windowing for long tables: only the rows in (and near) the viewport are mounted; spacers above and below … |
 | `frontend/src/hooks/useVirtualRows.test.js` | Range math of the TrackTable row windowing (computeVirtualRange). |
 | `frontend/src/store/authStore.js` | Tiny module-level auth state shared across the frontend. |
@@ -192,7 +194,7 @@
 | `frontend/src/components/UsbSettingsView.jsx` | UsbSettingsView — edit MYSETTING.DAT / MYSETTING2.DAT / DJMMYSETTING.DAT Per-stick CDJ + DJM hardware setting… |
 | `frontend/src/components/UsbView.jsx` | UsbView — Melodex-styled USB device manager (container). |
 | `frontend/src/components/UtilitiesView.jsx` | UtilitiesView — router for the Utilities workspace. |
-| `frontend/src/components/WaveformEditor.jsx` | *(no module docstring)* |
+| `frontend/src/components/WaveformEditor.jsx` | Waveform editor used by Ranking mode (simpleMode): master + overview WaveSurfer, 3-band layers. |
 | `frontend/src/components/XmlCleanView.jsx` | Using existing endpoint but improved backend logic |
 | `frontend/src/components/artistHub/ArtistDetail.jsx` | *(no module docstring)* |
 | `frontend/src/components/artistHub/ArtistLinks.jsx` | *(no module docstring)* |
@@ -309,6 +311,7 @@
 | `tests/test_compare_rekordbox.py` | Unit tests for the pure comparison helpers in scripts/compare_rekordbox.py. |
 | `tests/test_cue_beatgrid_persistence.py` | Round-trip tests for the cue / beatgrid sidecar persistence. |
 | `tests/test_database.py` | Tests for `app/database.py`. |
+| `tests/test_database_save_cache.py` | Perf contracts of `app/database.py`: cached settings read + coalesced XML saves. |
 | `tests/test_db_taste.py` | taste-vector store tests (recommender-taste-llm-audio T1 — app/db_taste.py). |
 | `tests/test_download_names_route.py` | ``POST /api/soundcloud/downloads/{sc_track_id}/names`` (artist hub T-31, Threat T18). |
 | `tests/test_download_registry.py` | Tests for app/download_registry.py — SoundCloud download dedup/history DB. |
@@ -348,6 +351,7 @@
 | `tests/test_require_session.py` | Phase-2 require_session dual-acceptance tests (T3 — app/auth.py). |
 | `tests/test_route_uniqueness.py` | Routing-table invariant: no duplicate (method, path) registrations. |
 | `tests/test_sc_fuzzy_index.py` | SoundCloud sync matcher: the indexed matcher answers exactly like the old brute force. |
+| `tests/test_sc_lazy_numpy.py` | ``import app.soundcloud_api`` must not import numpy. |
 | `tests/test_security_compare.py` | Tests for ``app/security_compare.py::safe_compare``. |
 | `tests/test_security_hotfixes.py` | Regression tests for the 5 security hotfixes in commit e3a5ae8. |
 | `tests/test_services.py` | Tests for `app/services.py`. |
