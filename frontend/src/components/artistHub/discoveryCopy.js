@@ -235,7 +235,7 @@ export const idleSentence = (status) => {
 
 const STOP_SENTENCES = {
     [STOP_DISABLED]:
-        'Background sync is switched off, so nothing was refreshed. Turn it on in Settings → Network, or use Sync now.',
+        'Background sync is switched off, so nothing was refreshed. Switch it on in the hub’s status card, or use Sync now.',
     [STOP_CALL_BUDGET]: 'stopped at the per-run call cap — the rest go first next time',
     [STOP_ARTIST_CAP]: 'stopped at the per-run artist cap — the rest go first next time',
     [STOP_NOT_CONNECTED]: 'stopped because SoundCloud is not connected',

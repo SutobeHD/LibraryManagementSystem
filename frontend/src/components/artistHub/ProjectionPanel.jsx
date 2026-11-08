@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'react-hot-toast';
-import { AlertTriangle, Clock, FolderTree, Loader2, RefreshCw } from 'lucide-react';
+import { AlertTriangle, FolderTree, Loader2, RefreshCw } from 'lucide-react';
 
 import {
     errorMessage,
@@ -11,8 +11,9 @@ import {
 import { formatNumber, pluralise } from './mergeCopy';
 
 /**
- * ProjectionPanel — the `Artists` folder inside Rekordbox: what is projected
- * right now, and the button that brings it up to date.
+ * ProjectionPanel — one compact row for the `Artists` folder inside Rekordbox:
+ * what is projected right now, and the button that brings it up to date. The
+ * details sit in the row's tooltip; the run's delta goes to the toast.
  *
  * Two things it must not do: claim a sync happened when the backend refused
  * (Rekordbox open ⇒ 409, rendered as a sentence, not as a raw error), and report
@@ -62,13 +63,6 @@ const deltaLine = (report) => {
     if (parts.length === 0) parts.push('already up to date — nothing to write');
     return parts.join(' · ');
 };
-
-const KeyValue = ({ label, children }) => (
-    <div className="flex items-baseline justify-between gap-3 py-[3px] text-[11.5px]">
-        <span className="text-ink-muted shrink-0">{label}</span>
-        <span className="text-ink-secondary text-right min-w-0 truncate">{children}</span>
-    </div>
-);
 
 const ProjectionPanel = ({ refreshToken }) => {
     const [status, setStatus] = useState(null);
@@ -146,118 +140,85 @@ const ProjectionPanel = ({ refreshToken }) => {
           ? 'in your collection'
           : 'missing in Rekordbox — the next sync re-creates it';
 
+    const pending = Number(status?.pending) || 0;
+    const meta = status
+        ? `${folderName} · ${formatNumber(status?.projected)}/${formatNumber(status?.favourites)}${
+              synced ? ` · ${relativeTime(synced)}` : ' · never synced'
+          }`
+        : '';
+    const metaTitle = status
+        ? [
+              `Folder "${folderName}" — ${folderState}.`,
+              `${formatNumber(status?.projected)} of ${pluralise(status?.favourites, 'favourite', 'favourites')} have a playlist${
+                  pending ? `, ${formatNumber(pending)} pending` : ''
+              }.`,
+              `Last synced: ${synced ? relativeTime(synced) : 'never'}.`,
+              report ? `Last run: ${deltaLine(report)}.` : '',
+          ]
+              .filter(Boolean)
+              .join('\n')
+        : '';
+
     return (
-        <div className="bg-mx-panel border border-line-subtle rounded-xl shrink-0 overflow-hidden">
-            <div className="flex items-center gap-2 px-3.5 py-2.5 border-b border-line-subtle">
-                <FolderTree size={14} className="text-amber2 shrink-0" />
-                <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-muted">
+        <div className="px-3 py-2">
+            <div className="flex items-center gap-2 min-w-0">
+                <FolderTree size={13} className="text-amber2 shrink-0" />
+                <span className="text-[11.5px] font-semibold text-ink-secondary shrink-0">
                     Rekordbox folder
                 </span>
-                <div className="flex-1" />
                 <span
-                    className={`flex items-center gap-1.5 px-2 py-[3px] rounded-mx-xs text-[10px] border whitespace-nowrap ${
-                        running
-                            ? 'text-amber2 bg-amber2/10 border-amber2/40'
-                            : 'text-ok bg-ok/[0.07] border-ok/30'
-                    }`}
+                    title={metaTitle || unavailable}
+                    className="flex-1 min-w-0 truncate text-[11px] text-ink-muted font-mono"
                 >
-                    <span
-                        className={`w-1.5 h-1.5 rounded-full ${running ? 'bg-amber2' : 'bg-ok'}`}
-                    />
-                    {running ? 'Rekordbox open' : 'Rekordbox closed'}
-                </span>
-            </div>
-
-            <div className="p-3.5">
-                {loading && !status ? (
-                    <div className="flex items-center gap-2 py-2 text-[11.5px] text-ink-muted">
-                        <Loader2 size={13} className="animate-spin text-amber2" />
-                        Reading the projection state…
-                    </div>
-                ) : unavailable ? (
-                    <p className="text-[11.5px] text-ink-muted leading-relaxed">{unavailable}</p>
-                ) : (
-                    <>
-                        <KeyValue label="Folder">
-                            <span className="font-mono text-ink-primary">{folderName}</span> ·{' '}
-                            {folderState}
-                        </KeyValue>
-                        <KeyValue label="Artist playlists">
-                            {formatNumber(status?.projected)} of{' '}
-                            {pluralise(status?.favourites, 'favourite', 'favourites')}
-                            {status?.pending > 0 && (
+                    {loading && !status ? (
+                        <Loader2 size={11} className="inline animate-spin text-amber2" />
+                    ) : unavailable ? (
+                        'status unavailable'
+                    ) : (
+                        <>
+                            {meta}
+                            {pending > 0 && (
                                 <span className="text-amber2">
                                     {' '}
-                                    · {formatNumber(status.pending)} pending
+                                    · {formatNumber(pending)} pending
                                 </span>
                             )}
-                        </KeyValue>
-                        <KeyValue label="Last synced">
-                            {synced ? (
-                                <span className="inline-flex items-center gap-1.5">
-                                    <Clock size={11} className="text-ink-muted" />
-                                    {relativeTime(synced)}
-                                </span>
-                            ) : (
-                                'never'
-                            )}
-                        </KeyValue>
-
-                        <button
-                            type="button"
-                            onClick={runSync}
-                            disabled={syncing}
-                            className="mt-3 w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-mx-sm text-[12px] font-semibold bg-amber2 text-black hover:brightness-110 transition-all disabled:opacity-40"
-                        >
-                            {syncing ? (
-                                <Loader2 size={13} className="animate-spin" />
-                            ) : (
-                                <RefreshCw size={13} />
-                            )}
-                            {syncing ? 'Syncing…' : 'Sync now'}
-                        </button>
-
-                        {report && !blocked && (
-                            <div className="mt-2.5 px-3 py-2 rounded-xl bg-mx-card/50 border border-white/5">
-                                <div className="text-[11.5px] text-ink-primary">
-                                    {deltaLine(report)}
-                                </div>
-                                <div className="mt-0.5 text-[10.5px] text-ink-muted">
-                                    {report.adopted
-                                        ? `Folder adopted, not recreated · `
-                                        : report.created
-                                          ? `Folder created · `
-                                          : ''}
-                                    {pluralise(report.artists, 'artist', 'artists')} ·{' '}
-                                    {Number(report.elapsed_s || 0).toFixed(1)} s
-                                    {(report.skipped ?? []).length > 0 &&
-                                        ` · ${formatNumber((report.skipped ?? []).length)} skipped`}
-                                    {(report.errors ?? []).length > 0 &&
-                                        ` · ${formatNumber((report.errors ?? []).length)} failed`}
-                                </div>
-                            </div>
-                        )}
-
-                        {blocked && (
-                            <div className="mt-2.5 flex gap-2 px-3 py-2 rounded-xl bg-amber2/[0.07] border border-amber2/30">
-                                <AlertTriangle
-                                    size={14}
-                                    className="mt-[1px] shrink-0 text-amber2"
-                                />
-                                <p className="text-[11.5px] text-ink-secondary leading-relaxed">
-                                    {blocked}
-                                </p>
-                            </div>
-                        )}
-                    </>
-                )}
+                        </>
+                    )}
+                </span>
+                <span
+                    title={
+                        running
+                            ? 'Rekordbox is open — writing the folder needs it closed.'
+                            : 'Rekordbox is closed — the folder can be written.'
+                    }
+                    className={`w-1.5 h-1.5 rounded-full shrink-0 ${running ? 'bg-amber2' : 'bg-ok'}`}
+                />
+                <button
+                    type="button"
+                    onClick={runSync}
+                    disabled={syncing || !!unavailable}
+                    title={
+                        running
+                            ? 'Close Rekordbox first — the folder is written into master.db.'
+                            : 'Write one playlist per favourite into the Artists folder. Re-running updates in place — no duplicate folders or entries.'
+                    }
+                    className="flex items-center gap-1 px-2 py-0.5 rounded-mx-sm text-[11px] bg-mx-card border border-line-subtle text-ink-primary hover:border-amber2/50 hover:text-amber2 transition-colors disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
+                >
+                    {syncing ? (
+                        <Loader2 size={11} className="animate-spin" />
+                    ) : (
+                        <RefreshCw size={11} />
+                    )}
+                    Write
+                </button>
             </div>
-
-            <div className="border-t border-line-subtle px-3.5 py-2.5 text-[11px] text-ink-muted leading-relaxed">
-                One flat folder, one playlist per favourite — what the CDJ reads. Re-running the
-                sync updates in place: no duplicate folders, no duplicate entries. Writing needs
-                Rekordbox closed.
-            </div>
+            {blocked && (
+                <div className="mt-1 flex items-start gap-1.5 text-[11px] text-ink-secondary">
+                    <AlertTriangle size={12} className="mt-[1px] shrink-0 text-amber2" />
+                    <span className="min-w-0">{blocked}</span>
+                </div>
+            )}
         </div>
     );
 };

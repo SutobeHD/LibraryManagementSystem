@@ -20,6 +20,8 @@ import { confirmModal } from './ConfirmModal';
 import { useContextMenu } from './shared/ContextMenu';
 import MergeDialog from './artistHub/MergeDialog';
 import ProjectionPanel from './artistHub/ProjectionPanel';
+import HubSettingsPopover, { Switch } from './artistHub/HubSettingsPopover';
+import { saveHubSettings } from './artistHub/hubSettingsApi';
 import ArtistDetail, { ArtistDetailActions, ArtistDetailSummary } from './artistHub/ArtistDetail';
 import LocalTracksPanel from './artistHub/LocalTracksPanel';
 import {
@@ -293,12 +295,12 @@ const SuggestionRow = ({ row, onOpen, action, onContextMenu }) => (
                 onOpen(row);
             }
         }}
-        className="flex items-center gap-3 px-3 py-2 mb-1.5 rounded-xl bg-mx-card/40 hover:bg-amber2/10 border border-white/5 hover:border-amber2/50 cursor-pointer transition-all"
+        className="flex items-center gap-2.5 px-2.5 py-1.5 mb-1 rounded-lg bg-mx-card/40 hover:bg-amber2/10 border border-white/5 hover:border-amber2/50 cursor-pointer transition-all"
     >
         <ArtistAvatar name={row.name} artwork={row.artwork} small />
         <div className="flex-1 min-w-0">
-            <div className="font-semibold text-[13px] text-ink-primary truncate">{row.name}</div>
-            <div className="mt-0.5 flex items-center gap-2 text-[11.5px] text-ink-muted flex-wrap">
+            <div className="font-semibold text-[12.5px] text-ink-primary truncate">{row.name}</div>
+            <div className="flex items-center gap-2 text-[11px] text-ink-muted flex-wrap">
                 <span className="font-mono">{row.track_count} tracks</span>
                 <AliasNote names={row.library_names} />
             </div>
@@ -306,6 +308,21 @@ const SuggestionRow = ({ row, onOpen, action, onContextMenu }) => (
         {action}
     </div>
 );
+
+/** Full background-sync status for the status row's tooltip; the row shows one line. */
+const syncStatusTitle = (status) => {
+    if (!status) return 'Background sync status unavailable.';
+    const lines = [idleSentence(status)];
+    if (status.last_run) lines.push(`Last pass: ${runSummary(status.last_run)}`);
+    const unobservable = status.unobservable?.length ?? 0;
+    if (unobservable > 0) {
+        lines.push(
+            `${unobservable} load path${unobservable === 1 ? '' : 's'} report nothing, so "idle" is a best reading.`
+        );
+    }
+    lines.push('Only favourites set to Auto or Review. Never downloads.');
+    return lines.join('\n');
+};
 
 const HUB_SEARCH_DEBOUNCE_MS = 250;
 
@@ -342,6 +359,7 @@ const ArtistHubView = ({ active, onSelectTrack, onEditTrack, onPlayTrack, librar
     // GET /api/artists/sync/status — idle verdict, opt-in flag and the last run record.
     const [syncStatus, setSyncStatus] = useState(null);
     const [syncBusy, setSyncBusy] = useState(false);
+    const [syncToggleBusy, setSyncToggleBusy] = useState(false);
     const [mergeOpen, setMergeOpen] = useState(false);
     const [mergeSeed, setMergeSeed] = useState(null);
     // null = not scanned (or the scan failed) — the affordance stays honest about
@@ -769,6 +787,32 @@ const ArtistHubView = ({ active, onSelectTrack, onEditTrack, onPlayTrack, librar
         }
     }, [loadHub, loadSyncStatus, searchTerm]);
 
+    const toggleBackgroundSync = useCallback(
+        async (on) => {
+            setSyncToggleBusy(true);
+            try {
+                await saveHubSettings({ artist_background_sync: on });
+            } catch (e) {
+                console.error('[ArtistHub] background sync toggle failed', e);
+                toast.error(
+                    'Background sync not switched — the settings file could not be updated.'
+                );
+            } finally {
+                setSyncToggleBusy(false);
+                loadSyncStatus();
+            }
+        },
+        [loadSyncStatus]
+    );
+
+    const handleHubSettingsSaved = useCallback(
+        (key) => {
+            if (key === 'artist_background_sync') loadSyncStatus();
+            if (key === 'artist_view_threshold') refreshPanels();
+        },
+        [loadSyncStatus, refreshPanels]
+    );
+
     const artistMenu = useContextMenu();
 
     const copyArtistName = useCallback(async (name) => {
@@ -1037,6 +1081,7 @@ const ArtistHubView = ({ active, onSelectTrack, onEditTrack, onPlayTrack, librar
                                   : 'No duplicates'}
                         </button>
                     )}
+                    <HubSettingsPopover onSaved={handleHubSettingsSaved} />
                     {!selected && (
                         <button
                             onClick={refreshPanels}
@@ -1090,7 +1135,7 @@ const ArtistHubView = ({ active, onSelectTrack, onEditTrack, onPlayTrack, librar
                     />
                 </ArtistDetail>
             ) : (
-                <div className="flex-1 min-h-0 grid grid-cols-1 xl:grid-cols-[1fr_400px] gap-4">
+                <div className="flex-1 min-h-0 grid grid-cols-1 xl:grid-cols-[1fr_440px] gap-4">
                     {/* Favourites */}
                     <div className="bg-mx-panel border border-line-subtle rounded-xl flex flex-col min-h-0 overflow-hidden">
                         <PanelHead
@@ -1225,54 +1270,16 @@ const ArtistHubView = ({ active, onSelectTrack, onEditTrack, onPlayTrack, librar
                                 })
                             )}
                         </div>
-
-                        <div className="border-t border-line-subtle px-3.5 py-2.5 text-[11.5px] text-ink-muted leading-relaxed">
-                            <b className="text-ink-secondary font-semibold">Update</b> fetches one
-                            artist's SoundCloud catalogue now.{' '}
-                            <b className="text-ink-secondary font-semibold">Auto</b> and{' '}
-                            <b className="text-ink-secondary font-semibold">Review</b> put the
-                            artist into the background pass — <b>Off</b> skips them entirely.
-                            Neither mode ever downloads: a pass refreshes the catalogue, and every
-                            download stays a button you press.
-                            <div className="mt-1.5 flex items-center gap-2 flex-wrap">
-                                <span
-                                    className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-                                        syncStatus?.idle ? 'bg-ok' : 'bg-ink-placeholder'
-                                    }`}
-                                />
-                                <span className="text-ink-secondary">
-                                    {idleSentence(syncStatus)}
-                                </span>
-                                {syncStatus && !syncStatus.enabled && (
-                                    <span className="text-ink-muted">
-                                        Background sync is off — turn it on in Settings → Network,
-                                        or press Sync now.
-                                    </span>
-                                )}
-                            </div>
-                            {syncStatus?.last_run && (
-                                <div className="mt-1 text-ink-muted">
-                                    Last pass: {runSummary(syncStatus.last_run)}
-                                </div>
-                            )}
-                            {(syncStatus?.unobservable?.length ?? 0) > 0 && (
-                                <div className="mt-1 text-ink-muted">
-                                    Not everything is observable — {syncStatus.unobservable.length}{' '}
-                                    load path
-                                    {syncStatus.unobservable.length === 1 ? '' : 's'} report
-                                    nothing, so "idle" is a best reading, not a proof.
-                                </div>
-                            )}
-                        </div>
                     </div>
 
                     {/* Suggestions */}
-                    <div className="flex flex-col gap-4 min-h-0">
-                        <div className="bg-mx-panel border border-line-subtle rounded-xl flex flex-col min-h-0 overflow-hidden">
+                    <div className="flex flex-col gap-3 min-h-0">
+                        <div className="flex-1 bg-mx-panel border border-line-subtle rounded-xl flex flex-col min-h-0 overflow-hidden">
                             <div className="flex items-stretch px-3 border-b border-line-subtle">
                                 <button
                                     type="button"
                                     onClick={() => setSuggestTab(SUGGEST_TAB_BACKLOG)}
+                                    title="Artists you already own, most tracks first. Favourites are excluded. No network calls."
                                     className={suggestTabClass(SUGGEST_TAB_BACKLOG)}
                                 >
                                     From your library
@@ -1280,6 +1287,7 @@ const ArtistHubView = ({ active, onSelectTrack, onEditTrack, onPlayTrack, librar
                                 <button
                                     type="button"
                                     onClick={() => setSuggestTab(SUGGEST_TAB_ALL)}
+                                    title="Every artist in the loaded library. Search and sort run on the server. The star adds or removes a favourite."
                                     className={suggestTabClass(SUGGEST_TAB_ALL)}
                                 >
                                     All artists
@@ -1287,7 +1295,7 @@ const ArtistHubView = ({ active, onSelectTrack, onEditTrack, onPlayTrack, librar
                                 <button
                                     type="button"
                                     onClick={() => setSuggestTab(SUGGEST_TAB_DISCOVER)}
-                                    title="Artists you do not own yet, from SoundCloud's related accounts plus the catalogues already cached here"
+                                    title="Artists you do not own yet: one related-artist hop per linked favourite plus the catalogues already cached here. Add makes them a favourite; linking SoundCloud stays manual."
                                     className={`flex items-center gap-1.5 ${suggestTabClass(
                                         SUGGEST_TAB_DISCOVER
                                     )}`}
@@ -1522,59 +1530,47 @@ const ArtistHubView = ({ active, onSelectTrack, onEditTrack, onPlayTrack, librar
                                 )}
                             </div>
 
-                            <div className="border-t border-line-subtle px-3.5 py-2.5 text-[11.5px] text-ink-muted">
-                                {showDiscover ? (
-                                    <>
-                                        Seeded from your favourites — one related-artist hop per
-                                        linked favourite, never a hop on a result, plus a zero-call
-                                        pass over catalogues already cached here.{' '}
-                                        {discovery
-                                            ? exclusionNote(discovery)
-                                            : 'Nothing has been asked yet.'}{' '}
-                                        Add puts the artist in your favourites; linking their
-                                        SoundCloud account stays a separate, manual step.
-                                    </>
-                                ) : showAllArtists ? (
-                                    'Every artist in the loaded library. Search and sort run on the server, so nothing below the loaded page is hidden from a search. The star adds or removes a favourite — the pane on the left follows.'
-                                ) : (
-                                    'Artists you already own, most tracks first. Favourites are excluded. No network calls.'
-                                )}
-                            </div>
+                            {showDiscover && discovery && (
+                                <div
+                                    className="border-t border-line-subtle px-3 py-1.5 text-[11px] text-ink-muted truncate"
+                                    title={exclusionNote(discovery)}
+                                >
+                                    {exclusionNote(discovery)}
+                                </div>
+                            )}
                         </div>
 
-                        <ProjectionPanel refreshToken={projectionToken} />
-
-                        <div className="rounded-xl border border-line-subtle bg-mx-input/60 p-3.5 shrink-0">
-                            <div className="flex items-center gap-2 mb-1.5">
-                                <RefreshCw size={14} className="text-ink-muted" />
-                                <span className="text-[12px] font-semibold text-ink-secondary">
+                        <div className="shrink-0 bg-mx-panel border border-line-subtle rounded-xl divide-y divide-line-subtle">
+                            <ProjectionPanel refreshToken={projectionToken} />
+                            <div className="px-3 py-2 flex items-center gap-2 min-w-0">
+                                <RefreshCw size={13} className="text-ink-muted shrink-0" />
+                                <span className="text-[11.5px] font-semibold text-ink-secondary shrink-0">
                                     Background sync
                                 </span>
                                 <span
-                                    className={`px-1.5 py-[1px] rounded-mx-xs text-[9px] font-semibold uppercase tracking-wider border ${
-                                        syncStatus?.enabled
-                                            ? 'bg-ok/[0.07] border-ok/30 text-ok'
-                                            : 'bg-mx-card border-line-subtle text-ink-muted'
-                                    }`}
+                                    title={syncStatusTitle(syncStatus)}
+                                    className="flex-1 min-w-0 truncate text-[11px] text-ink-muted"
                                 >
-                                    {syncStatus === null
-                                        ? 'unknown'
-                                        : syncStatus.enabled
-                                          ? 'on'
-                                          : 'off'}
+                                    <span
+                                        className={`inline-block w-1.5 h-1.5 rounded-full mr-1.5 align-middle ${
+                                            syncStatus?.idle ? 'bg-ok' : 'bg-ink-placeholder'
+                                        }`}
+                                    />
+                                    {syncStatus?.last_run
+                                        ? `Last pass: ${runSummary(syncStatus.last_run)}`
+                                        : idleSentence(syncStatus)}
                                 </span>
+                                <Switch
+                                    checked={!!syncStatus?.enabled}
+                                    disabled={syncStatus === null || syncToggleBusy}
+                                    onChange={toggleBackgroundSync}
+                                    title={
+                                        syncStatus?.enabled
+                                            ? 'On — refreshes Auto/Review favourites while the app is idle. Click to switch off.'
+                                            : 'Off — click to refresh Auto/Review favourites while the app is idle (max 20 artists, 60 calls per pass, never downloads).'
+                                    }
+                                />
                             </div>
-                            <p className="text-[11.5px] text-ink-muted leading-relaxed">
-                                Runs only while the app is open and idle, only over favourites set
-                                to Auto or Review, capped at 20 artists and 60 SoundCloud calls per
-                                pass. It refreshes catalogues and{' '}
-                                <b className="text-ink-secondary font-semibold">never downloads</b>.
-                                Switch it on under Settings → Network, or press Sync now to run one
-                                pass by hand.
-                            </p>
-                            <p className="mt-1.5 text-[11.5px] text-ink-secondary">
-                                {idleSentence(syncStatus)}
-                            </p>
                         </div>
                     </div>
                 </div>
