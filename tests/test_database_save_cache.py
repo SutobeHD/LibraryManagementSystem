@@ -29,9 +29,14 @@ from app.database import RekordboxDB, RekordboxXMLDB, flush_pending_saves
 from app.services import SettingsManager
 
 # sha256 + size of the scenario file written by app/database.py at 3dcd5bc, before
-# saves were coalesced (one full rewrite per mutation).
-_PRE_CHANGE_SHA256 = "30e4bd1b7f7e509da802d54cc1e3316fdded8a244940da52f9421c3c4bde5711"
-_PRE_CHANGE_SIZE = 8648
+# saves were coalesced (one full rewrite per mutation), with LF line endings.
+# ElementTree.write(path, encoding=...) writes in text mode: the one newline it emits,
+# after the XML declaration, is os.linesep. So the file is 1 byte longer on Windows
+# (8648) than on POSIX (8647). That is the writer's behaviour before and after this
+# change and is deliberately not normalised: it would change the bytes on Windows.
+_PRE_CHANGE_SHA256_LF = "e5e67d33682b59ded060de13e07dc41e974930f87e560e4f978247b7794be7f5"
+_PRE_CHANGE_SIZE_LF = 8647
+_XML_DECLARATION = b"<?xml version='1.0' encoding='utf-8'?>"
 
 
 def _wait_until(cond: Callable[[], bool], timeout: float = 5.0) -> bool:
@@ -311,8 +316,14 @@ class TestXmlBytes:
         assert _to(writes, xml._xml_path) == 0, "mutations must not write on their own"
         data = Path(xml.xml_path).read_bytes()  # the read flushes
         assert _to(writes, xml._xml_path) == 1
-        assert len(data) == _PRE_CHANGE_SIZE
-        assert hashlib.sha256(data).hexdigest() == _PRE_CHANGE_SHA256
+        # The platform newline sits after the declaration and nowhere else.
+        newline = os.linesep.encode()
+        assert data.startswith(_XML_DECLARATION + newline)
+        assert data.count(b"\n") == 1
+        assert data.count(b"\r") == newline.count(b"\r")
+        lf = data.replace(newline, b"\n", 1)
+        assert len(lf) == _PRE_CHANGE_SIZE_LF
+        assert hashlib.sha256(lf).hexdigest() == _PRE_CHANGE_SHA256_LF
 
     def test_coalesced_equals_save_after_every_mutation(
         self, make_xml, writes, monkeypatch: pytest.MonkeyPatch
