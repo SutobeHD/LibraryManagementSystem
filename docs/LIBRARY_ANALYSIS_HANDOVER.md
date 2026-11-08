@@ -147,6 +147,46 @@ Port `scan_audio_quality.py` + `rescan_unreadable.py` from `feat/artist-hub` (`g
 | PWV4 / PWV5 | colour waveform as a second energy / brightness proxy; mind the LMS-writer bugs (§2) |
 | PPTH | path stored in ANLZ vs real path (moved files) |
 
+#### 3.4.1 Built and measured (2026-11-08) — `scripts/library_measure_anlz.py`
+
+Spike exists: module + CLI (`--input --db --limit --out --summary-only`), 23 tests in `tests/test_library_measure_anlz.py` (synthetic PMAI/PSSI/PQTZ/PQT2/PPTH/PCOB/PCO2/PWV5/6/7/PWVC builders, no user files). ruff + mypy clean (mypy reports one **pre-existing** error in `app/anlz_writer.py:604`, untouched). Output: `tmp/library-analysis/measure/anlz.jsonl` (11.6 MB, one row per track incl. error rows).
+
+**Full-library run (read-only):**
+
+| Measurement | Value |
+|---|---|
+| `resolve_anlz_paths` | 4764 of 4765 snapshot tracks in 0.30 s (1 SoundCloud stream without path; 111 streams **do** have ANLZ) |
+| Files present | DAT / EXT / EX2 4764 each (100 %) |
+| Runtime | 200 tracks 10.6 s; **all 4765 in 216 s** (22/s, single process) |
+| Status | ok 4754, partial 10, no_anlz_path 1, **0 file errors** |
+| Tag errors (pyrekordbox `Const` too strict) | `PQT2 u1` 9× (0x02000002 instead of 0x01000002), `PCPT u1` 2× (0x100000 instead of 0x10000). Tolerant parse keeps every other tag; PQT2/PCOB read raw |
+| Tag sets | DAT `PPTH,PVBR,PQTZ,PWAV,PWV2,PCOB,PCOB` 4763/4764; EXT standard 4722, 21 without PQT2, 20 without PSSI; EX2 `PPTH,PWV7,PWV6,PWVC` 4764/4764 |
+| Grid | missing in 3 (PQTZ with 0 entries; 2 of them also all-zero PWV7 → probably broken audio). Beats min 5 / median 745 / max 18173. First downbeat median 46 ms, p90 878 ms, > 2 s: 4 |
+| Tempo changes | 9 tracks. 8 carry PQT2 flag **0x02000002** (13-59 distinct BPM, 71-208 switches), 1 with 0x01000002 (1 switch 53.97 → 215.88). 1 track has 0x02000002 without changes. → high byte 02 = variable-tempo marker (8/9, measured, no spec) |
+| Cues | **0 hot cues in the whole library**, memory cues in 1 track (23), 0 loops, 0 comments, 0 colours |
+| PSSI | present 4744; **masked 2584 (54.5 %) / plain 2160**. Moods high 3954 / mid 772 / low 18. Phrases min 3 / median 18 / max 431 (91-min mix). Intro bars top: 8 (1279), 16 (817), 4 (558). Outro bars top: 8 (822), 16 (416). Fills in 3822 tracks. After unmask every mood is 1..3 and beats ascend |
+| Writer guess | rekordbox 4749, conflict 15, **lms 0**. Signals: PSSI header layout (LMS `end_beat` @0x16 vs RB @0x1A + u2=1), PWVC payload (LMS zeros, RB e.g. `0050 006f 006d`), PQT2 u3 (LMS 0). The 15 conflicts = PQT2 u3 == 0 with otherwise RB signals → **u3 vote unreliable**. File header u1..u4 and tag order are identical for RB and LMS → no signal. No real LMS file in the library → heuristic tested against synthetic files only |
+| PPTH | DAT: `?/<file name>` 1587, empty 1440, **extension mismatch 1732** (PPTH `.m4a`, file `.aiff` → analysis predates the conversion), full path 5. EX2: mismatch 2710, basename 1587, full 466 |
+
+**PWV6 / PWV7 layout (numbers):**
+
+- PWV7: header 24, `len_entry_bytes` = 3, `tag_len − 24 == 3 × len_entries` in every sample; **frames == PWV5 frames in 4764/4764**; `frames / 150 − TotalTime` median +0.47 s (p5 0.05, p95 0.95, none > 2 s) → 150 half-frames/s verified. Byte max 127 (7 bit).
+- PWV6: header 20, always 1200 frames = 3600 bytes (4764/4764), byte max 116.
+- **Band order [low, mid, high] measured:** byte 0 correlates +0.75 with PWV5 red, byte 1 +0.44 green, byte 2 +0.54 blue (30 tracks); PWV6 vs PWV4 d3/d4/d5: +0.87 / +0.44 / +0.48. Assumes Rekordbox RGB = red low / green mid / blue high. **Contradicts the djl-analysis text** ("mid, high, low"); LMS writer and rbox say [low, mid, high] and the numbers agree. Means low 52.6 / mid 36.9 / high 15.1; bass_share median 0.50 (0-0.75), brightness median 0.135. Byte scaling (linear vs non-linear) **not** verified — assumed linear.
+
+**3 tracks for the Rekordbox-UI check of the kind → label mapping (§2), ask the user for screenshots:**
+
+- high: "MODE_1_Need _T1C7#005_preview" – T1-C7 Records, ID 157309106, 142 BPM, masked: kinds `1,5,5,2,5,5,5,6` → Intro, Chorus×2, Up, Chorus×3, Outro (k1k2k3 `000,100,100,010,100,100,100,100`).
+- mid: "I'll Be Your Only Friend - Radio Mix" – Flamman/Abraxas, ID 235643068, 170 BPM: `1,2,3,4,9,3,5,6,3,3,3,9,8,9,3,9` → Intro, Verse1-3, Chorus, Verse2, Verse4, Verse5, Verse2×3, Chorus, Bridge, Chorus, Verse2, Chorus.
+- low: "Wanna Be Down" – Karl Seery, HZRX, ID 80581211, 130 BPM: `1,2,8,3,3,4,8,8,5,9,9,9,9,10` → Intro, Verse1, Bridge, Verse1×3, Bridge×2, Verse2, Chorus×4, Outro.
+
+**Open points:**
+
+- After unmask, `bank` ≠ 0 (230-255) and `u1` ≠ 0 in 2573 of 2584 masked files; 0 in every plain file. Entries are plausible → either real extra data in RB 7 or the mask does not cover header bytes 0x14-0x1F correctly. Deep Symmetry notes the same "unexpected" bank values. Don't rely on `bank`/`u1` from masked files.
+- High-mood variants (Intro 1/2, Up 1-3, Chorus 1/2 via k1-k3) not mapped — source adoc 404; `kind_variants` kept raw in the JSONL.
+- Label mapping unverified against the Rekordbox UI (P3 criterion).
+- The pre-existing `tests/conftest.py` import prints `LMS_TOKEN=…` into captured stdout — not from this work, but it violates the never-log rule; worth a separate fix.
+
 ### 3.5 Stage E — audio (new runner, hours)
 
 **Measured cost:** `run_full_analysis` single-process, `use_cache=False`:

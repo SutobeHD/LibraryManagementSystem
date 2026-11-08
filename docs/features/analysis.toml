@@ -167,10 +167,10 @@ status = "in_progress"
 branch = "feat/library-analysis"
 desc = "Einmal über die ganze Library: Füllgrad aller Felder, Genre-Feld-Vokabular, Atlas-Abdeckung, Übereinstimmung mit eigenen Genre-Labels, Lücken, LMS-Analyse-Cache. Nur lesen."
 depends_on = ["genre-atlas-hints"]
-paths = ["scripts/library_analysis.py", "tests/test_library_analysis.py"]
+paths = ["scripts/library_analysis.py", "tests/test_library_analysis.py", "scripts/library_measure_anlz.py", "tests/test_library_measure_anlz.py"]
 related = ["genre-atlas-hints", "insights-dashboard", "analysis-cache", "quality-tiers-audit"]
-notes = "Liest GET /api/library/tracks oder einen JSON-Abzug; schreibt tmp/library-analysis/{report.md,report.json,tracks.csv}. Erstlauf 2026-11-07: 67 % Atlas-Kandidat aus Metadaten, 21 % nur Tempo, 12 % keiner (Lücken in den Hauptgenre-Tempofenstern 142-148 und 155-170 BPM). LMS-Merkmale (LUFS, Stimmung, Phrasen) für 2 von 4648 lokalen Tracks im Cache."
-todo = ["Volle Messung nach docs/LIBRARY_ANALYSIS_HANDOVER.md: abgeleitete Merkmale, ffprobe, Rekordbox-ANLZ inkl. PSSI-Entmaskierung, Audio-Lauf (~53 CPU-Stunden), Quervergleiche", "Tempo-Fallback in genre_atlas über min-max statt nur typische Fenster (füllt 581 Tracks ohne Kandidat)", "Szene-Notizen für die häufigsten Uploader"]
+notes = "Liest GET /api/library/tracks oder einen JSON-Abzug; schreibt tmp/library-analysis/{report.md,report.json,tracks.csv}. Stage D (library_measure_anlz.py, 2026-11-08): alle 4765 Tracks in 216 s read-only gelesen, 0 Dateifehler, PSSI 54.5 % maskiert und nach XOR-Unmask überall plausibel, 9 Tracks mit Tempo-Wechseln, 0 Hot Cues in der ganzen Library, PWV6/7 = [low, mid, high] je 3 Bytes (gemessen), 1732 ANLZ-Pfade mit alter .m4a-Endung (Analyse vor der Konvertierung). Erstlauf 2026-11-07: 67 % Atlas-Kandidat aus Metadaten, 21 % nur Tempo, 12 % keiner (Lücken in den Hauptgenre-Tempofenstern 142-148 und 155-170 BPM). LMS-Merkmale (LUFS, Stimmung, Phrasen) für 2 von 4648 lokalen Tracks im Cache."
+todo = ["Volle Messung nach docs/LIBRARY_ANALYSIS_HANDOVER.md: abgeleitete Merkmale (Stage B), ffprobe-Port (Stage C), Audio-Lauf (Stage E, ~53 CPU-Stunden), Quervergleiche, Report-Abschnitte + CSV-Spalten", "Stage D offen: PSSI kind->Label gegen Rekordbox-UI an 3 Tracks prüfen (Screenshots vom User), bank/u1 nach Unmask klären, PWV6/7 Byte-Skalierung verifizieren", "Tempo-Fallback in genre_atlas über min-max statt nur typische Fenster (füllt 581 Tracks ohne Kandidat)", "Szene-Notizen für die häufigsten Uploader"]
 
 # ── Ideen ─────────────────────────────────────────────────────────────────
 

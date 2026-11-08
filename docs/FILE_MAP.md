@@ -192,6 +192,7 @@
 | `scripts/feature_map_template.html` | Self-contained mindmap page (no CDN, offline). `feature_map.py --html` injects the model at `/*__FEATURE_MAP_DATA__*/null` → `tmp/feature-map.html` |
 | `scripts/sync_genre_atlas.py` | Vendors a slim snapshot of the sibling `genre-atlas` repo (`dist/genres.json`) into `app/data/genre_atlas.json`. Source `../genre-atlas`, `$GENRE_ATLAS_DIR` or `--source`; `--check` exits 1 on drift |
 | `scripts/library_analysis.py` | Read-only whole-library report: field fill rates, derived source/format/MyTags, Genre-field vocabulary + spelling variants, genre-atlas coverage (metadata / tempo-only / none), leave-genre-out agreement with the user's labels, gaps (unmatched uploaders/labels), LMS analysis-cache coverage. Input: `GET /api/library/tracks` or `--input` dump. Output: `tmp/library-analysis/{report.md,report.json,tracks.csv}` |
+| `scripts/library_measure_anlz.py` | Stage D of `docs/LIBRARY_ANALYSIS_HANDOVER.md`: read-only reader for Rekordbox's own ANLZ files (DAT/EXT/EX2 via `anlz_safe.resolve_anlz_paths`, parsed with pyrekordbox, never rbox). Unmasks XOR-masked PSSI (routine copied from `anlz_usb_export.py:mask_pssi`), tolerant tag-by-tag parse when pyrekordbox's `Const` fields reject a tag. Per track: PQTZ grid + tempo changes, PCOB/PCO2 cues, PSSI mood + phrase sequence, PWV6/PWV7 3-band energy ([low, mid, high], measured), PWV4/5 presence, PPTH vs real path, writer guess. Output: `tmp/library-analysis/measure/anlz.jsonl` (error rows, never drops a track) |
 | `docs/features/*.toml` | Feature registry, one file per top-level area (`[area]` + `[[feature]]`). `_meta.toml` = hubs, ignore globs, parked branches, stale days, coverage globs. Schema + workflow: `.claude/rules/feature-map.md` |
 | `scripts/screenshot.py` | Playwright screenshot utility for UI at localhost:5173 |
 | `scripts/test_xml_sync.py` | Validates Rekordbox XML generation with mock track data |
@@ -247,6 +248,7 @@ Only rows added / changed in Phase-1 auth hardening are listed here. Full suite 
 | `tests/test_genre_atlas.py` | Matching logic on a synthetic atlas (normalisation, overlapping tags, scenes, BPM window/octave, BPM-only fallback, library spelling) + shipped-snapshot integrity, size < 500 KB and real-data cases (Daddy Trance, 240KM/H, bare "Raw" by tempo) |
 | `tests/test_genre_atlas_routes.py` | Both genre-atlas GET routes via httpx ASGITransport + fake db: query validation, 404, library spelling, no auth needed |
 | `tests/test_library_analysis.py` | `scripts/library_analysis.py` on a synthetic atlas: zero-as-empty fill rates, MyTag dedupe, source/format, spelling variants, coverage split, leave-genre-out agreement, gaps, analysis-cache coverage, report + CSV output |
+| `tests/test_library_measure_anlz.py` | `scripts/library_measure_anlz.py` on synthetic ANLZ bytes built in the test (PMAI header, PSSI, PQTZ/PQT2, PPTH, PCOB/PCO2, PWV5/6/7, PWVC): PSSI mask round-trip + masked/plain detection, splice leaves other bytes identical, `load_anlz` on a tmp file, tempo-change counting, phrase summary, band summary, writer guess, partial-parse error rows. No user files |
 
 ---
 
