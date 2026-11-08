@@ -58,6 +58,7 @@ function canShareDecode(player) {
 // Owns the master WaveSurfer + Overview lifecycle:
 //  - mount-once init (registers regions/timeline plugins, all event listeners)
 //  - per-track load + state reset when fullTrack.path / blobUrl changes
+//    (not the beat grid — WaveformEditor loads it per track id)
 //  - playback sync when isPlaying / isPlayingExternal changes
 //  - zoom sync (master WaveSurfer .zoom() on state change)
 //
@@ -101,7 +102,6 @@ export default function useWaveSurfer({
     setIsLooping,
     setCuts,
     setHotCues,
-    setBeatGrid,
     setHistory,
     setHistoryIdx,
     setClipboard,
@@ -409,7 +409,6 @@ export default function useWaveSurfer({
         setIsLooping(false);
         setCuts([]);
         setHotCues([]);
-        setBeatGrid([]);
         setHistory([]);
         setHistoryIdx(-1);
         setClipboard(null);
@@ -430,7 +429,6 @@ export default function useWaveSurfer({
         setIsLooping,
         setCuts,
         setHotCues,
-        setBeatGrid,
         setHistory,
         setHistoryIdx,
         setClipboard,

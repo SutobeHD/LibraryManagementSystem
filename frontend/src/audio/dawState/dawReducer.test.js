@@ -147,6 +147,15 @@ test('SET_BPM updates BPM', () => {
     assert.equal(next.bpm, 130);
 });
 
+test('SET_TEMPO_MAP drops a manual grid shift made on the previous grid', () => {
+    const shifted = dawReducer(createInitialState(), { type: 'SHIFT_GRID', payload: 0.05 });
+    assert.equal(shifted.gridOffsetSec, 0.05);
+    const map = [{ index: 0, bpm: 140, positionMs: 31, beat: 1 }];
+    const next = dawReducer(shifted, { type: 'SET_TEMPO_MAP', payload: map });
+    assert.equal(next.tempoMap, map);
+    assert.equal(next.gridOffsetSec, 0);
+});
+
 // ---------------------------------------------------------------------------
 // Undo / Redo
 // ---------------------------------------------------------------------------

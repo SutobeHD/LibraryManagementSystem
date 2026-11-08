@@ -51,8 +51,10 @@ export function transportReducer(state, action) {
         case 'SET_BPM':
             return { ...state, bpm: action.payload };
 
+        // A manual grid shift belongs to the grid it shifted — a new track's
+        // Rekordbox grid starts unshifted.
         case 'SET_TEMPO_MAP':
-            return { ...state, tempoMap: action.payload };
+            return { ...state, tempoMap: action.payload, gridOffsetSec: 0 };
 
         case 'SET_MASTER_TEMPO_MAP':
             return { ...state, masterTempoMap: action.payload };

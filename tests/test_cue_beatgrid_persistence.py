@@ -119,6 +119,36 @@ class TestFallbackToActiveDb:
         instance.save_track_cues("T1", CUES)
         assert instance.get_track_cues("T1") == CUES
 
+    def test_beatgrid_falls_back_to_the_loaded_grid(self, tmp_path, monkeypatch):
+        """Both loaders store the grid as ``beatGrid``. The getter looked up
+        ``BeatGrid``, so GET /api/track/{id}/beatgrid answered [] for every track."""
+        loaded = [{"time": 0.031, "bpm": 140.0, "beat": 1}, {"time": 0.46, "bpm": 140.0, "beat": 2}]
+        instance = RekordboxDB.__new__(RekordboxDB)
+        monkeypatch.setattr(
+            type(instance),
+            "_beatgrid_sidecar_path",
+            lambda self: tmp_path / "beatgrid_overrides.json",
+        )
+        monkeypatch.setattr(
+            type(instance), "get_track_details", lambda self, tid: {"beatGrid": loaded}
+        )
+        assert instance.get_track_beatgrid("T1") == loaded
+
+    def test_beatgrid_sidecar_override_beats_the_loaded_grid(self, tmp_path, monkeypatch):
+        instance = RekordboxDB.__new__(RekordboxDB)
+        monkeypatch.setattr(
+            type(instance),
+            "_beatgrid_sidecar_path",
+            lambda self: tmp_path / "beatgrid_overrides.json",
+        )
+        monkeypatch.setattr(
+            type(instance),
+            "get_track_details",
+            lambda self, tid: {"beatGrid": [{"time": 9.0, "bpm": 90.0, "beat": 1}]},
+        )
+        instance.save_track_beatgrid("T1", GRID)
+        assert instance.get_track_beatgrid("T1") == GRID
+
 
 class TestWriteLockCoverage:
     def test_savers_are_serialised(self):
@@ -129,9 +159,9 @@ class TestWriteLockCoverage:
         for name in ("save_track_cues", "save_track_beatgrid"):
             fn = getattr(RekordboxDB, name)
             src = inspect.getsource(fn)
-            assert "db_lock" in src or fn.__wrapped__ is not None, (
-                f"{name} is not wrapped by _serialised"
-            )
+            assert (
+                "db_lock" in src or fn.__wrapped__ is not None
+            ), f"{name} is not wrapped by _serialised"
 
 
 class TestEndpointsNoLongerFiveHundred:

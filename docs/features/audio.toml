@@ -71,6 +71,20 @@ status = "shipped"
 desc = "Studio-Tab: Web-Audio-Playback, Regionen split/ripple-delete, Track-Browser."
 paths = ["frontend/src/components/daw/DjEditDaw.jsx", "frontend/src/components/daw/DawLayout.jsx", "frontend/src/components/daw/DawToolbar.jsx", "frontend/src/components/daw/DawBrowser.jsx", "frontend/src/components/daw/useTrackLoader.js", "frontend/src/audio/DawEngine.js", "frontend/src/audio/AudioRegion.js"]
 depends_on = ["daw-state-reducer", "daw-timeline-canvas", "multiband-waveform-data"]
+todo = ["DawBrowser-Suche findet nie etwas: filtert t.title/t.artist, Library-Tracks haben Title/Artist", "DawEngine.loadAudio holt Audio absolut von localhost:8000 statt über den Vite-Proxy - Dev-Server auf anderem Port als 5173 scheitert an CORS"]
+
+[[feature]]
+id = "editor-rekordbox-beatgrid"
+group = "DAW-Editor"
+parent = "cues-beatgrid-io"
+name = "Editoren nutzen Rekordbox-Beatgrid"
+status = "unmerged"
+branch = "feat/editor-rekordbox-beatgrid"
+desc = "DAW und Waveform-Editor laden das Grid des geladenen Tracks (GET /api/track/{id}/beatgrid): erster Beat, Taktphase, Tempo-Map."
+paths = ["frontend/src/audio/beatGrid.js", "frontend/src/audio/beatGrid.test.js"]
+depends_on = ["cues-beatgrid-io", "dj-edit-daw", "wavesurfer-waveform-editor"]
+related = ["daw-timeline-canvas", "daw-cue-loop-grid-edit", "rbep-projects"]
+notes = "Gestapelt auf feat/light-library-tracks. Backend-Fix im selben Branch: get_track_beatgrid las 'BeatGrid' statt 'beatGrid', Route lieferte immer []. DAW zeichnet konstante BPM ab dem ersten Downbeat; Tempowechsel stehen nur in Tempo-Map/.rbep. Ranking-simpleMode zeichnet keine Beat-Linien, Grid wirkt dort nur auf Snap."
 
 [[feature]]
 id = "daw-state-reducer"
@@ -88,6 +102,7 @@ status = "shipped"
 desc = "Canvas-Timeline (Path2D), Beatgrid, Playhead, Scrollbar, Overview."
 paths = ["frontend/src/components/daw/DawTimeline.jsx", "frontend/src/components/daw/timeline/", "frontend/src/components/daw/DawScrollbar.jsx", "frontend/src/components/daw/WaveformOverview.jsx", "frontend/src/components/shared/WaveformMiniCanvas.jsx"]
 depends_on = ["daw-state-reducer"]
+todo = ["drawGrid färbt ab Zoom >60 px/Beat die Viertel-Linien 0,5/0,25 Beat vor und 0,25 nach jedem Taktstrich rot (Math.round(-0.25) = -0 -> % 4 === 0)"]
 
 [[feature]]
 id = "daw-cue-loop-grid-edit"
