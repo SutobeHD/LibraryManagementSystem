@@ -14,7 +14,7 @@ If this index drifts from the file system, the file system wins — re-derive wi
 ## research/
 
 ### idea
-_(none)_
+- [idea_sound-component-sorting.md](research/idea_sound-component-sorting.md) — Nach Klang-Bestandteilen sortieren (Bass, Hi-Hats, Bells, Melodie); 8 Wünsche in Wert / Ähnlichkeit / Kategorie, 10 Fragen an den User offen, Hürden gemessen in docs/LIBRARY_ANALYSIS_HANDOVER.md §9.2.1; Planung nur, kein Code vor dem Gate (2026-11-08)
 
 ### drafting
 - [drafting_performance-overhaul.md](research/drafting_performance-overhaul.md) — Speed & efficiency overhaul; Stage-1 pre-filled from 9-agent perf investigation (48 hotspots: no list virtualization, unpaginated `/api/library/tracks`, unmemoized always-mounted views, blocking USB export+scan, event-loop waveform, 30s blocking startup); 16 OQs + 8-agent research plan queued for research-explore (2026-06-09). 3 backend quick wins shipped outside pipeline on `claude/perf-backend-quickwins` (mappings cache, import-dedup resolve memo, `/api/library/tracks?light=true`) — see Lifecycle (2026-10-11)
