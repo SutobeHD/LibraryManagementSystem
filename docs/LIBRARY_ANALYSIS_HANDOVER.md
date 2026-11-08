@@ -243,6 +243,74 @@ This touches backend, engine, cache and settings UI:
 - Spawn `audio-stack-reviewer` for the engine edit, and `e2e-tester` for the settings UI.
 - Registry entry: `analysis-depth` in `docs/features/analysis.toml`.
 
+#### 3.6.1 Verified against the code (2026-11-08, HEAD `d040bad` + PR #60)
+
+`analysis_engine.py`, `anlz_sidecar.py`, `analysis_settings.py` identical on both branches. PR #60 differs in `analysis_cache.py` (adds `WaveformCache`), `main.py`, `services.py`, `analysis_db_writer.py`, `audio_analyzer.py`.
+
+**Settings storage**
+
+- `SettingsManager` = `app/services.py:772`; `DEFAULT` :774-793; `load()` :843 merges `{**DEFAULT, **sanitized}`; `save()` :873 atomic tmp + `os.replace`. `CONFIG = Path("settings.json")` is **relative to the cwd** (:773).
+- `GET /api/settings` `main.py:3015` (PR #60 :4928). `POST` :3022 → `SetReq.model_dump()` + `model_extra` → `save(payload)`: **replaces the whole file, no merge**.
+- `SetReq` (`main.py:409`) is `extra="allow", strict=True` → unknown keys persist. `analysis_quality` is therefore stored in `settings.json` today although 0 backend reads exist (both branches).
+- `get_settings()` (`app/analysis_settings.py:129`) = frozen dataclass from `RB_ANALYSIS_*` env only. Never reads `settings.json`. **`analysis_depth` does not belong there.**
+- Build: `analysis_depth: _Literal["rekordbox","high"] | None = None` in `SetReq` (pattern: `sc_download_format` :442), `"analysis_depth": "rekordbox"` in `SettingsManager.DEFAULT`.
+
+**Frontend**
+
+- "Analysis Quality" block = `SettingsAnalysis.jsx:16-37`, `set('analysis_quality', …)` :26. Default `SettingsView.jsx:69`.
+- Load: `api.get('/api/settings')` inline in `SettingsView.jsx:132`, merged `{...DEFAULTS, ...res.data}`. Save: `api.post('/api/settings', settings)` :157 sends the whole object.
+- Build: replace the block, add `analysis_depth: 'rekordbox'` to DEFAULTS, drop `analysis_quality` from DEFAULTS (optionally strip it on load).
+
+**Engine stages (`run_full_analysis` :2323-2576)**
+
+| emit | Output | Level |
+|---|---|---|
+| `load` 5/15 | load; **`compute_stereo_features` inline at :2401** (no own emit) | stereo = high |
+| `beats` 20/45 | bpm, beats, downbeat, grid_confidence | RB |
+| `key` 50/60 | key | RB |
+| `waveform` 65/80 | `generate_waveform_data(y, sr)` | RB |
+| `phrases` 82/88 | phrases | RB |
+| `tempo_grid` 89 | tempo_anchors | RB |
+| `pvbr` 91 | pvbr | RB |
+| `lufs` 93 | lufs, replay_gain | high |
+| `mood` 94 | `detect_mood(y, sr, bpm, lufs)`, `hint_genre` | high |
+| `cues` 95 | hot/memory cues from phrases + beats | RB |
+| (no emit) | peak = `max(abs(y))` :2490 | ~free; keep in RB |
+
+- **No RB stage depends on a high output.** `detect_phrases` computes its own per-phrase `mood` from energy (:1427), independent of track mood → PSSI unaffected (`anlz_writer.py:602`). The split is clean.
+- Downstream defaults when lufs/peak are missing: `analysis_db_writer.py:159` (-100), `services.py:1016-1017`, :1255-1256, :1362-1363 → import metadata Loudness/Peak = 0 at RB depth.
+
+**Cache (`analysis_cache.py`)**
+
+- Key = absolute path; valid if `version` + `size` + `mtime` (±1 s) match (:65-78). `USE_CONTENT_HASH=False` (:34) → the toml desc "per Content-Hash" is wrong. `ANALYSIS_VERSION = 3` (:32).
+- `get` returns the stored dict as-is; `put` is per path (one entry per file). **Errors are never cached** (`put` only in the success branch :2563).
+- Existing bug, same root as the depth problem: on a hit, `auto_hot_cues` / `auto_memory_cues` / `memory_cue_grid` arguments are ignored.
+- Build: store `result["depth"]`; `get(file_path, min_depth)` with rank `{"rekordbox": 0, "high": 1}`; entries without `depth` count as `high` (today's result already carries lufs/mood/stereo) — or bump `ANALYSIS_VERSION` to 4 (full re-analysis). **A RB run must not overwrite an existing high entry** (`put` guard) — not in the original design.
+
+**Callers of `run_full_analysis`** (handover list was incomplete)
+
+| Caller | HEAD | PR #60 | Settings today |
+|---|---|---|---|
+| `analysis_db_writer` | :126 direct, same process | :204 `_run_analysis` via executor (entry :137, batch :364) | none |
+| `anlz_sidecar` | :52 | :52 | none |
+| `audio_analyzer.analyze_track` / `analyze_sync` | :85 / :115 | :134 / :165 | `mode` speed (default, `main.py:590`) → `duration_cap=120` → **no cache** |
+| `services.BeatAnalyzer.analyze` | import :948, **call :972** | import :1067, **call :1091** | none |
+| `soundcloud_downloader` | **:1453** | **:1525** | none — **missing from the original list** |
+| `AnalysisEngine.submit` / `analyze_sync` | :2206 / :2235 | same | `submit` has **no callers**; `run_quick_analysis` only called from `submit` → dead |
+
+- `submit` passes args **positionally** `(file_path, None, True, None, hot, mem, grid)` — append `depth` as the **last** keyword parameter or the positions shift.
+- Analysis runs in worker processes; reading `settings.json` there depends on the relative cwd. Read `depth` **once per job in the main process** and pass it: `analyze_batch` / `analyze_and_save`, import path `services.py` ~:1263 / :1382 (PR #60), SC download, sidecar. `write_companion_anlz` (`services.py:1451`) re-analyses with `None` → becomes a cache hit with the depth-aware cache.
+- `audio_analyzer` `mode` speed/accuracy is a **second half-dead quality knob** (120 s cap, no cache). Merge into depth or remove — decision needed.
+
+**Open decisions for the user (§3.6)**
+
+1. Keep `peak` in the RB level (near-free, feeds import "Peak")?
+2. Import "Loudness" at RB depth: write 0 or compute lufs anyway?
+3. Old cache entries: treat as `high`, or bump `ANALYSIS_VERSION` → 4 (full re-analysis)?
+4. `audio_analyzer` `mode` speed/accuracy: fold into depth or delete?
+5. Fix the cue-toggle cache bug in the same change?
+6. Actively strip `analysis_quality` from existing `settings.json` files?
+
 ### 3.7 Stage F — network (only if the user asks)
 
 These are optional and not started without the user's say:
