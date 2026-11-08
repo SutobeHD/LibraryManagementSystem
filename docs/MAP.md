@@ -104,6 +104,8 @@
 | `frontend/src/audio/dawState/dawReducer.test.js` | Tests for the composed dawReducer (DawState.js barrel) — Phase 4B split. |
 | `frontend/src/audio/dawState/helpers.js` | DawState helpers — pure utilities and the initial-state factory. |
 | `frontend/src/audio/dawState/history.js` | historyReducer — undo / redo full-state snapshots + HYDRATE. |
+| `frontend/src/audio/dawState/playheadStore.js` | playheadStore — live transport position, kept outside the DAW reducer. |
+| `frontend/src/audio/dawState/playheadStore.test.js` | Tests for the live playhead store (playheadStore.js). |
 | `frontend/src/audio/dawState/regions.js` | regionsReducer — region create / split / move / delete / resize / clipboard. |
 | `frontend/src/audio/dawState/selection.js` | selectionReducer — region selection set and time-range selection. |
 | `frontend/src/audio/dawState/transport.js` | transportReducer — playhead, BPM, zoom/scroll, snap-grid, edit-mode, project metadata, and audio-source actio… |
@@ -128,6 +130,7 @@
 | `frontend/src/components/daw/useDawKeyhandlers.js` | useDawKeyhandlers — Pure key-event handlers for the DJ Edit DAW. |
 | `frontend/src/components/daw/useDawProject.js` | useDawProject — Project persistence hook for the DJ Edit DAW Owns: • File input ref used by the hidden <input… |
 | `frontend/src/components/daw/useDawShortcuts.js` | useDawShortcuts — keyboard-shortcut binding for the DJ Edit DAW. |
+| `frontend/src/components/daw/usePlayheadClock.js` | usePlayheadClock — owns the live playhead store for one DAW instance. |
 | `frontend/src/components/daw/useTrackLoader.js` | useTrackLoader — Effect hook that hydrates DAW state when activeTrack changes. |
 | `frontend/src/components/downloads/recognitionCopy.js` | Copy for the download recognizer (artist hub T-31): who a downloaded track is by, whether the library knows t… |
 | `frontend/src/components/downloads/recognitionCopy.test.js` | node:test — `node --test frontend/src/components/downloads/recognitionCopy.test.js` |
