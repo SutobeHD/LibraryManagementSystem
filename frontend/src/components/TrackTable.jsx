@@ -1,6 +1,5 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
-    Music,
     Star,
     X,
     Check,
@@ -15,7 +14,6 @@ import {
     ListMusic,
     FolderOpen,
     Copy,
-    Info,
     Tag,
     UserPlus,
 } from 'lucide-react';
@@ -27,6 +25,7 @@ import { assignArtistModal } from './artistHub/AssignArtistModal';
 import { log } from '../utils/log';
 import { TRACK_TABLE_TEXT_COL_MIN_PX } from '../config/constants';
 import { openExternal } from '../utils/openExternal';
+import { useVirtualRows } from '../hooks/useVirtualRows';
 
 const DEFAULT_COLUMNS = [
     { id: 'index', label: '#', width: '32px', align: 'right', fixed: true },
@@ -117,6 +116,63 @@ const getKeyColor = (key) => {
     return CAMELOT_COLORS[cleanKey] || '#888';
 };
 
+const formatTime = (seconds) => {
+    if (!seconds) return '-';
+    const m = Math.floor(seconds / 60);
+    const s = Math.floor(seconds % 60);
+    return `${m}:${s.toString().padStart(2, '0')}`;
+};
+
+const trackIdOf = (t) => t.id || t.ID;
+
+// The Rekordbox skin stripes rows with :nth-child(even); an even window start keeps
+// each track's stripe while the window slides.
+const ROW_PARITY = 2;
+
+const ROW_STYLE = { borderBottom: '1px solid var(--line-subtle)' };
+const SPACER_CELL_STYLE = { padding: 0, border: 0 };
+const NO_OVERRIDES = new Map();
+
+// Local edits (rating, colour, BPM/Key) live in an id -> {base, fields, merged} map
+// instead of being written into the `tracks` prop objects. `base` is the prop object
+// the edit was made on: once the parent hands over a fresh object for that id (a
+// reload), the server copy wins and the override is dropped.
+const MERGED_BASE = new WeakMap();
+
+const baseOf = (track) => MERGED_BASE.get(track) || track;
+
+function withOverride(map, base, fields) {
+    const id = trackIdOf(base);
+    const cur = map.get(id);
+    const nextFields = { ...(cur && cur.base === base ? cur.fields : null), ...fields };
+    for (const k of Object.keys(nextFields)) {
+        if (nextFields[k] === base[k]) delete nextFields[k];
+    }
+    const next = new Map(map);
+    if (Object.keys(nextFields).length === 0) {
+        next.delete(id);
+    } else {
+        const merged = { ...base, ...nextFields };
+        MERGED_BASE.set(merged, base);
+        next.set(id, { base, fields: nextFields, merged });
+    }
+    return next;
+}
+
+const sameItems = (a, b) => {
+    if (a === b) return true;
+    if (!a || !b || a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i += 1) {
+        if (a[i] !== b[i]) return false;
+    }
+    return true;
+};
+
+const allowDrop = (e) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+};
+
 const TrackTable = ({
     tracks = [],
     onSelectTrack,
@@ -152,6 +208,7 @@ const TrackTable = ({
     });
     const [headerMenu, setHeaderMenu] = useState(null);
     const [contextMenu, setContextMenu] = useState(null);
+    const [overrides, setOverrides] = useState(NO_OVERRIDES);
 
     useEffect(() => {
         try {
@@ -169,6 +226,9 @@ const TrackTable = ({
         });
     };
 
+    // One Set per column change — memoised rows compare it by identity.
+    const visible = useMemo(() => new Set(visibleColumns), [visibleColumns]);
+
     // table-fixed gives %-width columns only what the px columns leave over; with many
     // columns visible Title/Artist/Album shrank to nothing. A min width from the visible
     // columns makes the container scroll horizontally instead.
@@ -177,37 +237,68 @@ const TrackTable = ({
             typeof w === 'string' && w.endsWith('px')
                 ? parseInt(w, 10)
                 : TRACK_TABLE_TEXT_COL_MIN_PX;
-        const own = DEFAULT_COLUMNS.filter((c) => visibleColumns.includes(c.id));
+        const own = DEFAULT_COLUMNS.filter((c) => visible.has(c.id));
         return [...own, ...(customColumns || [])].reduce((sum, c) => sum + px(c.width), 0);
-    }, [visibleColumns, customColumns]);
+    }, [visible, customColumns]);
+
+    const colCount = useMemo(
+        () =>
+            DEFAULT_COLUMNS.reduce((n, c) => n + (visible.has(c.id) ? 1 : 0), 0) +
+            (customColumns?.length || 0),
+        [visible, customColumns]
+    );
 
     const sortedTracks = useMemo(() => {
-        if (!sortConfig.key) return tracks;
+        const { key, direction } = sortConfig;
+        if (!key) return tracks;
+        const dir = direction === 'asc' ? 1 : -1;
 
-        return [...tracks].sort((a, b) => {
-            let aVal = a[sortConfig.key];
-            let bVal = b[sortConfig.key];
-
-            // Handle numeric values (BPM, Rating, etc)
-            if (typeof aVal === 'number' && typeof bVal === 'number') {
-                return sortConfig.direction === 'asc' ? aVal - bVal : bVal - aVal;
-            }
-
-            // Fallback to string comparison
-            aVal = String(aVal || '').toLowerCase();
-            bVal = String(bVal || '').toLowerCase();
-
-            if (aVal < bVal) return sortConfig.direction === 'asc' ? -1 : 1;
-            if (aVal > bVal) return sortConfig.direction === 'asc' ? 1 : -1;
+        // Sort keys computed once per track, not twice per comparison (20k tracks ≈ 600k
+        // comparisons). Same order as before: numeric when both values are numbers,
+        // else lower-cased string compare; Array.prototype.sort is stable.
+        const decorated = tracks.map((t) => {
+            const v = t[key];
+            return {
+                t,
+                num: typeof v === 'number' ? v : null,
+                str: String(v || '').toLowerCase(),
+            };
+        });
+        decorated.sort((a, b) => {
+            if (a.num !== null && b.num !== null) return (a.num - b.num) * dir;
+            if (a.str < b.str) return -dir;
+            if (a.str > b.str) return dir;
             return 0;
         });
+        return decorated.map((d) => d.t);
     }, [tracks, sortConfig]);
 
+    // Report the displayed order only when it really changed — not on every render a
+    // caller's inline callback or a same-content array would otherwise trigger.
+    const sortedCbRef = useRef(onSortedTracksChange);
+    useLayoutEffect(() => {
+        sortedCbRef.current = onSortedTracksChange;
+    });
+    const lastSentRef = useRef(null);
+    const hasSortedCb = !!onSortedTracksChange;
     useEffect(() => {
-        if (onSortedTracksChange) {
-            onSortedTracksChange(sortedTracks);
-        }
-    }, [sortedTracks, onSortedTracksChange]);
+        if (!hasSortedCb || sameItems(lastSentRef.current, sortedTracks)) return;
+        lastSentRef.current = sortedTracks;
+        sortedCbRef.current?.(sortedTracks);
+    }, [sortedTracks, hasSortedCb]);
+
+    // Drop overrides whose prop object is gone (list reloaded or the track left it).
+    useEffect(() => {
+        setOverrides((prev) => {
+            if (prev.size === 0) return prev;
+            const present = new Set(tracks);
+            const next = new Map();
+            prev.forEach((entry, id) => {
+                if (present.has(entry.base)) next.set(id, entry);
+            });
+            return next.size === prev.size ? prev : next;
+        });
+    }, [tracks]);
 
     const toggleColumn = (colId) => {
         setVisibleColumns((prev) => {
@@ -226,13 +317,6 @@ const TrackTable = ({
         return () => window.removeEventListener('click', handleClick);
     }, []);
 
-    const formatTime = (seconds) => {
-        if (!seconds) return '-';
-        const m = Math.floor(seconds / 60);
-        const s = Math.floor(seconds % 60);
-        return `${m}:${s.toString().padStart(2, '0')}`;
-    };
-
     // window.open is refused inside the desktop app; openExternal goes through the
     // shell plugin there and falls back to a new tab in the browser.
     const openSoundCloud = (track) => {
@@ -244,9 +328,144 @@ const TrackTable = ({
         });
     };
 
+    // Row handlers are created once and read the current props through a ref, so the
+    // memoised rows never re-render because a parent passed a fresh inline callback.
+    const latest = useRef({});
+    useLayoutEffect(() => {
+        latest.current = { onSelectTrack, onEditTrack, onPlay, onReorder, onRemove, playlistId };
+    });
+
+    const rowActions = useMemo(() => {
+        const applyLocal = (track, fields) => {
+            const base = baseOf(track);
+            if (trackIdOf(base) == null) return;
+            setOverrides((m) => withOverride(m, base, fields));
+        };
+
+        // Shown at once; rolled back if the save fails and no newer edit replaced it.
+        const persist = (track, fields, label) => {
+            const base = baseOf(track);
+            const id = trackIdOf(base);
+            const previous = {};
+            for (const k of Object.keys(fields)) previous[k] = track[k];
+            applyLocal(track, fields);
+            api.patch('/api/tracks/batch', { track_ids: [id], updates: fields }).catch((err) => {
+                console.error(`[TrackTable] ${label} save failed`, err);
+                setOverrides((m) => {
+                    const cur = m.get(id);
+                    if (!cur || cur.base !== base) return m;
+                    const rollback = {};
+                    for (const k of Object.keys(fields)) {
+                        const now = k in cur.fields ? cur.fields[k] : base[k];
+                        if (now === fields[k]) rollback[k] = previous[k];
+                    }
+                    return Object.keys(rollback).length ? withOverride(m, base, rollback) : m;
+                });
+                toast.error(`${label} speichern fehlgeschlagen`);
+            });
+        };
+
+        return {
+            select(track, key) {
+                setSelectedKey(key);
+                latest.current.onSelectTrack?.(track);
+            },
+            activate(track) {
+                const { onPlay: play, onEditTrack: edit } = latest.current;
+                if (play) play(track);
+                else edit?.(track);
+            },
+            play(track) {
+                latest.current.onPlay?.(track);
+            },
+            openMenu(e, track) {
+                e.preventDefault();
+                setContextMenu({ x: e.clientX, y: e.clientY, track });
+                setHeaderMenu(null);
+            },
+            dragStart(e, track, index) {
+                if (!latest.current.onReorder) return;
+                e.dataTransfer.setData(
+                    'application/json',
+                    JSON.stringify({
+                        type: 'track',
+                        playlistId: latest.current.playlistId,
+                        trackId: track.id,
+                        index,
+                    })
+                );
+                e.dataTransfer.effectAllowed = 'move';
+            },
+            drop(e, track, index) {
+                e.preventDefault();
+                const { onReorder: reorder, playlistId: pid } = latest.current;
+                try {
+                    const data = JSON.parse(e.dataTransfer.getData('application/json'));
+                    if (
+                        reorder &&
+                        data.type === 'track' &&
+                        data.playlistId === pid &&
+                        data.trackId !== track.id
+                    ) {
+                        reorder(data.trackId, index);
+                    }
+                } catch (err) {
+                    // Drop payload wasn't our JSON shape (e.g. native OS drag) — ignore.
+                    log.debug('TrackTable drop JSON parse failed', err);
+                }
+            },
+            remove(track) {
+                latest.current.onRemove?.(track.id);
+            },
+            rate(track, star) {
+                // Toggle: clicking the current rating clears it
+                const newRating = (track.Rating || 0) === star ? 0 : star;
+                persist(track, { Rating: newRating }, 'Rating');
+            },
+            color(track, colorId) {
+                persist(track, { ColorID: String(colorId) }, 'Color');
+            },
+            // Saved elsewhere (context-menu BPM/Key edit) — just show it.
+            patched: applyLocal,
+        };
+    }, []);
+
+    const { scrollRef, bodyRef, start, end, offsetTop, offsetBottom } = useVirtualRows({
+        rowCount: sortedTracks.length,
+        align: ROW_PARITY,
+        resetKey: playlistId,
+    });
+
+    const canReorder = !!onReorder;
+    const canRemove = !!onRemove;
+    const rows = [];
+    for (let index = start; index < end; index += 1) {
+        const t = sortedTracks[index];
+        const key = t.id || index;
+        const ov = overrides.size ? overrides.get(trackIdOf(t)) : undefined;
+        rows.push(
+            <TrackRow
+                key={key}
+                track={ov && ov.base === t ? ov.merged : t}
+                index={index}
+                rowKey={key}
+                selected={selectedKey === key}
+                visible={visible}
+                customColumns={customColumns}
+                canReorder={canReorder}
+                canRemove={canRemove}
+                actions={rowActions}
+            />
+        );
+    }
+
     return (
         <div
+            ref={scrollRef}
             className={`track-table h-full overflow-auto relative ${variant === 'default' ? 'bg-mx-shell border border-line-subtle rounded-mx-md mx-2 mb-2 pb-20' : ''}`}
+            // Spacer heights change as the window slides; browser scroll anchoring would
+            // "correct" scrollTop against that and make the list jump.
+            style={{ overflowAnchor: 'none' }}
         >
             <table
                 className="w-full text-left border-collapse table-fixed"
@@ -267,7 +486,7 @@ const TrackTable = ({
                         }}
                     >
                         {DEFAULT_COLUMNS.map((col) => {
-                            if (!visibleColumns.includes(col.id)) return null;
+                            if (!visible.has(col.id)) return null;
                             return (
                                 <th
                                     key={col.id}
@@ -309,259 +528,23 @@ const TrackTable = ({
                             ))}
                     </tr>
                 </thead>
-                <tbody>
-                    {sortedTracks.map((t, index) => (
-                        <tr
-                            key={t.id || index}
-                            onClick={() => {
-                                setSelectedKey(t.id || index);
-                                onSelectTrack && onSelectTrack(t);
-                            }}
-                            onDoubleClick={() =>
-                                onPlay ? onPlay(t) : onEditTrack && onEditTrack(t)
-                            }
-                            onContextMenu={(e) => {
-                                e.preventDefault();
-                                setContextMenu({ x: e.clientX, y: e.clientY, track: t });
-                                setHeaderMenu(null);
-                            }}
-                            className={`tt-row group transition-colors cursor-pointer text-[12px] hover:bg-mx-hover ${selectedKey === (t.id || index) ? 'tt-selected' : ''}`}
-                            style={{ borderBottom: '1px solid var(--line-subtle)' }}
-                            draggable={!!onReorder}
-                            onDragStart={(e) => {
-                                if (onReorder) {
-                                    e.dataTransfer.setData(
-                                        'application/json',
-                                        JSON.stringify({
-                                            type: 'track',
-                                            playlistId,
-                                            trackId: t.id,
-                                            index,
-                                        })
-                                    );
-                                    e.dataTransfer.effectAllowed = 'move';
-                                }
-                            }}
-                            onDragOver={(e) => {
-                                e.preventDefault();
-                                e.dataTransfer.dropEffect = 'move';
-                            }}
-                            onDrop={(e) => {
-                                e.preventDefault();
-                                try {
-                                    const data = JSON.parse(
-                                        e.dataTransfer.getData('application/json')
-                                    );
-                                    if (
-                                        onReorder &&
-                                        data.type === 'track' &&
-                                        data.playlistId === playlistId &&
-                                        data.trackId !== t.id
-                                    ) {
-                                        onReorder(data.trackId, index);
-                                    }
-                                } catch (err) {
-                                    // Drop payload wasn't our JSON shape (e.g. native OS drag) — ignore.
-                                    log.debug('TrackTable drop JSON parse failed', err);
-                                }
-                            }}
-                        >
-                            {visibleColumns.includes('index') && (
-                                <td className="tt-num p-1 font-mono text-ink-muted text-right pr-2 text-[11px]">
-                                    {index + 1}
-                                </td>
-                            )}
-                            {visibleColumns.includes('preview') && (
-                                <td
-                                    className="p-1 text-center opacity-50 hover:opacity-100 cursor-pointer hover:text-amber2"
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        onPlay && onPlay(t);
-                                    }}
-                                >
-                                    <Play size={12} className="mx-auto fill-current" />
-                                </td>
-                            )}
-                            {visibleColumns.includes('artwork') && (
-                                <td className="p-1 px-2 text-center w-[48px]">
-                                    {t.Artwork ? (
-                                        <div className="tt-art w-9 h-9 rounded-mx-sm overflow-hidden mx-auto bg-mx-card border border-line-subtle relative group-hover:scale-105 transition-transform">
-                                            <img
-                                                src={`${api.defaults.baseURL || ''}/api/artwork?path=${encodeURIComponent(t.Artwork)}`}
-                                                alt={t.Title}
-                                                className="w-full h-full object-cover"
-                                                loading="lazy"
-                                                onError={(e) => {
-                                                    e.target.style.display = 'none';
-                                                    e.target.parentElement.classList.add(
-                                                        'flex',
-                                                        'items-center',
-                                                        'justify-center'
-                                                    );
-                                                    if (
-                                                        !e.target.parentElement.querySelector('svg')
-                                                    ) {
-                                                        e.target.parentElement.innerHTML =
-                                                            '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-slate-700"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>';
-                                                    }
-                                                }}
-                                            />
-                                        </div>
-                                    ) : (
-                                        <div className="tt-art w-9 h-9 bg-mx-card rounded-mx-sm border border-line-subtle flex items-center justify-center mx-auto text-ink-placeholder">
-                                            <ImageIcon size={14} />
-                                        </div>
-                                    )}
-                                </td>
-                            )}
-                            {visibleColumns.includes('Title') && (
-                                <td
-                                    className="tt-title p-1 px-2 font-medium text-ink-primary group-hover:text-amber2 transition-colors truncate"
-                                    title={t.Title}
-                                >
-                                    {t.Title}
-                                </td>
-                            )}
-                            {visibleColumns.includes('Artist') && (
-                                <td className="p-1 text-ink-secondary truncate" title={t.Artist}>
-                                    {t.Artist}
-                                </td>
-                            )}
-                            {visibleColumns.includes('Album') && (
-                                <td className="p-1 text-ink-muted truncate" title={t.Album}>
-                                    {t.Album || '-'}
-                                </td>
-                            )}
-                            {visibleColumns.includes('BPM') && (
-                                <td className="tt-bpm p-1 text-amber2 text-center font-mono">
-                                    {t.BPM ? parseFloat(t.BPM).toFixed(2) : '-'}
-                                </td>
-                            )}
-                            {visibleColumns.includes('Key') && (
-                                <td className="p-1 text-center font-mono font-bold">
-                                    <span
-                                        className="tt-key-badge px-2 py-0.5 rounded-full text-[9px] shadow-lg"
-                                        style={{
-                                            backgroundColor: `${getKeyColor(t.Key)}22`, // 22 is ~13% opacity
-                                            color: getKeyColor(t.Key),
-                                            border: `1px solid ${getKeyColor(t.Key)}44`,
-                                        }}
-                                    >
-                                        {t.Key || '-'}
-                                    </span>
-                                </td>
-                            )}
-                            {visibleColumns.includes('Color') && (
-                                <td className="p-1 text-center">
-                                    <ColorDot
-                                        track={t}
-                                        onChange={(newColor) => {
-                                            api.patch('/api/tracks/batch', {
-                                                track_ids: [t.id || t.ID],
-                                                updates: { ColorID: newColor },
-                                            })
-                                                .then(() => {
-                                                    t.ColorID = String(newColor);
-                                                })
-                                                .catch(() =>
-                                                    toast.error('Color speichern fehlgeschlagen')
-                                                );
-                                        }}
-                                    />
-                                </td>
-                            )}
-                            {visibleColumns.includes('Rating') && (
-                                <td className="p-1 text-center">
-                                    <div className="tt-rating flex justify-center gap-0.5 opacity-40 group-hover:opacity-100">
-                                        {[1, 2, 3, 4, 5].map((star) => (
-                                            <Star
-                                                key={star}
-                                                size={11}
-                                                fill={
-                                                    star <= (t.Rating || 0)
-                                                        ? 'currentColor'
-                                                        : 'none'
-                                                }
-                                                className={`cursor-pointer transition-transform hover:scale-125 ${
-                                                    star <= (t.Rating || 0)
-                                                        ? 'text-amber2'
-                                                        : 'text-ink-placeholder hover:text-amber2/60'
-                                                }`}
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    // Toggle: clicking the current rating clears it
-                                                    const newRating =
-                                                        (t.Rating || 0) === star ? 0 : star;
-                                                    api.patch('/api/tracks/batch', {
-                                                        track_ids: [t.id || t.ID],
-                                                        updates: { Rating: newRating },
-                                                    })
-                                                        .then(() => {
-                                                            // Optimistic local update so the UI reacts immediately
-                                                            t.Rating = newRating;
-                                                        })
-                                                        .catch(() =>
-                                                            toast.error(
-                                                                'Rating speichern fehlgeschlagen'
-                                                            )
-                                                        );
-                                                }}
-                                            />
-                                        ))}
-                                    </div>
-                                </td>
-                            )}
-                            {[
-                                { id: 'Bitrate', value: t.Bitrate || '-' },
-                                { id: 'PlayCount', value: t.PlayCount || '-' },
-                                { id: 'Composer', value: t.Composer },
-                                { id: 'Remixer', value: t.Remixer },
-                            ].map(
-                                (field) =>
-                                    visibleColumns.includes(field.id) && (
-                                        <td
-                                            key={field.id}
-                                            className={`p-1 truncate ${field.id === 'Bitrate' || field.id === 'PlayCount' ? 'text-center font-mono text-ink-secondary' : 'text-ink-muted'}`}
-                                            title={field.value}
-                                        >
-                                            {field.value || '-'}
-                                        </td>
-                                    )
-                            )}
-                            {visibleColumns.includes('TotalTime') && (
-                                <td className="tt-time p-1 text-ink-secondary text-center font-mono">
-                                    {formatTime(t.TotalTime)}
-                                </td>
-                            )}
-                            {visibleColumns.includes('DateAdded') && (
-                                <td className="p-1 text-ink-muted text-right pr-2 text-[10px] font-mono">
-                                    {t.DateAdded || '-'}
-                                </td>
-                            )}
-                            {customColumns &&
-                                customColumns.map((col) => (
-                                    <td key={col.id} className="p-1">
-                                        {col.render ? col.render(t) : '-'}
-                                    </td>
-                                ))}
-                            {visibleColumns.includes('actions') && (
-                                <td className="p-1 text-right pr-4">
-                                    {onRemove && (
-                                        <button
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                onRemove(t.id);
-                                            }}
-                                            className="p-1 px-2 hover:bg-bad/10 rounded-mx-sm text-bad/60 hover:text-bad transition-all opacity-0 group-hover:opacity-100"
-                                        >
-                                            <X size={12} />
-                                        </button>
-                                    )}
-                                </td>
-                            )}
+                {/* Spacers live in their own row groups so the rows' :nth-child count
+                    starts at the first mounted track. */}
+                {offsetTop > 0 && (
+                    <tbody aria-hidden="true">
+                        <tr style={{ height: offsetTop }}>
+                            <td colSpan={colCount} style={SPACER_CELL_STYLE} />
                         </tr>
-                    ))}
-                </tbody>
+                    </tbody>
+                )}
+                <tbody ref={bodyRef}>{rows}</tbody>
+                {offsetBottom > 0 && (
+                    <tbody aria-hidden="true">
+                        <tr style={{ height: offsetBottom }}>
+                            <td colSpan={colCount} style={SPACER_CELL_STYLE} />
+                        </tr>
+                    </tbody>
+                )}
             </table>
 
             {/* Column Menu */}
@@ -583,9 +566,7 @@ const TrackTable = ({
                                 className="w-full flex items-center justify-between px-3 py-1.5 hover:bg-mx-hover text-[12px] text-ink-secondary hover:text-ink-primary transition-colors"
                             >
                                 <span>{col.label}</span>
-                                {visibleColumns.includes(col.id) && (
-                                    <Check size={12} className="text-amber2" />
-                                )}
+                                {visible.has(col.id) && <Check size={12} className="text-amber2" />}
                             </button>
                         );
                     })}
@@ -605,11 +586,199 @@ const TrackTable = ({
                     availablePlaylists={availablePlaylists}
                     setContextMenu={setContextMenu}
                     contextActions={contextActions}
+                    onPatched={rowActions.patched}
                 />
             )}
         </div>
     );
 };
+
+const ArtworkCell = ({ path, title }) => {
+    // Remember which path failed, so a row reused for another track tries again.
+    const [failedPath, setFailedPath] = useState(null);
+    if (!path || failedPath === path) {
+        return (
+            <div className="tt-art w-9 h-9 bg-mx-card rounded-mx-sm border border-line-subtle flex items-center justify-center mx-auto text-ink-placeholder">
+                <ImageIcon size={14} />
+            </div>
+        );
+    }
+    return (
+        <div className="tt-art w-9 h-9 rounded-mx-sm overflow-hidden mx-auto bg-mx-card border border-line-subtle relative group-hover:scale-105 transition-transform">
+            <img
+                src={`${api.defaults.baseURL || ''}/api/artwork?path=${encodeURIComponent(path)}`}
+                alt={title}
+                className="w-full h-full object-cover"
+                loading="lazy"
+                onError={() => setFailedPath(path)}
+            />
+        </div>
+    );
+};
+
+const RATING_STARS = [1, 2, 3, 4, 5];
+
+// One row. Memoised: it re-renders only when its own track object, position,
+// selection or the column set changes — handlers come from a stable `actions` object.
+const TrackRow = memo(function TrackRow({
+    track: t,
+    index,
+    rowKey,
+    selected,
+    visible,
+    customColumns,
+    canReorder,
+    canRemove,
+    actions,
+}) {
+    return (
+        <tr
+            onClick={() => actions.select(t, rowKey)}
+            onDoubleClick={() => actions.activate(t)}
+            onContextMenu={(e) => actions.openMenu(e, t)}
+            className={`tt-row group transition-colors cursor-pointer text-[12px] hover:bg-mx-hover ${selected ? 'tt-selected' : ''}`}
+            style={ROW_STYLE}
+            draggable={canReorder}
+            onDragStart={(e) => actions.dragStart(e, t, index)}
+            onDragOver={allowDrop}
+            onDrop={(e) => actions.drop(e, t, index)}
+        >
+            {visible.has('index') && (
+                <td className="tt-num p-1 font-mono text-ink-muted text-right pr-2 text-[11px]">
+                    {index + 1}
+                </td>
+            )}
+            {visible.has('preview') && (
+                <td
+                    className="p-1 text-center opacity-50 hover:opacity-100 cursor-pointer hover:text-amber2"
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        actions.play(t);
+                    }}
+                >
+                    <Play size={12} className="mx-auto fill-current" />
+                </td>
+            )}
+            {visible.has('artwork') && (
+                <td className="p-1 px-2 text-center w-[48px]">
+                    <ArtworkCell path={t.Artwork} title={t.Title} />
+                </td>
+            )}
+            {visible.has('Title') && (
+                <td
+                    className="tt-title p-1 px-2 font-medium text-ink-primary group-hover:text-amber2 transition-colors truncate"
+                    title={t.Title}
+                >
+                    {t.Title}
+                </td>
+            )}
+            {visible.has('Artist') && (
+                <td className="p-1 text-ink-secondary truncate" title={t.Artist}>
+                    {t.Artist}
+                </td>
+            )}
+            {visible.has('Album') && (
+                <td className="p-1 text-ink-muted truncate" title={t.Album}>
+                    {t.Album || '-'}
+                </td>
+            )}
+            {visible.has('BPM') && (
+                <td className="tt-bpm p-1 text-amber2 text-center font-mono">
+                    {t.BPM ? parseFloat(t.BPM).toFixed(2) : '-'}
+                </td>
+            )}
+            {visible.has('Key') && (
+                <td className="p-1 text-center font-mono font-bold">
+                    <span
+                        className="tt-key-badge px-2 py-0.5 rounded-full text-[9px] shadow-lg"
+                        style={{
+                            backgroundColor: `${getKeyColor(t.Key)}22`, // 22 is ~13% opacity
+                            color: getKeyColor(t.Key),
+                            border: `1px solid ${getKeyColor(t.Key)}44`,
+                        }}
+                    >
+                        {t.Key || '-'}
+                    </span>
+                </td>
+            )}
+            {visible.has('Color') && (
+                <td className="p-1 text-center">
+                    <ColorDot colorId={t.ColorID} onPick={(c) => actions.color(t, c)} />
+                </td>
+            )}
+            {visible.has('Rating') && (
+                <td className="p-1 text-center">
+                    <div className="tt-rating flex justify-center gap-0.5 opacity-40 group-hover:opacity-100">
+                        {RATING_STARS.map((star) => (
+                            <Star
+                                key={star}
+                                size={11}
+                                fill={star <= (t.Rating || 0) ? 'currentColor' : 'none'}
+                                className={`cursor-pointer transition-transform hover:scale-125 ${
+                                    star <= (t.Rating || 0)
+                                        ? 'text-amber2'
+                                        : 'text-ink-placeholder hover:text-amber2/60'
+                                }`}
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    actions.rate(t, star);
+                                }}
+                            />
+                        ))}
+                    </div>
+                </td>
+            )}
+            {[
+                { id: 'Bitrate', value: t.Bitrate || '-' },
+                { id: 'PlayCount', value: t.PlayCount || '-' },
+                { id: 'Composer', value: t.Composer },
+                { id: 'Remixer', value: t.Remixer },
+            ].map(
+                (field) =>
+                    visible.has(field.id) && (
+                        <td
+                            key={field.id}
+                            className={`p-1 truncate ${field.id === 'Bitrate' || field.id === 'PlayCount' ? 'text-center font-mono text-ink-secondary' : 'text-ink-muted'}`}
+                            title={field.value}
+                        >
+                            {field.value || '-'}
+                        </td>
+                    )
+            )}
+            {visible.has('TotalTime') && (
+                <td className="tt-time p-1 text-ink-secondary text-center font-mono">
+                    {formatTime(t.TotalTime)}
+                </td>
+            )}
+            {visible.has('DateAdded') && (
+                <td className="p-1 text-ink-muted text-right pr-2 text-[10px] font-mono">
+                    {t.DateAdded || '-'}
+                </td>
+            )}
+            {customColumns &&
+                customColumns.map((col) => (
+                    <td key={col.id} className="p-1">
+                        {col.render ? col.render(t) : '-'}
+                    </td>
+                ))}
+            {visible.has('actions') && (
+                <td className="p-1 text-right pr-4">
+                    {canRemove && (
+                        <button
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                actions.remove(t);
+                            }}
+                            className="p-1 px-2 hover:bg-bad/10 rounded-mx-sm text-bad/60 hover:text-bad transition-all opacity-0 group-hover:opacity-100"
+                        >
+                            <X size={12} />
+                        </button>
+                    )}
+                </td>
+            )}
+        </tr>
+    );
+});
 
 // Pioneer color palette — IDs 0-8 (None, Pink, Red, Orange, Yellow, Green, Aqua, Blue, Purple)
 const PIONEER_COLORS = [
@@ -624,10 +793,10 @@ const PIONEER_COLORS = [
     { id: '8', name: 'Purple', hex: '#a000ff' },
 ];
 
-const ColorDot = ({ track, onChange }) => {
+const ColorDot = ({ colorId, onPick }) => {
     const [open, setOpen] = useState(false);
     const ref = React.useRef(null);
-    const cur = String(track.ColorID || '0');
+    const cur = String(colorId || '0');
     const color = PIONEER_COLORS.find((c) => c.id === cur) || PIONEER_COLORS[0];
 
     useEffect(() => {
@@ -664,7 +833,7 @@ const ColorDot = ({ track, onChange }) => {
                             key={c.id}
                             onClick={(e) => {
                                 e.stopPropagation();
-                                onChange(c.id);
+                                onPick(c.id);
                                 setOpen(false);
                             }}
                             title={c.name}
@@ -692,6 +861,7 @@ const TrackContextMenuPopup = ({
     availablePlaylists,
     setContextMenu,
     contextActions,
+    onPatched,
 }) => {
     const [showAddSubmenu, setShowAddSubmenu] = useState(false);
     const [pSearch, setPSearch] = useState('');
@@ -743,11 +913,13 @@ const TrackContextMenuPopup = ({
             setContextMenu(null);
             return;
         }
+        const updates = { BPM: parseFloat(newBpm) || 0, Key: newKey };
         try {
             await api.patch('/api/tracks/batch', {
                 track_ids: [t.id || t.ID],
-                updates: { BPM: parseFloat(newBpm) || 0, Key: newKey },
+                updates,
             });
+            onPatched?.(t, updates);
             toast.success('Metadaten aktualisiert');
         } catch (e) {
             toast.error('Update fehlgeschlagen: ' + (e.response?.data?.detail || e.message));
@@ -991,4 +1163,4 @@ const TrackContextMenuPopup = ({
     );
 };
 
-export default TrackTable;
+export default memo(TrackTable);

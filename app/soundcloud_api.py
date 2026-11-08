@@ -30,17 +30,23 @@ never as a cache key.
 
 from __future__ import annotations
 
+import functools
 import logging
 import os
 import re
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse, urlsplit, urlunsplit
 
 import requests
+
+if TYPE_CHECKING:
+    import numpy as np
+    import numpy.typing as npt
 
 logger = logging.getLogger(__name__)
 
@@ -1603,6 +1609,199 @@ def search_tracks_many(
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Local-library match index
+# ──────────────────────────────────────────────────────────────────────────────
+
+#: Minimum combined ``artist - title`` ``SequenceMatcher`` ratio for a fuzzy match.
+_FUZZY_MATCH_THRESHOLD = 0.65
+_LCS_WORD_BITS = 64
+
+
+@functools.lru_cache(maxsize=1)
+def _numpy() -> Any:
+    """numpy on first use only: ``app.main`` imports this module at sidecar boot."""
+    import numpy
+
+    return numpy
+
+
+@functools.lru_cache(maxsize=1)
+def _bit_tables() -> tuple[Any, Any]:
+    """``(all-ones uint64, per-byte popcount table)``, built on the first index query."""
+    np = _numpy()
+    all_ones = np.uint64(0xFFFF_FFFF_FFFF_FFFF)
+    byte_popcount = np.array([bin(i).count("1") for i in range(256)], dtype=np.int64)
+    return all_ones, byte_popcount
+
+
+#: A char present in at least this share of rows gets a dense mask column (whole-array
+#: ops); rarer chars update only their own rows via fancy indexing.
+_DENSE_COLUMN_MIN_SHARE = 0.25
+#: ``bound >= ratio`` holds exactly in float (same ``2.0 * n / total`` rounding, ``n`` larger).
+#: The slack only buys extra ``ratio()`` calls, never a missed or different match.
+_BOUND_SLACK = 1e-9
+
+
+def _normalize_match_title(title: str) -> str:
+    return re.sub(r"[^\w\s]", "", title.lower().strip())
+
+
+class _LocalTrackIndex:
+    """Snapshot of the local library, built once per sync / preview, for SC track matching.
+
+    Answers exactly what the old per-SC-track brute force answered: the first track (dict
+    order) whose normalised title equals the SC title wins with ``1.0``; otherwise the first
+    track with the highest ``SequenceMatcher(None, sc, local).ratio()`` >= threshold.
+
+    It just skips the ``ratio()`` calls that cannot change the answer. ``ratio`` is
+    ``2*M / (len(a)+len(b))`` and the characters ``M`` in SequenceMatcher's matching blocks
+    form a common subsequence, so ``M <= LCS(a, b)``. LCS against every local track at once:
+    bit-parallel LCS (Allison-Dix / Hyyro) over one uint64 row per 64-char chunk of each
+    local string. Summed chunk LCS >= whole-string LCS, so long strings stay a valid bound.
+    Tracks are then scored best-bound-first and the scan stops once no bound can beat the
+    best ratio found.
+    """
+
+    _dense: dict[str, npt.NDArray[np.uint64]]
+    _sparse: dict[str, tuple[npt.NDArray[np.intp], npt.NDArray[np.uint64]]]
+
+    def __init__(self, local_tracks: Mapping[str, Mapping[str, Any]]) -> None:
+        self._source = local_tracks
+        self._size = len(local_tracks)
+        self._tids: list[str] = []
+        self._combined: list[str] = []
+        self._exact: dict[str, int] = {}
+        first_row: list[int] = []
+        row_lengths: list[int] = []
+        char_rows: dict[str, tuple[list[int], list[int]]] = {}
+
+        for tid, track in local_tracks.items():
+            local_title = (track.get("Title") or "").lower()
+            local_artist = (track.get("Artist") or "").lower()
+            combined = f"{local_artist} - {local_title}"
+            norm_title = _normalize_match_title(local_title)
+            if norm_title:
+                self._exact.setdefault(norm_title, len(self._tids))
+            self._tids.append(tid)
+            self._combined.append(combined)
+            first_row.append(len(row_lengths))
+            for start in range(0, len(combined), _LCS_WORD_BITS):
+                chunk = combined[start : start + _LCS_WORD_BITS]
+                row = len(row_lengths)
+                masks: dict[str, int] = {}
+                bit = 1
+                for ch in chunk:
+                    masks[ch] = masks.get(ch, 0) | bit
+                    bit <<= 1
+                for ch, mask in masks.items():
+                    entry = char_rows.get(ch)
+                    if entry is None:
+                        char_rows[ch] = ([row], [mask])
+                    else:
+                        entry[0].append(row)
+                        entry[1].append(mask)
+                row_lengths.append(len(chunk))
+
+        self._n_rows = len(row_lengths)
+        np = _numpy()
+        self._lengths = np.array([len(c) for c in self._combined], dtype=np.int64)
+        self._first_row = np.array(first_row, dtype=np.intp)
+        self._row_lengths = np.array(row_lengths, dtype=np.int64)
+        self._row_low_bits = np.array([(1 << n) - 1 for n in row_lengths], dtype=np.uint64)
+        self._dense = {}
+        self._sparse = {}
+        dense_min_rows = self._n_rows * _DENSE_COLUMN_MIN_SHARE
+        for ch, (rows, row_masks) in char_rows.items():
+            row_idx = np.array(rows, dtype=np.intp)
+            mask_arr = np.array(row_masks, dtype=np.uint64)
+            if len(rows) >= dense_min_rows:
+                column = np.zeros(self._n_rows, dtype=np.uint64)
+                column[row_idx] = mask_arr
+                self._dense[ch] = column
+            else:
+                self._sparse[ch] = (row_idx, mask_arr)
+
+    @property
+    def n_rows(self) -> int:
+        return self._n_rows
+
+    def covers(self, local_tracks: Mapping[str, Mapping[str, Any]]) -> bool:
+        """True while ``local_tracks`` is the same, unresized mapping this index was built from.
+
+        In-place edits of a track's Title/Artist are not detected: the index is a snapshot,
+        meant to live for one request's engine.
+        """
+        return local_tracks is self._source and len(local_tracks) == self._size
+
+    def lcs_upper_bounds(self, query: str) -> npt.NDArray[np.int64]:
+        """Per local track (dict order): an upper bound on ``LCS(query, combined)``.
+
+        Exact for local strings up to 64 chars, sum of per-chunk LCS beyond that.
+        """
+        np = _numpy()
+        all_ones, byte_popcount = _bit_tables()
+        if not self._tids:
+            return np.zeros(0, dtype=np.int64)
+        v = np.full(self._n_rows, all_ones, dtype=np.uint64)
+        u = np.empty_like(v)
+        kept = np.empty_like(v)
+        for ch in query:
+            column = self._dense.get(ch)
+            if column is not None:
+                np.bitwise_and(v, column, out=u)
+                # u is a subset of v's bits, so v - u == v & ~column: no borrow crosses bits.
+                np.subtract(v, u, out=kept)
+                # Wraps mod 2**64; carries only travel upward, out of the row's low bits.
+                np.add(v, u, out=v)
+                np.bitwise_or(v, kept, out=v)
+                continue
+            sparse = self._sparse.get(ch)
+            if sparse is None:
+                # Char in no local track: u == 0 everywhere, v unchanged.
+                continue
+            rows, row_masks = sparse
+            v_rows = v[rows]
+            u_rows = v_rows & row_masks
+            v[rows] = (v_rows + u_rows) | (v_rows - u_rows)
+        np.bitwise_and(v, self._row_low_bits, out=v)
+        ones = byte_popcount[v.view(np.uint8)].reshape(-1, 8).sum(axis=1)
+        return np.add.reduceat(self._row_lengths - ones, self._first_row)
+
+    def best_match(self, sc_title: str, sc_artist: str) -> tuple[str | None, float]:
+        """``(local_track_id, score)`` for one SC track; ``(None, 0.0)`` below threshold."""
+        sc_combined = f"{sc_artist} - {sc_title}".lower()
+        sc_norm_title = _normalize_match_title(sc_title)
+        if sc_norm_title:
+            hit = self._exact.get(sc_norm_title)
+            if hit is not None:
+                return self._tids[hit], 1.0
+        if not self._tids:
+            return None, 0.0
+
+        np = _numpy()
+        bounds = 2.0 * self.lcs_upper_bounds(sc_combined) / (self._lengths + len(sc_combined))
+        candidates = np.flatnonzero(bounds >= _FUZZY_MATCH_THRESHOLD - _BOUND_SLACK)
+        # Highest bound first; equal bounds in dict order so ties resolve like the old loop.
+        order = candidates[np.lexsort((candidates, -bounds[candidates]))]
+
+        best_idx = -1
+        best_ratio = 0.0
+        for idx, bound in zip(order.tolist(), bounds[order].tolist(), strict=True):
+            if bound < best_ratio - _BOUND_SLACK:
+                break
+            ratio = SequenceMatcher(None, sc_combined, self._combined[idx]).ratio()
+            if ratio < _FUZZY_MATCH_THRESHOLD:
+                continue
+            if ratio > best_ratio or (ratio == best_ratio and idx < best_idx):
+                best_ratio = ratio
+                best_idx = idx
+
+        if best_idx < 0:
+            return None, 0.0
+        return self._tids[best_idx], round(best_ratio, 3)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # SoundCloud Sync Engine
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -1612,39 +1811,48 @@ class SoundCloudSyncEngine:
 
     SYNC_PREFIX = "SC_"
 
-    def __init__(self, db_manager):
+    def __init__(self, db_manager: Any) -> None:
         self.db = db_manager
+        self._match_index: _LocalTrackIndex | None = None
 
     def _normalize_title(self, title: str) -> str:
-        return re.sub(r"[^\w\s]", "", title.lower().strip())
+        return _normalize_match_title(title)
 
-    def _fuzzy_match_track(self, sc_title: str, sc_artist: str, local_tracks: dict) -> str | None:
+    def _match_index_for(self, local_tracks: Mapping[str, Mapping[str, Any]]) -> _LocalTrackIndex:
+        """Index for ``local_tracks``, built once and reused while that mapping is unchanged.
+
+        One engine lives for one request, so a ``sync_all`` or merge run indexes the
+        library once instead of once per SC track.
+        """
+        index = self._match_index
+        if index is None or not index.covers(local_tracks):
+            started = time.perf_counter()
+            index = _LocalTrackIndex(local_tracks)
+            self._match_index = index
+            logger.info(
+                "op=sc_match_index tracks=%d rows=%d elapsed_ms=%.1f",
+                len(local_tracks),
+                index.n_rows,
+                (time.perf_counter() - started) * 1000,
+            )
+        return index
+
+    def _fuzzy_match_track(
+        self, sc_title: str, sc_artist: str, local_tracks: Mapping[str, Mapping[str, Any]]
+    ) -> str | None:
         """Find the best matching local track. Returns the local track ID or None."""
         tid, _ = self._fuzzy_match_with_score(sc_title, sc_artist, local_tracks)
         return tid
 
-    def _fuzzy_match_with_score(self, sc_title: str, sc_artist: str, local_tracks: dict):
-        """Find the best match and return (local_track_id, score). Score 0..1."""
-        sc_combined = f"{sc_artist} - {sc_title}".lower()
-        sc_norm_title = self._normalize_title(sc_title)
-        best_match = None
-        best_ratio = 0.0
+    def _fuzzy_match_with_score(
+        self, sc_title: str, sc_artist: str, local_tracks: Mapping[str, Mapping[str, Any]]
+    ) -> tuple[str | None, float]:
+        """Find the best match and return (local_track_id, score). Score 0..1.
 
-        for tid, track in local_tracks.items():
-            local_title = (track.get("Title") or "").lower()
-            local_artist = (track.get("Artist") or "").lower()
-            local_combined = f"{local_artist} - {local_title}"
-
-            # Exact normalized title match wins immediately
-            if sc_norm_title and sc_norm_title == self._normalize_title(local_title):
-                return tid, 1.0
-
-            ratio = SequenceMatcher(None, sc_combined, local_combined).ratio()
-            if ratio > best_ratio and ratio >= 0.65:
-                best_ratio = ratio
-                best_match = tid
-
-        return best_match, round(best_ratio, 3)
+        Exact normalised-title hit wins with 1.0 (first in dict order); otherwise the
+        highest combined ``artist - title`` ratio >= 0.65, ties to the earlier track.
+        """
+        return self._match_index_for(local_tracks).best_match(sc_title, sc_artist)
 
     def find_or_create_playlist(self, sc_playlist_title: str) -> str | None:
         """Find existing synced playlist or create a new one. Returns playlist ID string.

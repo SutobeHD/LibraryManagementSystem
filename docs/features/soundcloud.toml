@@ -183,7 +183,7 @@ status = "shipped"
 desc = "Fortschrittsbanner auf jedem Screen, Klick öffnet den Manager."
 paths = ["frontend/src/components/ImportProgressBanner.jsx"]
 related = ["download-manager-view"]
-notes = "1,5-s-Polling (sc-ui-polish / Perf)."
+notes = "Polling seit PR #65 (in #60) über useTaskPolling mit Idle-Backoff."
 
 [[feature]]
 id = "download-format-setting"
@@ -259,4 +259,4 @@ name = "SC-UI: Polling & Redundanz"
 status = "idea"
 desc = "1,5-s-Polling/401-Loop reduzieren, SoundCloudView vs. SoundCloudSyncView zusammenführen."
 related = ["sc-url-download", "sc-playlist-sync", "import-progress-banner"]
-todo = ["Polling reduzieren", "View-Redundanz auflösen", "SC-Such-Recall mit echtem Künstler messen"]
+todo = ["View-Redundanz auflösen", "SC-Such-Recall mit echtem Künstler messen"]

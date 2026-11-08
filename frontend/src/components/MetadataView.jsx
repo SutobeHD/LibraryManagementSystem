@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useDeferredValue } from 'react';
 import { createPortal } from 'react-dom';
 import { toast } from 'react-hot-toast';
 import api from '../api/api';
@@ -73,20 +73,32 @@ const MetadataView = ({
         api.get(`/api/${type}/${item.id}/tracks`).then((res) => setTracks(res.data));
     };
 
+    // Keystroke render reuses the old result; the re-filter runs in the background.
+    const deferredSearchTerm = useDeferredValue(searchTerm);
+    const deferredTrackFilter = useDeferredValue(trackFilter);
+
+    // Lower-cased once per loaded list, not per row per keystroke. '\n' joins the
+    // fields so a query never matches across them (an input value has no '\n').
+    const itemHays = useMemo(() => items.map((a) => String(a.name ?? '').toLowerCase()), [items]);
+    const trackHays = useMemo(
+        () =>
+            tracks.map((t) =>
+                `${t.Title || ''}\n${t.Artist || ''}\n${t.Album || ''}`.toLowerCase()
+            ),
+        [tracks]
+    );
+
     const filteredItems = useMemo(() => {
-        return items.filter((a) => a.name.toLowerCase().includes(searchTerm.toLowerCase()));
-    }, [items, searchTerm]);
+        if (!deferredSearchTerm) return items;
+        const q = deferredSearchTerm.toLowerCase();
+        return items.filter((a, i) => itemHays[i].includes(q));
+    }, [items, itemHays, deferredSearchTerm]);
 
     const filteredTracks = useMemo(() => {
-        const q = (selectedItem ? trackFilter : searchTerm).toLowerCase();
+        const q = (selectedItem ? deferredTrackFilter : deferredSearchTerm).toLowerCase();
         if (!q) return tracks;
-        return tracks.filter(
-            (t) =>
-                (t.Title && t.Title.toLowerCase().includes(q)) ||
-                (t.Artist && t.Artist.toLowerCase().includes(q)) ||
-                (t.Album && t.Album.toLowerCase().includes(q))
-        );
-    }, [tracks, trackFilter, searchTerm, selectedItem]);
+        return tracks.filter((t, i) => trackHays[i].includes(q));
+    }, [tracks, trackHays, deferredTrackFilter, deferredSearchTerm, selectedItem]);
 
     const handleMerge = async (sourceName) => {
         if (activeTab === 'artists') {

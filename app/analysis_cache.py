@@ -21,7 +21,9 @@ import hashlib
 import json
 import logging
 import os
+import tempfile
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -205,6 +207,142 @@ class AnalysisCache:
 
 
 # ---------------------------------------------------------------------------
+# Waveform cache
+# ---------------------------------------------------------------------------
+
+# Bump when generate_multiband_waveform output changes.
+WAVEFORM_CACHE_VERSION = 1
+WAVEFORM_CACHE_MAX_ENTRIES = 200  # ~250 kB gzip per 6-min track at 50 pps
+# Byte cap too: editor zoom requests up to pps 2000 (~3.5 MB gzip per track).
+WAVEFORM_CACHE_MAX_BYTES = 256 * 1024 * 1024
+_WAVEFORM_SUFFIX = ".wf.gz"
+_STALE_TMP_SECONDS = 3600
+
+
+class WaveformCache:
+    """Disk cache for /api/audio/waveform response bodies.
+
+    One gzip file per (normalised abs path, pps). File = one JSON header line
+    ``{"v", "mtime_ns", "size", "pps"}`` + the serialized response body, so a
+    hit returns the bytes without a JSON parse. No shared index: entries are
+    independent, written temp+rename. Bounded to ``max_entries`` files and
+    ``max_bytes`` total; the least recently used (file mtime, touched on hit)
+    are pruned first.
+    """
+
+    def __init__(
+        self,
+        cache_dir: str | Path | None = None,
+        max_entries: int = WAVEFORM_CACHE_MAX_ENTRIES,
+        max_bytes: int = WAVEFORM_CACHE_MAX_BYTES,
+    ):
+        if cache_dir is None:
+            cache_dir = Path.home() / ".cache" / "rb_editor_pro" / "waveform_cache"
+        self.cache_dir = Path(cache_dir)
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self.max_entries = max(1, int(max_entries))
+        self.max_bytes = max(1, int(max_bytes))
+        self._prune_lock = threading.Lock()
+
+    @staticmethod
+    def key(file_path: str, pps: int) -> str:
+        norm = os.path.normcase(os.path.abspath(file_path))
+        raw = f"{WAVEFORM_CACHE_VERSION}|{int(pps)}|{norm}"
+        return hashlib.md5(raw.encode("utf-8"), usedforsecurity=False).hexdigest()
+
+    def _entry_path(self, file_path: str, pps: int) -> Path:
+        return self.cache_dir / (self.key(file_path, pps) + _WAVEFORM_SUFFIX)
+
+    def get(self, file_path: str, pps: int, st: os.stat_result) -> bytes | None:
+        """Cached body if the source file still has the stat ``st``, else None."""
+        entry = self._entry_path(file_path, pps)
+        try:
+            with gzip.open(entry, "rb") as f:
+                header = json.loads(f.readline())
+                if (
+                    header.get("v") != WAVEFORM_CACHE_VERSION
+                    or header.get("pps") != int(pps)
+                    or header.get("size") != st.st_size
+                    or header.get("mtime_ns") != st.st_mtime_ns
+                ):
+                    return None
+                body = f.read()
+        except FileNotFoundError:
+            return None
+        except (OSError, EOFError, ValueError) as e:
+            logger.warning("op=waveform_cache_get entry=%s err=%s", entry.name, e)
+            return None
+        with contextlib.suppress(OSError):
+            os.utime(entry)
+        return body
+
+    def put(self, file_path: str, pps: int, st: os.stat_result, body: bytes) -> None:
+        """Store ``body`` for the source stat ``st`` (taken before computing)."""
+        entry = self._entry_path(file_path, pps)
+        header = {
+            "v": WAVEFORM_CACHE_VERSION,
+            "mtime_ns": st.st_mtime_ns,
+            "size": st.st_size,
+            "pps": int(pps),
+        }
+        tmp: Path | None = None
+        try:
+            fd, tmp_name = tempfile.mkstemp(dir=self.cache_dir, suffix=".tmp")
+            tmp = Path(tmp_name)
+            with (
+                os.fdopen(fd, "wb") as raw,
+                gzip.GzipFile(fileobj=raw, mode="wb", compresslevel=5) as f,
+            ):
+                f.write(json.dumps(header).encode("utf-8") + b"\n")
+                f.write(body)
+            # Windows: PermissionError while a reader holds the target open.
+            os.replace(tmp, entry)
+        except OSError as e:
+            logger.warning("op=waveform_cache_put entry=%s err=%s", entry.name, e)
+            if tmp is not None:
+                with contextlib.suppress(OSError):
+                    tmp.unlink()
+            return
+        self._prune()
+
+    def _prune(self) -> None:
+        with self._prune_lock:
+            entries: list[tuple[float, int, Path]] = []
+            for p in self.cache_dir.glob("*" + _WAVEFORM_SUFFIX):
+                try:
+                    st = p.stat()
+                except OSError:
+                    continue
+                entries.append((st.st_mtime, st.st_size, p))
+            count = len(entries)
+            total = sum(e[1] for e in entries)
+            entries.sort(key=lambda e: e[0])
+            for _, size, p in entries:
+                if count <= self.max_entries and total <= self.max_bytes:
+                    break
+                with contextlib.suppress(OSError):
+                    p.unlink()
+                    count -= 1
+                    total -= size
+            # Leftovers of a process killed mid-write.
+            cutoff = time.time() - _STALE_TMP_SECONDS
+            for p in self.cache_dir.glob("*.tmp"):
+                with contextlib.suppress(OSError):
+                    if p.stat().st_mtime < cutoff:
+                        p.unlink()
+
+    def clear(self) -> int:
+        """Delete every entry. Returns number removed."""
+        removed = 0
+        with self._prune_lock:
+            for p in self.cache_dir.glob("*" + _WAVEFORM_SUFFIX):
+                with contextlib.suppress(OSError):
+                    p.unlink()
+                    removed += 1
+        return removed
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
@@ -250,3 +388,16 @@ def get_default_cache() -> AnalysisCache:
     if _default_cache is None:
         _default_cache = AnalysisCache()
     return _default_cache
+
+
+_default_waveform_cache: WaveformCache | None = None
+_waveform_cache_lock = threading.Lock()
+
+
+def get_waveform_cache() -> WaveformCache:
+    global _default_waveform_cache
+    if _default_waveform_cache is None:
+        with _waveform_cache_lock:
+            if _default_waveform_cache is None:
+                _default_waveform_cache = WaveformCache()
+    return _default_waveform_cache

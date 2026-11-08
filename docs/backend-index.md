@@ -95,7 +95,7 @@ Marker convention in the route tables below:
 |--------|------|-------------|
 | GET | `/api/stream` | Stream audio file (range-request, sandboxed, query param `path`) |
 | GET | `/api/audio/stream` | Same sandboxed path check, plain `FileResponse` (handler `stream_audio_file`; used by `DawEngine.js`) |
-| GET | `/api/audio/waveform` | Multiband waveform data (pps param controls points-per-second) |
+| GET | `/api/audio/waveform` | Multiband waveform data (`pps` >= 1, points-per-second); computed off-loop, disk-cached per (file mtime+size, pps) |
 | POST | `/api/audio/analyze` `[AUTH]` | Start async BPM/key analysis → returns `{ task_id }` |
 | GET | `/api/audio/analyze/{task_id}` | Poll analysis result: `{ status, bpm, key, confidence }` |
 | POST | `/api/audio/slice` `[AUTH]` | Slice audio file at beat positions |
