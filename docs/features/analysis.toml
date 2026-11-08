@@ -26,6 +26,17 @@ paths = ["app/analysis_settings.py", "frontend/src/components/settings/SettingsA
 notes = "DSP-Tunables nur per Env. UI-Preset analysis_quality liest kein Backend (toter Wert)."
 
 [[feature]]
+id = "analysis-depth"
+group = "DSP-Engine"
+name = "Analysetiefe: Rekordbox oder Hoch"
+status = "planned"
+parent = "analysis-settings"
+desc = "Einstellbar, wie tief ein Track analysiert wird: Rekordbox-Level (BPM, Key, Grid, Waveforms, Phrasen, Cues) oder Hoch (zusätzlich Lautheit, Stereo, Stimmung, Frequenzgrenze, Clipping, Dynamik, Bass-Anteil)."
+related = ["analysis-engine", "analysis-cache", "analysis-api-manual", "library-analysis-report"]
+notes = "Wunsch 2026-11-08. Ersetzt den toten UI-Preset analysis_quality (fast/standard/thorough, von keinem Backend gelesen). Plan in docs/LIBRARY_ANALYSIS_HANDOVER.md §3.6: depth-Argument in run_full_analysis, Cache nur bei Tiefe >= angefragt, Setting über /api/settings, alle 5 Aufrufer reichen es durch."
+todo = ["Stufen-Zeiten beider Level an 50 Tracks messen", "Default mit dem User klären, wenn Hoch kaum teurer ist", "Optional: Pro-Lauf-Auswahl im Kontextmenü (erst fragen)"]
+
+[[feature]]
 id = "analysis-cache"
 group = "DSP-Engine"
 name = "AnalysisCache"
