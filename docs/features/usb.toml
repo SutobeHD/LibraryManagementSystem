@@ -15,6 +15,7 @@ desc = "Nur Wechsel-Sticks, Rekordbox-Stick erkennen, Speicherbalken, Kompatibil
 paths = ["frontend/src/components/usb/UsbDeviceList.jsx", "frontend/src/components/UsbView.jsx"]
 routes = ["/api/usb/devices"]
 related = ["linux-dj-workflow"]
+todo = ["USB-Ansicht öffnen: GET /api/usb/devices 4,6 s, /api/usb/profiles 7,5 s (gemessen 2026-11-08)"]
 notes = "Windows-only (PowerShell Get-Disk)."
 
 [[feature]]

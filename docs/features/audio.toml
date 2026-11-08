@@ -47,6 +47,7 @@ status = "partial"
 desc = "WaveSurfer + Overview, blue/rgb/3band-Layer, Cuts, Hot-Cues, Loop, Zoom."
 paths = ["frontend/src/components/WaveformEditor.jsx", "frontend/src/components/waveform/"]
 depends_on = ["multiband-waveform-data", "audio-stream-route"]
+todo = ["Ranking-Waveform bleibt bei AIFF leer: WebView2-WebAudio dekodiert kein AIFF ('WebAudioPlayer load error', 0 Canvases), Beatgrid kommt trotzdem an - AIFF ist Download-Default; prüfen, ob PR #72 (Ranking-Waveform-Pipeline) das löst"]
 notes = "Voller Modus nicht mehr gemountet (ersetzt durch DjEditDaw); nur simpleMode im Ranking."
 
 [[feature]]
