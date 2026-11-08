@@ -238,6 +238,8 @@
 | `tests/test_import_tracker.py` | Tests for app/import_tracker.py — live import-progress tracker. |
 | `tests/test_library_analysis.py` | Tests for scripts/library_analysis.py on a synthetic atlas and a handful of tracks. |
 | `tests/test_library_format_swap.py` | Tests for app.library_format_swap. |
+| `tests/test_library_measure_anlz.py` | Tests for scripts/library_measure_anlz.py on synthetic ANLZ bytes. |
+| `tests/test_library_measure_audio.py` | Tests for scripts/library_measure_audio.py: the Stage-E extras (E1-E7) on synthetic signals, |
 | `tests/test_library_source.py` | Tests for app/library_source.py — the Live/XML normalization layer. |
 | `tests/test_live_cue_loading.py` | Cue loading in `app.live_database`. |
 | `tests/test_logging_redaction.py` | Unit tests for `app.logging_utils.RedactingFormatter`. |
@@ -286,6 +288,8 @@
 | `scripts/dev/safe_format_swap.py` | safe_format_swap.py -- defensive m4a -> AIFF swap for ONE Rekordbox playlist. |
 | `scripts/feature_map.py` | Feature registry plus a live overlay of which branch or worktree touches which feature. |
 | `scripts/library_analysis.py` | Whole-library analysis: which track fields are filled, how the Genre field is used, and how |
+| `scripts/library_measure_anlz.py` | Stage D of docs/LIBRARY_ANALYSIS_HANDOVER.md: read Rekordbox's own ANLZ analysis files. |
+| `scripts/library_measure_audio.py` | Decode-once audio measurement runner: Stage E of docs/LIBRARY_ANALYSIS_HANDOVER.md (§3.5). |
 | `scripts/pipeline_dashboard.py` | Local web dashboard for the research pipeline. |
 | `scripts/pipeline_status.py` | Show the research pipeline state at a glance. |
 | `scripts/print_routine.py` | Extract the deploy-ready prompt from a routine .md file. |
