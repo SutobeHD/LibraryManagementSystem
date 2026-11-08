@@ -12,7 +12,7 @@ group = "Navigation & Fenster"
 name = "TopBar + Workspaces"
 status = "shipped"
 desc = "Workspaces (Library/Import/Ranking/Editor/USB/SoundCloud/Utilities), Unter-Tabs, Lazy-Views, ErrorBoundary pro View."
-notes = "Komplett in frontend/src/main.jsx (Hub). Dauerhaft gemountete schwere Views = Perf-Hotspot."
+notes = "Komplett in frontend/src/main.jsx (Hub). Views mounten seit PR #65 (in #60) erst beim Tab-Öffnen; zustandsbehaftete Views bleiben gemountet."
 
 [[feature]]
 id = "frameless-window"
@@ -109,7 +109,7 @@ research = "security-pydantic-extra-allow-blob-write"
 desc = "JSON-Settings laden/speichern, SetReq-Caps (8 KB/Wert, 256 KB gesamt), Sanitizer beim Laden."
 paths = ["tests/test_settings_caps.py"]
 routes = ["/api/settings"]
-notes = "SettingsManager lebt in services.py (Hub). load() ungecacht (Perf)."
+notes = "SettingsManager lebt in services.py (Hub). load() ungecacht; hide_streaming wird seit PR #67 (in #60) in database.py per mtime gecacht."
 
 [[feature]]
 id = "keyboard-shortcuts"
