@@ -352,6 +352,7 @@
 | `tests/test_security_hotfixes.py` | Regression tests for the 5 security hotfixes in commit e3a5ae8. |
 | `tests/test_services.py` | Tests for `app/services.py`. |
 | `tests/test_settings_caps.py` | Tests for `SetReq` payload caps + `SettingsManager.load` sanitizer. |
+| `tests/test_shutdown_flush.py` | Shutdown paths flush coalesced XML saves before os._exit / os.execv. |
 | `tests/test_smart_playlist_engine.py` | Tests for app/smart_playlist_engine.py — the smart-playlist rule evaluator. |
 | `tests/test_soundcloud_api.py` | Tests for `app/soundcloud_api.py`. |
 | `tests/test_soundcloud_artist_api.py` | Artist-Hub SoundCloud client tests (T-12 + T-13 — app/soundcloud_api.py). |

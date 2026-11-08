@@ -111,6 +111,7 @@ from .phrase_generator import (
     detect_first_downbeat,
     extract_beats_from_db,
     generate_phrase_cues,
+    resolve_anlz_dirs,
 )
 from .playcount_sync import (
     diff_playcounts,
@@ -7393,6 +7394,17 @@ async def _run_phrase_batch(
             # The start route refused this already; the library left live mode since.
             raise RuntimeError("Phrase cues need a live Rekordbox library")
         db_path = str(live_db_path)
+        # One master.db open (SQLCipher key derivation ~0.2 s) for the whole
+        # batch instead of two per track. Only dir strings cross threads: an
+        # rbox handle used from another thread aborts the process.
+        anlz_dirs: dict[int, str | None] | None
+        try:
+            anlz_dirs = await loop.run_in_executor(
+                None, lambda: resolve_anlz_dirs([t["id"] for t in scope_tracks], db_path)
+            )
+        except Exception as exc:
+            logger.warning("[PHRASE] batch %s: ANLZ dir prefetch failed — %s", job_id, exc)
+            anlz_dirs = None
         for idx, track in enumerate(scope_tracks):
             if job.get("cancel_requested"):
                 logger.info("[PHRASE] batch %s cancelled at %d/%d", job_id, idx, total)
@@ -7406,7 +7418,7 @@ async def _run_phrase_batch(
 
             try:
                 beats = await loop.run_in_executor(
-                    None, lambda t=tid: extract_beats_from_db(t, db_path)
+                    None, lambda t=tid: extract_beats_from_db(t, db_path, anlz_dirs=anlz_dirs)
                 )
                 if not beats:
                     job["skipped"] += 1
@@ -7428,7 +7440,11 @@ async def _run_phrase_batch(
                 await loop.run_in_executor(
                     None,
                     lambda t=tid, c=cues: commit_phrase_cues(
-                        t, c, db_path, include_bar_markers=include_bar_markers
+                        t,
+                        c,
+                        db_path,
+                        include_bar_markers=include_bar_markers,
+                        anlz_dirs=anlz_dirs,
                     ),
                 )
                 job["succeeded"] += 1

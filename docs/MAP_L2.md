@@ -4356,6 +4356,8 @@ Tests for the phrase-batch backend (app/main.py):
 - `test_worker_hands_the_live_master_db_to_every_call()`
 - `test_worker_errors_out_when_the_library_left_live_mode()`
 - `test_worker_eta_positive_mid_run()`
+- `test_worker_opens_master_db_once_per_batch()`
+- `test_worker_falls_back_per_track_when_prefetch_fails()`
 - `test_start_requires_auth()`
 - `test_start_library_not_loaded()`
 - `test_start_bad_phrase_length()`
@@ -4666,6 +4668,15 @@ Tests for `SetReq` payload caps + `SettingsManager.load` sanitizer.
 - `  TestSettingsManagerLoadSanitizer.test_oversize_value_dropped_on_load()`
 - `  TestSettingsManagerLoadSanitizer.test_oversize_list_dropped_on_load()`
 - `  TestSettingsManagerLoadSanitizer.test_load_legacy_clean_file_unchanged()`
+
+### `tests/test_shutdown_flush.py`
+
+Shutdown paths flush coalesced XML saves before os._exit / os.execv.
+
+- `test_noop_without_flush_function()`
+- `test_calls_flush_and_logs_failure()`
+- `test_flush_exception_never_escapes()`
+- `test_graceful_shutdown_flushes_before_exit()`
 
 ### `tests/test_smart_playlist_engine.py`
 
