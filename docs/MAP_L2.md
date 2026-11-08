@@ -431,7 +431,12 @@ Batch comment edits over the live library (``POST /api/tools/batch-comment``).
 *(no module docstring)*
 
 - `db_lock()` — Acquire `_db_write_lock` for the duration of the `with` block.
+- `flush_pending_saves()` — Write every XML library with unsaved changes.
 - `RekordboxXMLDB`
+- `  RekordboxXMLDB.xml_path()` — Library file path.
+- `  RekordboxXMLDB.xml_path()`
+- `  RekordboxXMLDB.pending_save()` — True while a mutation is in memory but not yet in the library file.
+- `  RekordboxXMLDB.flush()` — Write pending changes now.
 - `  RekordboxXMLDB.load_xml()`
 - `  RekordboxXMLDB.get_playlist_tracks()`
 - `  RekordboxXMLDB.get_track_details()`
@@ -461,10 +466,10 @@ Batch comment edits over the live library (``POST /api/tools/batch-comment``).
 - `  RekordboxXMLDB.get_track_mytags()`
 - `  RekordboxXMLDB.set_track_mytags()`
 - `  RekordboxXMLDB.delete_track()`
-- `  RekordboxXMLDB.save_xml()`
+- `  RekordboxXMLDB.save_xml()` — Write the library file now, pending debounce or not.
 - `RekordboxDB`
 - `  RekordboxDB.ensure_standalone_master_db()` — Create an empty master.db at our private location if Rekordbox isn't installed.
-- `  RekordboxDB.tracks()`
+- `  RekordboxDB.tracks()` — Track dict of the active backend, minus streaming tracks when hidden.
 - `  RekordboxDB.playlists()`
 - `  RekordboxDB.artists()`
 - `  RekordboxDB.genres()`
@@ -3734,6 +3739,45 @@ Tests for `app/database.py`.
 - `  TestFilterTracks.test_falls_back_to_location_key()` — Raw XML stores the URL under `Location` rather than `path`.
 - `  TestFilterTracks.test_unknown_scheme_preserved()` — Only the four explicit prefixes are filtered.
 - `  TestFilterTracks.test_unknown_input_type_passed_through()` — If the caller hands a non-dict / non-list we just return it.
+
+### `tests/test_database_save_cache.py`
+
+Perf contracts of `app/database.py`: cached settings read + coalesced XML saves.
+
+- `settings_file()`
+- `load_calls()`
+- `TestHideStreamingCache`
+- `  TestHideStreamingCache.test_unchanged_file_is_read_at_most_once()`
+- `  TestHideStreamingCache.test_missing_file_is_read_at_most_once()`
+- `  TestHideStreamingCache.test_flag_flips_on_first_access_after_mtime_change()`
+- `  TestHideStreamingCache.test_settings_manager_save_takes_effect_on_next_access()`
+- `TestFilteredTracksMemo`
+- `  TestFilteredTracksMemo.strip_calls()`
+- `  TestFilteredTracksMemo.hidden()`
+- `  TestFilteredTracksMemo.test_filtered_view_is_built_once()`
+- `  TestFilteredTracksMemo.test_facade_add_and_delete_invalidate()`
+- `  TestFilteredTracksMemo.test_path_change_invalidates()`
+- `  TestFilteredTracksMemo.test_swapped_or_resized_source_invalidates()`
+- `writes()` — Every target `_write_atomically` was called with (stray writes included).
+- `fake_clock()` — Distinct, repeatable millisecond ids for create_playlist / create_smart_playlist.
+- `make_xml()`
+- `TestXmlBytes`
+- `  TestXmlBytes.test_output_matches_pre_change_implementation()`
+- `  TestXmlBytes.test_coalesced_equals_save_after_every_mutation()`
+- `TestCoalescedSave`
+- `  TestCoalescedSave.test_hundred_mutations_write_at_most_twice()`
+- `  TestCoalescedSave.test_explicit_save_writes_immediately()`
+- `  TestCoalescedSave.test_reading_xml_path_flushes()`
+- `  TestCoalescedSave.test_facade_xml_path_flushes()`
+- `  TestCoalescedSave.test_repointing_xml_path_flushes_to_old_file()`
+- `  TestCoalescedSave.test_load_library_flushes_pending_first()`
+- `  TestCoalescedSave.test_unload_flushes_and_never_writes_the_empty_library()`
+- `  TestCoalescedSave.test_unload_after_failed_flush_leaves_the_file_alone()`
+- `  TestCoalescedSave.test_exit_flush_writes_pending_libraries()`
+- `  TestCoalescedSave.test_exit_flush_gives_up_on_a_wedged_writer()`
+- `  TestCoalescedSave.test_steady_mutations_are_saved_by_the_max_delay()`
+- `  TestCoalescedSave.test_failed_write_stays_dirty_until_a_later_flush()`
+- `  TestCoalescedSave.test_mutation_during_write_keeps_library_dirty()`
 
 ### `tests/test_db_taste.py`
 
