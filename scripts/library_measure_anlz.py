@@ -14,7 +14,7 @@ Per track the reader measures:
   writer      "rekordbox" | "lms" | "unknown" | "conflict" from header fields LMS writes differently
 
 PSSI unmasking: pyrekordbox 0.1.7 parses a masked PSSI into garbage (mood outside 1..3). The XOR
-routine below is copied from `app/anlz_usb_export.py:mask_pssi` (PR #60); the XOR is symmetric, so
+key, offsets and `mask_pssi` are imported from `app/anlz_usb_export.py`; the XOR is symmetric, so
 the same bytes-op unmasks when the "is plain" test is inverted.
 
 3-band byte order (PWV6 / PWV7): [low, mid, high] per 3-byte frame. Measured 2026-11-08 on 30
@@ -53,6 +53,15 @@ from pyrekordbox.anlz import structs as anlz_structs  # noqa: E402
 from pyrekordbox.anlz.tags import TAGS as ANLZ_TAGS  # noqa: E402
 
 from app.anlz_cue_patch import _walk_tags  # noqa: E402
+from app.anlz_usb_export import (  # noqa: E402
+    _PSSI_LEN_ENTRIES,
+    _PSSI_MASK_BASE,
+    _PSSI_MOOD,
+    _pssi_is_plain,
+)
+from app.anlz_usb_export import (
+    mask_pssi as mask_pssi,  # re-exported: the tests mask their fixtures through this module
+)
 from app.anlz_writer import PMAI_HEADER_LEN  # noqa: E402
 
 logger = logging.getLogger("library_measure_anlz")
@@ -67,12 +76,9 @@ TEMPO_TOL_BPM = 0.05
 CURVE_SEGMENTS = 10
 
 # --------------------------------------------------------------------------- PSSI mask
-# Copied from app/anlz_usb_export.py (PR #60, branch claude/dreamy-planck-w7771v): _PSSI_MOOD,
-# _PSSI_LEN_ENTRIES, _PSSI_MASK_BASE, _pssi_is_plain, mask_pssi. Replace with
-# `from app.anlz_usb_export import mask_pssi` after this branch is rebased onto PR #60.
-_PSSI_MASK_BASE = bytes.fromhex("CBE1EEFAE5EEADEEE9D2E9EBE1E9F3E8E9F4E1")
-_PSSI_LEN_ENTRIES = 0x10
-_PSSI_MOOD = 0x12
+# The mask key, offsets, plain-test and `mask_pssi` come from app/anlz_usb_export.py (the USB
+# writer). The XOR is symmetric, so unmasking is the same byte op applied when the mood is NOT a
+# plain 1..3; only that inverse lives here.
 _PSSI_END_BEAT = 0x1A
 _PSSI_U2 = 0x1C
 _PSSI_LMS_END_BEAT = 0x16  # where app/anlz_writer.py:_build_pssi puts end_beat (pyrekordbox's u1)
@@ -80,11 +86,7 @@ _PSSI_HEADER_LEN = 32
 _PQT2_U3 = 44  # offset of pyrekordbox's PQT2 u3 inside the tag; LMS writes 0, Rekordbox a hash
 
 
-def pssi_is_plain(tag: bytes) -> bool:
-    if len(tag) < _PSSI_MOOD + 2:
-        return False
-    mood = struct.unpack(">H", tag[_PSSI_MOOD : _PSSI_MOOD + 2])[0]
-    return 1 <= mood <= 3
+pssi_is_plain = _pssi_is_plain
 
 
 def pssi_is_masked(tag: bytes) -> bool:
@@ -98,11 +100,6 @@ def _pssi_xor(tag: bytes) -> bytes:
     for i in range(_PSSI_MOOD, len(out)):
         out[i] ^= key[(i - _PSSI_MOOD) % len(key)]
     return bytes(out)
-
-
-def mask_pssi(tag: bytes) -> bytes:
-    """Plain PSSI -> masked (the USB-export form). Anything else is returned unchanged."""
-    return _pssi_xor(tag) if pssi_is_plain(tag) else tag
 
 
 def unmask_pssi(tag: bytes) -> bytes:

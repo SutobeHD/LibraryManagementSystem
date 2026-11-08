@@ -59,6 +59,8 @@ v1 run (2026-11-07, 4760 tracks, 6 s): report at `tmp/library-analysis/{report.m
 - Cherry-pick of `d520daf` onto PR #60: **clean**. Merge of the whole branch onto PR #60: **0 conflicts.**
 - So either path works without conflict: rebase the 7 commits onto `origin/claude/dreamy-planck-w7771v`, or a new branch from PR #60 + cherry-pick. Both are rebase/cherry-pick operations → user's go-ahead first.
 
+**Decision (user, 2026-11-08): new branch `feat/library-measure` from `origin/claude/dreamy-planck-w7771v` (PR #60, base `a71bfa7`).** The 12 commits of `feat/library-analysis` were cherry-picked onto it without conflicts; `feat/library-analysis` stays on origin as the superseded source branch. Work here from now on.
+
 Fresh worktree: `npm install` is not needed (Python only). Use the main checkout's `.venv` through a junction: `cmd //c "mklink /J .venv C:\Users\tb\Documents\GitHub\LibraryManagementSystem\.venv"`.
 
 ### 1.3 Environment (measured 2026-11-08)
