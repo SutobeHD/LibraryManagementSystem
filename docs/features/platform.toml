@@ -173,14 +173,12 @@ notes = "Backend bindet im Container 127.0.0.1 (unerreichbar). HANDOVER 5.5 sagt
 id = "performance-overhaul"
 group = "Performance"
 name = "Performance-Overhaul"
-status = "unmerged"
-branch = "claude/dreamy-planck-w7771v"
-pr = 60
+status = "research"
 research = "performance-overhaul"
 desc = "Spürbare Langsamkeit beseitigen (Scroll, Tabwechsel, Playlist-Expand, USB, Start) - 48 Hotspots belegt, 17 davon am 2026-11-08 in 11 PRs (#62-#73) behoben."
 related = ["track-table", "usb-sync-engine", "workspace-topbar-nav", "multiband-waveform-data"]
 todo = ["/api/library/tracks paginieren + GZip (light=true existiert)", "/api/usb/sync als SSE + Export parallel", "load_library vom Event-Loop, 2-s-Splash weg", "Profiler-Baselines (OQ16) nachholen"]
-notes = "Teile unten. Virtualisierung ohne neue Dependency (hand-rolled). Research-Doc steht in drafting_ (Pipeline tot); Lifecycle-Zeile 2026-11-08 fasst den Stand zusammen."
+notes = "Code der 11 PRs liegt auf claude/dreamy-planck-w7771v (PR 60), siehe Teile unten. Virtualisierung ohne neue Dependency (hand-rolled). Research-Doc steht in drafting_ (Pipeline tot); Lifecycle-Zeile 2026-11-08 fasst den Stand zusammen."
 
 [[feature]]
 id = "perf-backend-quickwins"
