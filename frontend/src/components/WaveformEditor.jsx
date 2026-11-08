@@ -222,9 +222,13 @@ const WaveformEditorInner = forwardRef(
             isQuantizedRef.current = isQuantized;
         }, [isQuantized]);
 
+        // Project list only feeds the full editor's toolbar.
         useEffect(() => {
-            api.get('/api/projects').then((res) => setProjectList(res.data));
-        }, []);
+            if (simpleMode) return;
+            api.get('/api/projects')
+                .then((res) => setProjectList(res.data))
+                .catch((e) => log.warn('[WaveformEditor] project list failed', e));
+        }, [simpleMode]);
 
         useEffect(() => {
             if (track?.id && !track?.path) {
