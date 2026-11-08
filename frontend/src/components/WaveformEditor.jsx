@@ -450,6 +450,17 @@ const WaveformEditorInner = forwardRef(
             setIsDragOver,
         });
 
+        // Arm the cut preview only once cuts were edited on this track. Unarmed, useVisualPreview reads
+        // the initial empty cut list as "restore original" and re-fetches + re-decodes the whole track.
+        const sourceKey = blobUrl || fullTrack?.path || null;
+        const [previewArmed, setPreviewArmed] = useState(false);
+        useEffect(() => {
+            setPreviewArmed(false);
+        }, [sourceKey]);
+        useEffect(() => {
+            if (cuts.length > 0) setPreviewArmed(true);
+        }, [cuts]);
+
         // Debounced non-destructive preview rebuild when cuts change
         useVisualPreview({
             wavesurfer,
@@ -458,7 +469,7 @@ const WaveformEditorInner = forwardRef(
             blobUrl,
             fullTrack,
             duration,
-            bufferReady,
+            bufferReady: bufferReady && previewArmed,
             cuts,
             trackBlobUrl,
             toast,
