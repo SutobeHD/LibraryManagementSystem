@@ -39,6 +39,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from app.analysis_cache import get_waveform_cache
 from app.auth import require_session
 from app.rate_limit import rate_limit
 
@@ -89,7 +90,6 @@ KEYRING_SC_TOKEN = "sc_token"
 from . import audio_tags, download_registry, folder_watcher
 from . import soundcloud_api as sc_api
 from . import soundcloud_auth as sc_auth
-from .analysis_cache import get_waveform_cache
 from .artist_store import attribution as artist_attribution
 from .artist_store import catalogue as artist_catalogue
 from .artist_store import discovery as artist_discovery
