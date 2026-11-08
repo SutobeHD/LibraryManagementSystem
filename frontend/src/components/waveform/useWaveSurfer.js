@@ -34,7 +34,6 @@ export default function useWaveSurfer({
     setDuration,
     setLoading,
     setBufferReady,
-    setMultibandBuffers,
     setCurrentTime,
     setSelectionStart,
     setZoom,
@@ -110,11 +109,10 @@ export default function useWaveSurfer({
                 if (isPlayingExternalRef.current) {
                     wavesurfer.current.play().catch((e) => console.warn('Autoplay blocked:', e));
                 }
-                // Capture Original Buffer + reset multiband state for new track
+                // Capture Original Buffer for the non-destructive cut preview
                 const buffer = wavesurfer.current.getDecodedData();
                 if (buffer) {
                     originalBufferRef.current = buffer;
-                    setMultibandBuffers(null);
                     setBufferReady(true);
                 }
             });
@@ -249,7 +247,6 @@ export default function useWaveSurfer({
 
         setLoading(true);
         setBufferReady(false);
-        setMultibandBuffers(null);
         originalBufferRef.current = null; // CRITICAL: reset stale buffer ref
         // Clear Regions/Cues from previous track
         const regions = wavesurfer.current.plugins.find((p) => p.getRegions);
@@ -287,7 +284,6 @@ export default function useWaveSurfer({
         originalBufferRef,
         setLoading,
         setBufferReady,
-        setMultibandBuffers,
         setLoopIn,
         setLoopOut,
         setIsLooping,

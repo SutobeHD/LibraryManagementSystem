@@ -7,7 +7,6 @@ import React, {
     forwardRef,
     useImperativeHandle,
 } from 'react';
-import AudioBandAnalyzer from '../utils/AudioBandAnalyzer';
 import api from '../api/api';
 import { log } from '../utils/log';
 import { useToast } from './ToastContext';
@@ -27,6 +26,13 @@ import useEditPersistence from './waveform/useEditPersistence';
 import computeBeats from './waveform/computeBeats';
 
 const ZOOM_DEFAULT = 200;
+// 3-band RMS envelope resolution requested from /api/audio/waveform: 2 px per point at
+// ZOOM_DEFAULT (200 px/s). The JSON costs ~6 KB per second of audio at this rate.
+export const BAND_PEAKS_PER_SECOND = 100;
+// Uncached analysis of a long track (librosa load + 3 Butterworth passes) can exceed axios' 10 s default.
+export const BAND_FETCH_TIMEOUT_MS = 30000;
+// Band envelopes kept per editor instance so Ranking's prev/next does not refetch (~0.4 MB per 6-min track).
+const BAND_CACHE_SIZE = 4;
 
 const WaveformEditorInner = forwardRef(
     (
@@ -112,8 +118,9 @@ const WaveformEditorInner = forwardRef(
         const [loopOut, setLoopOut] = useState(null);
         const [isLooping, setIsLooping] = useState(false);
         const [visualMode, setVisualMode] = useState('blue'); // 'blue', 'rgb', '3band'
-        const [multibandBuffers, setMultibandBuffers] = useState(null);
-        const [analyzing, setAnalyzing] = useState(false);
+        // { key: track path, status: 'loading' | 'ready' | 'unavailable', peaks }
+        const [bands, setBands] = useState({ key: null, status: 'unavailable', peaks: null });
+        const bandCacheRef = useRef(new Map());
         const [bufferReady, setBufferReady] = useState(false);
         const [cuts, setCuts] = useState([]);
         const [history, setHistory] = useState([]);
@@ -161,45 +168,6 @@ const WaveformEditorInner = forwardRef(
                 }
             })();
         }, []);
-
-        // Analyze Audio when needed (decode the 3 EQ-band buffers)
-        useEffect(() => {
-            const analyze = async () => {
-                if (
-                    (visualMode === 'rgb' || visualMode === '3band') &&
-                    !multibandBuffers &&
-                    originalBufferRef.current &&
-                    !analyzing
-                ) {
-                    setAnalyzing(true);
-                    try {
-                        const bands = await AudioBandAnalyzer.splitBands(originalBufferRef.current);
-                        const lowBlob = AudioBandAnalyzer.bufferToWav(bands.low);
-                        const midBlob = AudioBandAnalyzer.bufferToWav(bands.mid);
-                        const highBlob = AudioBandAnalyzer.bufferToWav(bands.high);
-                        setMultibandBuffers({ low: lowBlob, mid: midBlob, high: highBlob });
-                    } catch (e) {
-                        console.error('Analysis Failed', e);
-                        toast.error('Waveform Analysis Failed');
-                    } finally {
-                        setAnalyzing(false);
-                    }
-                }
-            };
-            analyze();
-        }, [visualMode, multibandBuffers, bufferReady]);
-
-        // Slave-band lifecycle + RAF sync loop
-        useMultibandLayers({
-            wavesurfer,
-            waveLowRef,
-            waveMidRef,
-            waveHighRef,
-            visualMode,
-            multibandBuffers,
-            zoom,
-            trackBlobUrl,
-        });
 
         const handleToggleVisualMode = async () => {
             const modes = ['blue', 'rgb', '3band'];
@@ -326,6 +294,71 @@ const WaveformEditorInner = forwardRef(
             );
         }, [fullTrack]);
 
+        // 3-band envelopes come precomputed from the backend (Butterworth, same data the DAW uses) —
+        // no client-side band split, WAV encode or extra decode per track. Sources without a library
+        // path (blob URLs, streaming) have none: the master then shows its full-band waveform.
+        const bandSourcePath =
+            !streaming && !blobUrl && fullTrack?.path && !fullTrack.path.startsWith('blob:')
+                ? fullTrack.path
+                : null;
+        const wantBands = visualMode === 'rgb' || visualMode === '3band';
+        useEffect(() => {
+            if (!wantBands || !bandSourcePath) return;
+            const cached = bandCacheRef.current.get(bandSourcePath);
+            if (cached) {
+                setBands({ key: bandSourcePath, status: 'ready', peaks: cached });
+                return;
+            }
+            setBands({ key: bandSourcePath, status: 'loading', peaks: null });
+            const controller = new AbortController();
+            api.get('/api/audio/waveform', {
+                params: { path: bandSourcePath, pps: BAND_PEAKS_PER_SECOND },
+                timeout: BAND_FETCH_TIMEOUT_MS,
+                signal: controller.signal,
+            })
+                .then((res) => {
+                    const d = res.data;
+                    if (!d?.low?.length || !(d.duration > 0))
+                        throw new Error('empty band waveform');
+                    const peaks = {
+                        low: Float32Array.from(d.low),
+                        mid: Float32Array.from(d.mid),
+                        high: Float32Array.from(d.high),
+                        duration: d.duration,
+                    };
+                    const cache = bandCacheRef.current;
+                    cache.set(bandSourcePath, peaks);
+                    if (cache.size > BAND_CACHE_SIZE) cache.delete(cache.keys().next().value);
+                    setBands({ key: bandSourcePath, status: 'ready', peaks });
+                })
+                .catch((e) => {
+                    if (controller.signal.aborted) return;
+                    log.warn(
+                        '[WaveformEditor] 3-band waveform unavailable, showing full-band',
+                        e?.message || e
+                    );
+                    setBands({ key: bandSourcePath, status: 'unavailable', peaks: null });
+                });
+            return () => controller.abort();
+        }, [wantBands, bandSourcePath]);
+
+        const trackBands = bands.key === bandSourcePath ? bands : null;
+        const bandsUnavailable = !bandSourcePath || trackBands?.status === 'unavailable';
+        const analyzing = wantBands && !bandsUnavailable && trackBands?.status !== 'ready';
+
+        // Slave-band lifecycle + RAF sync loop. Bands wait for the master decode so the master
+        // WaveSurfer exists and both layers appear together.
+        useMultibandLayers({
+            wavesurfer,
+            waveLowRef,
+            waveMidRef,
+            waveHighRef,
+            visualMode,
+            zoom,
+            bandsUnavailable,
+            bandPeaks: bufferReady && trackBands?.status === 'ready' ? trackBands.peaks : null,
+        });
+
         // Master WaveSurfer lifecycle + track loading + playback/zoom sync (init effect lives here)
         useWaveSurfer({
             wavesurfer,
@@ -353,7 +386,6 @@ const WaveformEditorInner = forwardRef(
             setDuration,
             setLoading,
             setBufferReady,
-            setMultibandBuffers,
             setCurrentTime,
             setSelectionStart,
             setZoom,
