@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import threading
 from pathlib import Path
 
 import httpx
@@ -24,6 +25,7 @@ import pytest
 from fastapi import HTTPException
 
 from app import main
+from app import phrase_generator as pg
 from app.main import _phrase_track_fields, _run_phrase_batch, app, resolve_track_scope
 from app.phrase_generator import PhraseNotAnalysedError
 
@@ -121,11 +123,12 @@ def _drive(
     """Run _run_phrase_batch over `tracks` with patched phrase funcs; return job."""
     if cues is None:
         cues = [{"type": "phrase_start", "position_ms": 0, "label": "P1", "color": 0}]
-    monkeypatch.setattr(main, "extract_beats_from_db", lambda tid, dbp: list(beats))
+    monkeypatch.setattr(main, "extract_beats_from_db", lambda tid, dbp, **_k: list(beats))
+    monkeypatch.setattr(main, "resolve_anlz_dirs", lambda ids, dbp: {})
     monkeypatch.setattr(main, "generate_phrase_cues", lambda b, phrase_length=16: cues)
     monkeypatch.setattr(main, "detect_first_downbeat", lambda p, b: b[0])
     if commit is None:
-        commit = lambda tid, c, dbp, include_bar_markers=False: {"written": len(c)}  # noqa: E731
+        commit = lambda tid, c, dbp, include_bar_markers=False, **_k: {"written": len(c)}  # noqa: E731
     monkeypatch.setattr(main, "commit_phrase_cues", commit)
     monkeypatch.setattr(main, "_live_master_db_path", lambda: Path(LIVE_DB_PATH))
 
@@ -240,7 +243,7 @@ def test_worker_skips_no_phrase_cues(monkeypatch):
 
 
 def test_worker_skips_not_analysed(monkeypatch):
-    def _raise(tid, c, dbp, include_bar_markers=False):
+    def _raise(tid, c, dbp, include_bar_markers=False, **_k):
         raise PhraseNotAnalysedError("no anlz")
 
     job = _drive(_tracks(2), monkeypatch, commit=_raise)
@@ -249,7 +252,7 @@ def test_worker_skips_not_analysed(monkeypatch):
 
 
 def test_worker_records_failure(monkeypatch):
-    def _boom(tid, c, dbp, include_bar_markers=False):
+    def _boom(tid, c, dbp, include_bar_markers=False, **_k):
         raise ValueError("kaboom")
 
     job = _drive(_tracks(1), monkeypatch, commit=_boom)
@@ -264,7 +267,7 @@ def test_worker_cancel_before_first(monkeypatch):
 
 
 def test_worker_error_cap(monkeypatch):
-    def _boom(tid, c, dbp, include_bar_markers=False):
+    def _boom(tid, c, dbp, include_bar_markers=False, **_k):
         raise ValueError("x")
 
     job = _drive(_tracks(250), monkeypatch, commit=_boom)
@@ -276,7 +279,7 @@ def test_worker_error_cap(monkeypatch):
 def test_worker_hands_the_live_master_db_to_every_call(monkeypatch):
     seen = []
 
-    def _commit(tid, c, dbp, include_bar_markers=False):
+    def _commit(tid, c, dbp, include_bar_markers=False, **_k):
         seen.append(dbp)
         return {"written": len(c)}
 
@@ -301,6 +304,76 @@ def test_worker_eta_positive_mid_run(monkeypatch):
     # 2 tracks: assert eta math stays a non-negative number through completion.
     job = _drive(_tracks(2), monkeypatch)
     assert isinstance(job["eta_seconds"], float) and job["eta_seconds"] >= 0.0
+
+
+class _FakeMasterDb:
+    """Stands in for rbox.MasterDb; remembers the thread that opened it."""
+
+    def __init__(self) -> None:
+        self.opened_in = threading.get_ident()
+
+
+def _count_master_db_opens(monkeypatch, tmp_path):
+    """Real resolve_anlz_dirs / _lookup_anlz_dir; only the rbox open is faked.
+
+    Returns (opens, cross_thread_uses). Fake extract/commit resolve their ANLZ
+    dir exactly like the real ones (`_lookup_anlz_dir`), so the open count is
+    what a real batch pays.
+    """
+    anlz_dir = tmp_path / "anlz"
+    anlz_dir.mkdir()
+    opens: list[int] = []
+    cross_thread: list[int] = []
+
+    def fake_open(db_path, caller):
+        opens.append(threading.get_ident())
+        return _FakeMasterDb()
+
+    def fake_resolve_on(handle, tid):
+        if threading.get_ident() != handle.opened_in:
+            cross_thread.append(tid)
+        return str(anlz_dir)
+
+    def fake_extract(tid, dbp, *, anlz_dirs=None):
+        assert pg._lookup_anlz_dir(tid, dbp, anlz_dirs) == str(anlz_dir)
+        return [0.0, 0.5, 1.0, 1.5]
+
+    def fake_commit(tid, cues, dbp, *, include_bar_markers=False, anlz_dirs=None):
+        assert pg._lookup_anlz_dir(tid, dbp, anlz_dirs) == str(anlz_dir)
+        return {"written": len(cues)}
+
+    monkeypatch.setattr(pg, "_open_master_db", fake_open)
+    monkeypatch.setattr(pg, "_resolve_on", fake_resolve_on)
+    monkeypatch.setattr(main, "extract_beats_from_db", fake_extract)
+    monkeypatch.setattr(main, "commit_phrase_cues", fake_commit)
+    monkeypatch.setattr(main, "detect_first_downbeat", lambda p, b: b[0])
+    monkeypatch.setattr(main, "_live_master_db_path", lambda: Path(LIVE_DB_PATH))
+    return opens, cross_thread
+
+
+def test_worker_opens_master_db_once_per_batch(monkeypatch, tmp_path):
+    opens, cross_thread = _count_master_db_opens(monkeypatch, tmp_path)
+    main._phrase_jobs["job-opens"] = _new_job(25)
+    asyncio.run(_run_phrase_batch("job-opens", _tracks(25), 16, False, False))
+    job = main._phrase_jobs["job-opens"]
+    assert job["status"] == "done" and job["succeeded"] == 25
+    assert len(opens) == 1  # was 2 per track (extract + commit) = 50
+    assert cross_thread == []
+
+
+def test_worker_falls_back_per_track_when_prefetch_fails(monkeypatch, tmp_path):
+    opens, cross_thread = _count_master_db_opens(monkeypatch, tmp_path)
+
+    def broken(ids, dbp):
+        raise RuntimeError("prefetch blew up")
+
+    monkeypatch.setattr(main, "resolve_anlz_dirs", broken)
+    main._phrase_jobs["job-fallback"] = _new_job(3)
+    asyncio.run(_run_phrase_batch("job-fallback", _tracks(3), 16, False, False))
+    job = main._phrase_jobs["job-fallback"]
+    assert job["status"] == "done" and job["succeeded"] == 3
+    assert len(opens) == 6  # old behaviour: extract + commit per track
+    assert cross_thread == []
 
 
 # ── Endpoints ────────────────────────────────────────────────────────────────

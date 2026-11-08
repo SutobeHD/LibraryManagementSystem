@@ -315,6 +315,7 @@
 | `tests/test_db_taste.py` | taste-vector store tests (recommender-taste-llm-audio T1 — app/db_taste.py). |
 | `tests/test_download_names_route.py` | ``POST /api/soundcloud/downloads/{sc_track_id}/names`` (artist hub T-31, Threat T18). |
 | `tests/test_download_registry.py` | Tests for app/download_registry.py — SoundCloud download dedup/history DB. |
+| `tests/test_duplicate_grouping.py` | Duplicate finder: O(n) digest grouping, parallel fingerprinting, location index. |
 | `tests/test_external_track_match.py` | external_track_match unit tests (external-track-match-unified-module T-3..T-9). |
 | `tests/test_folder_watcher.py` | Tests for app/folder_watcher.py — auto-import folder watcher. |
 | `tests/test_genre_atlas.py` | Tests for app.genre_atlas: matching logic on a synthetic atlas + integrity of the snapshot. |
@@ -324,6 +325,7 @@
 | `tests/test_library_format_swap.py` | Tests for app.library_format_swap. |
 | `tests/test_library_source.py` | Tests for app/library_source.py — the Live/XML normalization layer. |
 | `tests/test_library_tracks_light.py` | GET /api/library/tracks — the optional ``light`` projection (app/main.py). |
+| `tests/test_librosa_lazy_import.py` | Booting the sidecar (``import app.main``) must not import librosa / numpy. |
 | `tests/test_live_cue_loading.py` | Cue loading in `app.live_database`. |
 | `tests/test_live_playlist_ops.py` | Tests for the live-mode playlist primitives in `app/live_database.py`. |
 | `tests/test_logging_redaction.py` | Unit tests for `app.logging_utils.RedactingFormatter`. |
@@ -354,6 +356,7 @@
 | `tests/test_security_hotfixes.py` | Regression tests for the 5 security hotfixes in commit e3a5ae8. |
 | `tests/test_services.py` | Tests for `app/services.py`. |
 | `tests/test_settings_caps.py` | Tests for `SetReq` payload caps + `SettingsManager.load` sanitizer. |
+| `tests/test_shutdown_flush.py` | Shutdown paths flush coalesced XML saves before os._exit / os.execv. |
 | `tests/test_smart_playlist_engine.py` | Tests for app/smart_playlist_engine.py — the smart-playlist rule evaluator. |
 | `tests/test_soundcloud_api.py` | Tests for `app/soundcloud_api.py`. |
 | `tests/test_soundcloud_artist_api.py` | Artist-Hub SoundCloud client tests (T-12 + T-13 — app/soundcloud_api.py). |
@@ -363,6 +366,7 @@
 | `tests/test_soundcloud_downloader_security.py` | Security regression tests for app/soundcloud_downloader. |
 | `tests/test_soundcloud_log_redaction.py` | Regression guard: no SoundCloud log record may carry a `client_id`. |
 | `tests/test_soundcloud_refresh_route.py` | Route tests for the persistent SoundCloud login (T-19). |
+| `tests/test_stream_chunking.py` | GET /api/stream: file reads happen off the event loop, in 1 MiB chunks. |
 | `tests/test_stream_unicode_filename.py` | Regression: GET /api/stream 500 on non-latin-1 filenames. |
 | `tests/test_system_health.py` | Contract tests for ``GET /api/system/health`` -- unauth'd liveness probe. |
 | `tests/test_track_metadata_fields.py` | Track-metadata writes refuse fields and values the backend cannot store (issue K8). |
@@ -373,6 +377,8 @@
 | `tests/test_usb_relocate.py` | Tests for the USB relocation pass (`app/usb_one_library.py`). |
 | `tests/test_variant_detector.py` | variant_schema + variant_detector tests (analysis-remix-detector T-2, T-3). |
 | `tests/test_variant_schema.py` | Tests for app/variant_schema.py — variants.db DDL + migration runner. |
+| `tests/test_waveform_cache.py` | GET /api/audio/waveform: off-loop compute, disk cache, in-flight dedup. |
+| `tests/test_xml_clean_offloop.py` | POST /api/xml/clean: upload copy + full library reload run off the event loop. |
 | `tests/test_xml_generator.py` | Tests for app/xml_generator.py — Rekordbox collection XML export. |
 
 ## scripts/ — Dev/Build Utilities
