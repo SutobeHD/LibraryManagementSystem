@@ -1,8 +1,8 @@
 /**
  * node:test for the shared task-polling store (refcount, back-off, pause, kick).
+ * Plain suite (CI runs it without a resolver), so imports carry `.js`:
  *
- *   node --import ./frontend/src/audio/dawState/dawReducer.test.resolver.mjs \
- *        --test frontend/src/hooks/useTaskPolling.test.js
+ *   node --test frontend/src/hooks/useTaskPolling.test.js
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -13,7 +13,7 @@ import {
     TASK_POLL_ACTIVE_MS,
     TASK_POLL_IDLE_MS,
     TASK_POLL_KICK_WINDOW_MS,
-} from './useTaskPolling';
+} from './useTaskPolling.js';
 
 const flush = () => new Promise((resolve) => setImmediate(resolve));
 
