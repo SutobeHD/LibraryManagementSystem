@@ -6,9 +6,13 @@
  * Now includes Palette tab and collapse toggle.
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Search, Music, FolderOpen, Grid, ChevronDown, ChevronUp, FileAudio } from 'lucide-react';
 import api, { fetchLibraryTracks } from '../../api/api';
+
+// The backend ignores `limit` and returns the whole library, and these rows are
+// not virtualized — cap what reaches the DOM. Search reaches the rest.
+const ROW_LIMIT = 200;
 
 const DawBrowser = React.memo(({ onLoadTrack, onOpenProject, isCollapsed, onToggleCollapse }) => {
     const [searchQuery, setSearchQuery] = useState('');
@@ -62,14 +66,18 @@ const DawBrowser = React.memo(({ onLoadTrack, onOpenProject, isCollapsed, onTogg
         fetchProjects();
     }, []);
 
-    // Filter tracks by search
-    const filteredTracks = searchQuery
-        ? tracks.filter(
-              (t) =>
-                  (t.title || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-                  (t.artist || '').toLowerCase().includes(searchQuery.toLowerCase())
-          )
-        : tracks;
+    // Library rows carry Title/Artist; lower-case keys are the fallback shape.
+    const filteredTracks = useMemo(() => {
+        if (!searchQuery) return tracks;
+        const q = searchQuery.toLowerCase();
+        return tracks.filter(
+            (t) =>
+                (t.title || t.Title || '').toLowerCase().includes(q) ||
+                (t.artist || t.Artist || '').toLowerCase().includes(q)
+        );
+    }, [tracks, searchQuery]);
+
+    const visibleTracks = useMemo(() => filteredTracks.slice(0, ROW_LIMIT), [filteredTracks]);
 
     return (
         <div className="w-full h-full flex flex-col bg-mx-deepest/80 border-t border-white/5">
@@ -148,7 +156,7 @@ const DawBrowser = React.memo(({ onLoadTrack, onOpenProject, isCollapsed, onTogg
                                     {searchQuery ? 'No matches' : 'No tracks loaded'}
                                 </p>
                             ) : (
-                                filteredTracks.map((track, idx) => (
+                                visibleTracks.map((track, idx) => (
                                     // Index fallback prevents duplicate `undefined` keys when
                                     // the backend returns tracks without `id`/`TrackID` (e.g.,
                                     // freshly imported rows). Without this fallback, React
@@ -173,6 +181,12 @@ const DawBrowser = React.memo(({ onLoadTrack, onOpenProject, isCollapsed, onTogg
                                         </div>
                                     </div>
                                 ))
+                            )}
+                            {!isLoading && filteredTracks.length > visibleTracks.length && (
+                                <p className="text-[10px] text-ink-placeholder text-center py-2">
+                                    {visibleTracks.length} of {filteredTracks.length} shown — search
+                                    to narrow down
+                                </p>
                             )}
                         </div>
                     </>

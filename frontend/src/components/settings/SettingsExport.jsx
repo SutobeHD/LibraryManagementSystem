@@ -113,12 +113,14 @@ const SettingsExport = ({ settings, setSettings }) => {
                         onClick={async () => {
                             try {
                                 const tracks = await fetchLibraryTracks();
-                                const ids = tracks.data.map((t) => t.id || t.TrackID);
+                                // Live-library tracks carry `ID`, XML-mode tracks `id`.
+                                const ids = tracks.data.map((t) => t.ID ?? t.id).filter(Boolean);
                                 const res = await api.post('/api/rekordbox/export', {
                                     track_ids: ids,
                                 });
                                 toast.success(`Exported: ${res.data.path}`);
-                            } catch {
+                            } catch (err) {
+                                console.error('[SettingsExport] Rekordbox push failed', err);
                                 toast.error('Export failed');
                             }
                         }}

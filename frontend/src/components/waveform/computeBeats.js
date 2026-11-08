@@ -1,4 +1,4 @@
-import { expandBeatGrid } from '../../audio/beatGrid';
+import { expandBeatGrid } from '../../audio/beatGrid.js';
 
 // Builds the beat array used for grid rendering + snap-to-grid. Follows the Rekordbox
 // grid (per-segment BPM, bar position); falls back to even spacing when no grid exists.

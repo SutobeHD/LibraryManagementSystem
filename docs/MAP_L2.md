@@ -24,7 +24,13 @@ LibraryManagementSystem -- Analysis Result Cache
 - `  AnalysisCache.invalidate()` — Remove a cache entry without deleting the underlying audio file.
 - `  AnalysisCache.clear()` — Empty the entire cache.
 - `  AnalysisCache.stats()` — Return cache size + entry count.
+- `WaveformCache` — Disk cache for /api/audio/waveform response bodies.
+- `  WaveformCache.key()`
+- `  WaveformCache.get()` — Cached body if the source file still has the stat ``st``, else None.
+- `  WaveformCache.put()` — Store ``body`` for the source stat ``st`` (taken before computing).
+- `  WaveformCache.clear()` — Delete every entry.
 - `get_default_cache()`
+- `get_waveform_cache()`
 
 ### `app/analysis_db_writer.py`
 
@@ -382,6 +388,7 @@ artist_store.sync — the idle signal + the background catalogue refresh (T-17).
 
 LibraryManagementSystem -- Audio Analyzer (Unified Wrapper)
 
+- `fingerprint_pcm_md5()` — MD5 digest of the first 30 s of decoded mono PCM (11025 Hz).
 - `AudioAnalyzer` — Background worker pool for audio analysis.
 - `  AudioAnalyzer.get_executor()`
 - `  AudioAnalyzer.shutdown()`
@@ -431,7 +438,12 @@ Batch comment edits over the live library (``POST /api/tools/batch-comment``).
 *(no module docstring)*
 
 - `db_lock()` — Acquire `_db_write_lock` for the duration of the `with` block.
+- `flush_pending_saves()` — Write every XML library with unsaved changes.
 - `RekordboxXMLDB`
+- `  RekordboxXMLDB.xml_path()` — Library file path.
+- `  RekordboxXMLDB.xml_path()`
+- `  RekordboxXMLDB.pending_save()` — True while a mutation is in memory but not yet in the library file.
+- `  RekordboxXMLDB.flush()` — Write pending changes now.
 - `  RekordboxXMLDB.load_xml()`
 - `  RekordboxXMLDB.get_playlist_tracks()`
 - `  RekordboxXMLDB.get_track_details()`
@@ -461,10 +473,10 @@ Batch comment edits over the live library (``POST /api/tools/batch-comment``).
 - `  RekordboxXMLDB.get_track_mytags()`
 - `  RekordboxXMLDB.set_track_mytags()`
 - `  RekordboxXMLDB.delete_track()`
-- `  RekordboxXMLDB.save_xml()`
+- `  RekordboxXMLDB.save_xml()` — Write the library file now, pending debounce or not.
 - `RekordboxDB`
 - `  RekordboxDB.ensure_standalone_master_db()` — Create an empty master.db at our private location if Rekordbox isn't installed.
-- `  RekordboxDB.tracks()`
+- `  RekordboxDB.tracks()` — Track dict of the active backend, minus streaming tracks when hidden.
 - `  RekordboxDB.playlists()`
 - `  RekordboxDB.artists()`
 - `  RekordboxDB.genres()`
@@ -1091,6 +1103,7 @@ phrase_generator.py — Phrase & Auto-Cue Generator
 - `generate_phrase_cues()` — Generate a list of cue point dicts at every N-bar phrase boundary.
 - `phrase_cues_to_memory_dicts()` — Map generate_phrase_cues() output to anlz_writer memory-cue dicts.
 - `resolve_anlz_dir()` — Find the existing ANLZ directory for a track via rbox, or None if the track
+- `resolve_anlz_dirs()` — Resolve the ANLZ directory of many tracks with ONE master.db open.
 - `commit_phrase_cues()` — Write phrase markers as Rekordbox MEMORY cues into the track's existing
 
 ### `app/playcount_sync.py`
@@ -1566,6 +1579,16 @@ historyReducer — undo / redo full-state snapshots + HYDRATE.
 
 - `historyReducer()` — History-domain reducer.
 
+### `frontend/src/audio/dawState/playheadStore.js`
+
+playheadStore — live transport position, kept outside the DAW reducer.
+
+- `createPlayheadStore()` — playheadStore — live transport position, kept outside the DAW reducer.
+
+### `frontend/src/audio/dawState/playheadStore.test.js`
+
+Tests for the live playhead store (playheadStore.js).
+
 ### `frontend/src/audio/dawState/regions.js`
 
 regionsReducer — region create / split / move / delete / resize / clipboard.
@@ -1769,6 +1792,13 @@ useDawShortcuts — keyboard-shortcut binding for the DJ Edit DAW.
 - `matches()` — Returns true if a KeyboardEvent matches a combo string.
 - `useDawShortcuts()`
 
+### `frontend/src/components/daw/usePlayheadClock.js`
+
+usePlayheadClock — owns the live playhead store for one DAW instance.
+
+- `usePlayheadClock()` — @param {Object} args @param {boolean} args.isPlaying reducer `isPlaying` @param {number} args.playh…
+- `usePlayheadTime()` — Subscribe a component to the live playhead (seconds).
+
 ### `frontend/src/components/daw/useTrackLoader.js`
 
 useTrackLoader — Effect hook that hydrates DAW state when activeTrack changes.
@@ -1860,7 +1890,7 @@ localStorage auto-save + restore for per-track edits (cuts + hot cues).
 
 ### `frontend/src/components/waveform/useMultibandLayers.js`
 
-Owns the slave WaveSurfer instances that render the LOW/MID/HIGH bands, plus the RAF sync
+Owns the slave WaveSurfers that render the LOW/MID/HIGH bands from precomputed peaks.
 
 - `useMultibandLayers()` — Owns the slave WaveSurfer instances that render the LOW/MID/HIGH bands, plus the RAF sync loop that…
 
@@ -1872,8 +1902,10 @@ Debounced non-destructive preview rebuild — whenever cuts change, splice the A
 
 ### `frontend/src/components/waveform/useWaveSurfer.js`
 
-Owns the master WaveSurfer + Overview lifecycle:
+Owns the master WaveSurfer + overview lifecycle: one fetch + one decode per track.
 
+- `OVERVIEW_PEAK_COUNT()` — Overview strip resolution — wavesurfer's own exportPeaks() default; enough for a 4K-wide strip.
+- `streamUrlFor()`
 - `useWaveSurfer()` — Owns the master WaveSurfer + Overview lifecycle: - mount-once init (registers regions/timeline plug…
 
 ### `frontend/src/components/waveform/useWaveformInteractions.js`
@@ -1929,6 +1961,38 @@ Tag chips for the Ranking view.
 ### `frontend/src/config/tagTaxonomy.test.js`
 
 node --test frontend/src/config/tagTaxonomy.test.js Pure module, imports carry extensions — no resolver needed.
+
+### `frontend/src/hooks/useTaskPolling.js`
+
+useTaskPolling — one shared poller per endpoint for background-task status.
+
+- `TASK_POLL_ACTIVE_MS()`
+- `TASK_POLL_IDLE_MS()`
+- `TASK_POLL_KICK_WINDOW_MS()`
+- `SC_TASKS_ENDPOINT()`
+- `IMPORT_TASKS_ENDPOINT()`
+- `TERMINAL_TASK_STATES()` — End states of import_tracker + SoundCloud downloader tasks.
+- `TASK_START_URL_PREFIXES()` — Mutating requests that register import / download tasks on the backend.
+- `isTaskStartRequest()` — export const isAnyTaskRunning = (snapshot) => !!snapshot && typeof snapshot === 'object' && Object.…
+- `createTaskPollingStore()` — Framework-free poller registry.
+- `connectTaskPolling()` — const refresh = (endpoint) => { const p = pollers.get(endpoint); if (!p) return Promise.resolve(EMP…
+- `useTaskPolling()` — Subscribe a component to the shared poller for `endpoint`.
+
+### `frontend/src/hooks/useTaskPolling.test.js`
+
+node:test for the shared task-polling store (refcount, back-off, pause, kick).
+
+### `frontend/src/hooks/useVirtualRows.js`
+
+Row windowing for long tables: only the rows in (and near) the viewport are mounted; spacers above and below stand in for the rest.
+
+- `VIRTUAL_OVERSCAN_ROWS()` — Row windowing for long tables: only the rows in (and near) the viewport are mounted; spacers above …
+- `computeVirtualRange()` — Which rows to mount for a viewport.
+- `useVirtualRows()` — @param {object} opts @param {number} opts.rowCount total rows @param {number} [opts.overscan] rows …
+
+### `frontend/src/hooks/useVirtualRows.test.js`
+
+Range math of the TrackTable row windowing (computeVirtualRange).
 
 ### `frontend/src/store/authStore.js`
 
@@ -2123,7 +2187,10 @@ UtilitiesView — router for the Utilities workspace.
 
 ### `frontend/src/components/WaveformEditor.jsx`
 
-*(no module docstring)*
+Waveform editor used by Ranking mode (simpleMode): master + overview WaveSurfer, 3-band layers.
+
+- `BAND_PEAKS_PER_SECOND()` — 3-band RMS envelope resolution requested from /api/audio/waveform: 2 px per point at ZOOM_DEFAULT (…
+- `BAND_FETCH_TIMEOUT_MS()` — Uncached analysis of a long track (librosa load + 3 Butterworth passes) can exceed axios' 10 s defa…
 
 ### `frontend/src/components/XmlCleanView.jsx`
 
@@ -3720,6 +3787,45 @@ Tests for `app/database.py`.
 - `  TestFilterTracks.test_unknown_scheme_preserved()` — Only the four explicit prefixes are filtered.
 - `  TestFilterTracks.test_unknown_input_type_passed_through()` — If the caller hands a non-dict / non-list we just return it.
 
+### `tests/test_database_save_cache.py`
+
+Perf contracts of `app/database.py`: cached settings read + coalesced XML saves.
+
+- `settings_file()`
+- `load_calls()`
+- `TestHideStreamingCache`
+- `  TestHideStreamingCache.test_unchanged_file_is_read_at_most_once()`
+- `  TestHideStreamingCache.test_missing_file_is_read_at_most_once()`
+- `  TestHideStreamingCache.test_flag_flips_on_first_access_after_mtime_change()`
+- `  TestHideStreamingCache.test_settings_manager_save_takes_effect_on_next_access()`
+- `TestFilteredTracksMemo`
+- `  TestFilteredTracksMemo.strip_calls()`
+- `  TestFilteredTracksMemo.hidden()`
+- `  TestFilteredTracksMemo.test_filtered_view_is_built_once()`
+- `  TestFilteredTracksMemo.test_facade_add_and_delete_invalidate()`
+- `  TestFilteredTracksMemo.test_path_change_invalidates()`
+- `  TestFilteredTracksMemo.test_swapped_or_resized_source_invalidates()`
+- `writes()` — Every target `_write_atomically` was called with (stray writes included).
+- `fake_clock()` — Distinct, repeatable millisecond ids for create_playlist / create_smart_playlist.
+- `make_xml()`
+- `TestXmlBytes`
+- `  TestXmlBytes.test_output_matches_pre_change_implementation()`
+- `  TestXmlBytes.test_coalesced_equals_save_after_every_mutation()`
+- `TestCoalescedSave`
+- `  TestCoalescedSave.test_hundred_mutations_write_at_most_twice()`
+- `  TestCoalescedSave.test_explicit_save_writes_immediately()`
+- `  TestCoalescedSave.test_reading_xml_path_flushes()`
+- `  TestCoalescedSave.test_facade_xml_path_flushes()`
+- `  TestCoalescedSave.test_repointing_xml_path_flushes_to_old_file()`
+- `  TestCoalescedSave.test_load_library_flushes_pending_first()`
+- `  TestCoalescedSave.test_unload_flushes_and_never_writes_the_empty_library()`
+- `  TestCoalescedSave.test_unload_after_failed_flush_leaves_the_file_alone()`
+- `  TestCoalescedSave.test_exit_flush_writes_pending_libraries()`
+- `  TestCoalescedSave.test_exit_flush_gives_up_on_a_wedged_writer()`
+- `  TestCoalescedSave.test_steady_mutations_are_saved_by_the_max_delay()`
+- `  TestCoalescedSave.test_failed_write_stays_dirty_until_a_later_flush()`
+- `  TestCoalescedSave.test_mutation_during_write_keeps_library_dirty()`
+
 ### `tests/test_db_taste.py`
 
 taste-vector store tests (recommender-taste-llm-audio T1 — app/db_taste.py).
@@ -3799,6 +3905,20 @@ Tests for app/download_registry.py — SoundCloud download dedup/history DB.
 - `test_set_names_binds_its_values()`
 - `test_set_names_on_a_row_that_is_not_there_is_false()`
 - `test_set_names_on_an_unreadable_registry_is_false_and_logged()`
+
+### `tests/test_duplicate_grouping.py`
+
+Duplicate finder: O(n) digest grouping, parallel fingerprinting, location index.
+
+- `test_grouping_equals_legacy_on_mixed_input()`
+- `test_grouping_equals_legacy_on_5k_digests()`
+- `test_digest_grouping_is_linear_on_5k_paths()`
+- `test_fingerprint_paths_preserves_input_order_and_bounds_inflight()`
+- `test_worker_count_bounds()`
+- `test_run_duplicate_scan_end_to_end_real_decode()` — Real librosa decode on the scan's thread pool, grouping + enrichment.
+- `test_location_index_first_match_wins_and_keeps_all()`
+- `test_location_index_matches_like_windows_path_equality()`
+- `test_member_info_survives_bad_numeric_metadata()`
 
 ### `tests/test_external_track_match.py`
 
@@ -4026,6 +4146,13 @@ GET /api/library/tracks — the optional ``light`` projection (app/main.py).
 - `test_hide_streaming_applies_light_or_not()`
 - `test_usb_source_and_rekordbox_xml_keep_grids_after_a_light_fetch()` — The CDJ-facing readers of the cached dicts, after a light fetch.
 - `test_light_survives_the_beatgrid_loader_writing_meanwhile()` — A writer keeps removing and re-inserting beatGrid on every cached dict
+
+### `tests/test_librosa_lazy_import.py`
+
+Booting the sidecar (``import app.main``) must not import librosa / numpy.
+
+- `test_import_app_main_does_not_load_librosa_or_numpy()`
+- `test_flag_is_a_plain_bool_and_engine_loads_on_demand()`
 
 ### `tests/test_live_cue_loading.py`
 
@@ -4268,6 +4395,28 @@ PDB writer structural test against F: drive Pioneer reference.
 - `main()`
 - `test_export_pdb_invariants()` — pytest entry point — all export.pdb byte invariants must hold.
 
+### `tests/test_phrase_anlz_dirs.py`
+
+One master.db open per phrase batch via `resolve_anlz_dirs`.
+
+- `FakeMasterDb`
+- `  FakeMasterDb.get_content_by_id()`
+- `  FakeMasterDb.share_directory()`
+- `library()` — Fake rbox; every even id analysed, ANLZ dirs on disk up to ON_DISK.
+- `TestResolveAnlzDirs`
+- `  TestResolveAnlzDirs.test_one_open_for_5k_tracks()`
+- `  TestResolveAnlzDirs.test_same_answers_as_per_track_resolution()`
+- `  TestResolveAnlzDirs.test_open_failure_returns_empty_so_callers_fall_back()`
+- `  TestResolveAnlzDirs.test_dir_missing_on_disk_is_none()`
+- `TestPhraseBatchOpens`
+- `  TestPhraseBatchOpens.test_batch_with_prefetch_opens_once()`
+- `  TestPhraseBatchOpens.test_batch_without_prefetch_is_two_opens_per_analysed_track()`
+- `  TestPhraseBatchOpens.test_prefetch_and_fresh_lookup_write_the_same_dirs()`
+- `  TestPhraseBatchOpens.test_track_missing_from_map_falls_back_to_lookup()`
+- `  TestPhraseBatchOpens.test_empty_map_after_failed_prefetch_falls_back()`
+- `  TestPhraseBatchOpens.test_stale_map_entry_is_rechecked()`
+- `  TestPhraseBatchOpens.test_not_analysed_in_map_raises_without_open()`
+
 ### `tests/test_phrase_batch.py`
 
 Tests for the phrase-batch backend (app/main.py):
@@ -4291,6 +4440,8 @@ Tests for the phrase-batch backend (app/main.py):
 - `test_worker_hands_the_live_master_db_to_every_call()`
 - `test_worker_errors_out_when_the_library_left_live_mode()`
 - `test_worker_eta_positive_mid_run()`
+- `test_worker_opens_master_db_once_per_batch()`
+- `test_worker_falls_back_per_track_when_prefetch_fails()`
 - `test_start_requires_auth()`
 - `test_start_library_not_loaded()`
 - `test_start_bad_phrase_length()`
@@ -4440,6 +4591,33 @@ Routing-table invariant: no duplicate (method, path) registrations.
 - `test_no_duplicate_method_path()`
 - `test_deduplicated_path_has_single_handler()`
 
+### `tests/test_sc_fuzzy_index.py`
+
+SoundCloud sync matcher: the indexed matcher answers exactly like the old brute force.
+
+- `engine()`
+- `TestMatchesBruteForce`
+- `  TestMatchesBruteForce.test_synthetic_library_with_edge_cases()`
+- `  TestMatchesBruteForce.test_near_duplicate_library_ties_and_close_scores()` — One artist, numbered titles, shared suffix: many candidates with equal
+- `  TestMatchesBruteForce.test_exact_title_hit_takes_first_in_dict_order()`
+- `  TestMatchesBruteForce.test_equal_ratio_tie_takes_first_in_dict_order()`
+- `  TestMatchesBruteForce.test_empty_library()`
+- `test_lcs_bound_exact_up_to_64_chars_and_upper_bound_beyond()`
+- `counting_index()`
+- `TestIndexReuse`
+- `  TestIndexReuse.test_same_mapping_builds_once()`
+- `  TestIndexReuse.test_resized_mapping_rebuilds_and_sees_new_track()`
+- `  TestIndexReuse.test_other_mapping_rebuilds()`
+- `  TestIndexReuse.test_preview_and_sync_index_once_per_engine()`
+- `test_benchmark_20k_library_500_track_playlist()`
+
+### `tests/test_sc_lazy_numpy.py`
+
+``import app.soundcloud_api`` must not import numpy.
+
+- `test_import_soundcloud_api_does_not_load_numpy()`
+- `test_index_still_matches_after_lazy_import()`
+
 ### `tests/test_security_compare.py`
 
 Tests for ``app/security_compare.py::safe_compare``.
@@ -4581,6 +4759,15 @@ Tests for `SetReq` payload caps + `SettingsManager.load` sanitizer.
 - `  TestSettingsManagerLoadSanitizer.test_oversize_value_dropped_on_load()`
 - `  TestSettingsManagerLoadSanitizer.test_oversize_list_dropped_on_load()`
 - `  TestSettingsManagerLoadSanitizer.test_load_legacy_clean_file_unchanged()`
+
+### `tests/test_shutdown_flush.py`
+
+Shutdown paths flush coalesced XML saves before os._exit / os.execv.
+
+- `test_noop_without_flush_function()`
+- `test_calls_flush_and_logs_failure()`
+- `test_flush_exception_never_escapes()`
+- `test_graceful_shutdown_flushes_before_exit()`
 
 ### `tests/test_smart_playlist_engine.py`
 
@@ -4834,6 +5021,18 @@ Route tests for the persistent SoundCloud login (T-19).
 - `test_auth_status_clamps_a_negative_lifetime()` — An already-expired token reports 0 s left, never a negative number.
 - `test_auth_status_legacy_session_has_no_known_lifetime()` — A pre-refresh login carries no expiry — `null`, never a made-up number.
 
+### `tests/test_stream_chunking.py`
+
+GET /api/stream: file reads happen off the event loop, in 1 MiB chunks.
+
+- `sandbox_root()`
+- `audio()`
+- `reads()`
+- `test_full_stream_reads_off_loop_in_1mib_chunks()`
+- `test_ranged_stream_reads_off_loop()`
+- `test_open_ended_range_to_eof()`
+- `test_invalid_range_is_416()`
+
 ### `tests/test_stream_unicode_filename.py`
 
 Regression: GET /api/stream 500 on non-latin-1 filenames.
@@ -4912,6 +5111,45 @@ USB audio copies must not leave a truncated file that never self-heals.
 - `  TestNeedsCopy.test_unreadable_source_errs_toward_copying()`
 - `TestEndToEndHealing`
 - `  TestEndToEndHealing.test_a_truncated_track_is_repaired_on_the_next_sync()`
+
+### `tests/test_usb_lookup_batching.py`
+
+Batched master.db lookups in the USB scan / diff / legacy-export paths.
+
+- `FakeMasterDb` — Counts every getter call; mirrors the rbox 0.1.7 MasterDb read surface.
+- `  FakeMasterDb.get_contents()`
+- `  FakeMasterDb.get_artists()`
+- `  FakeMasterDb.get_albums()`
+- `  FakeMasterDb.get_artist_by_id()`
+- `  FakeMasterDb.get_album_by_id()`
+- `  FakeMasterDb.get_playlists()`
+- `  FakeMasterDb.get_playlist_by_id()`
+- `  FakeMasterDb.get_playlist_contents()`
+- `fake_rbox()` — Install a fake `rbox` module whose `MasterDb(...)` returns `state["db"]`.
+- `TestNameLookup`
+- `  TestNameLookup.test_one_bulk_call_for_many_lookups()`
+- `  TestNameLookup.test_unknown_and_falsy_ids_are_empty()`
+- `  TestNameLookup.test_int_and_str_ids_hit_the_same_entry()`
+- `  TestNameLookup.test_bulk_failure_falls_back_to_memoised_by_id()`
+- `  TestNameLookup.test_by_id_failure_in_fallback_is_empty_and_memoised()`
+- `TestCalculateDiffBatching`
+- `  TestCalculateDiffBatching.test_one_open_and_constant_getter_calls()`
+- `  TestCalculateDiffBatching.test_local_tracks_carry_real_artist_names()`
+- `  TestCalculateDiffBatching.test_open_failure_returns_empty_without_second_open()`
+- `TestMatchUpdatesEquivalence`
+- `  TestMatchUpdatesEquivalence.test_randomised_fixture_matches_old_loop()`
+- `  TestMatchUpdatesEquivalence.test_first_usb_match_in_stick_order_wins()`
+- `  TestMatchUpdatesEquivalence.test_none_artist_on_stick_no_longer_crashes()`
+- `  TestMatchUpdatesEquivalence.test_key_computed_once_per_track()` — O(local + usb) — not O(to_add x usb).
+- `legacy_engine()`
+- `TestLegacyExportBatching`
+- `  TestLegacyExportBatching.test_constant_lookups_for_5k_tracks()`
+- `  TestLegacyExportBatching.test_copied_files_land_under_the_artist_folder()`
+- `  TestLegacyExportBatching.test_playlist_filter_still_resolves()`
+- `TestLegacyExportGolden`
+- `  TestLegacyExportGolden.test_output_matches_pre_batching_export()`
+- `TestCalculateDiffEndToEnd`
+- `  TestCalculateDiffEndToEnd.test_same_artist_on_both_sides_is_unchanged()`
 
 ### `tests/test_usb_manager.py`
 
@@ -5073,6 +5311,36 @@ Tests for app/variant_schema.py — variants.db DDL + migration runner.
 - `test_tables_and_indexes_exist()`
 - `test_schema_accepts_a_variant_row()`
 - `test_newer_schema_left_untouched()`
+
+### `tests/test_waveform_cache.py`
+
+GET /api/audio/waveform: off-loop compute, disk cache, in-flight dedup.
+
+- `FakeEngine`
+- `sandbox_root()`
+- `audio_file()`
+- `cache()`
+- `test_cache_roundtrip_and_key_includes_pps()`
+- `test_cache_invalidates_on_mtime_or_size_change()`
+- `test_cache_key_is_case_insensitive_on_windows()`
+- `test_cache_corrupt_entry_is_a_miss()`
+- `test_cache_prunes_least_recently_used()`
+- `test_cache_prunes_by_total_bytes()`
+- `test_second_call_is_cache_hit()`
+- `test_response_bytes_match_previous_jsonresponse()`
+- `test_file_change_recomputes()`
+- `test_health_answers_while_waveform_computes()`
+- `test_concurrent_requests_share_one_computation()`
+- `test_compute_error_is_500_and_not_cached()`
+- `test_non_positive_pps_rejected()`
+- `test_sandbox_still_enforced()`
+
+### `tests/test_xml_clean_offloop.py`
+
+POST /api/xml/clean: upload copy + full library reload run off the event loop.
+
+- `test_clean_xml_loads_in_worker_thread_under_db_lock()`
+- `test_clean_xml_rejects_non_xml()`
 
 ### `tests/test_xml_generator.py`
 

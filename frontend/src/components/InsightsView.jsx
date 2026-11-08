@@ -20,7 +20,7 @@
  */
 
 import React, { useState, useEffect, useMemo } from 'react';
-import api, { fetchLibraryTracks } from '../api/api';
+import { fetchLibraryTracks } from '../api/api';
 import {
     BarChart3,
     Music,
@@ -44,27 +44,16 @@ const InsightsView = ({ libraryStatus }) => {
         if (!libraryStatus?.loaded) return;
         setLoading(true);
         setError(null);
-        // Aggregierter Endpoint — fällt auf Library-Daten zurück wenn nicht implementiert
-        api.get('/api/insights/dj_stats')
-            .then((res) => {
-                setStats(res.data);
+        // No aggregated insights endpoint exists in app/ (the old dj_stats call
+        // always 404'd) — derive the stats from the library track list.
+        fetchLibraryTracks()
+            .then((r) => {
+                setStats(deriveStatsFromTracks(r.data || []));
                 setLoading(false);
             })
-            .catch((err) => {
-                console.warn(
-                    '[Insights] dj_stats endpoint not available, using library fallback',
-                    err
-                );
-                // Fallback: aus Library-Daten ableiten
-                fetchLibraryTracks()
-                    .then((r) => {
-                        setStats(deriveStatsFromTracks(r.data || []));
-                        setLoading(false);
-                    })
-                    .catch((e) => {
-                        setError(e.message);
-                        setLoading(false);
-                    });
+            .catch((e) => {
+                setError(e.message);
+                setLoading(false);
             });
     }, [libraryStatus?.loaded]);
 

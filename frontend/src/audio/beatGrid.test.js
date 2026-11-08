@@ -1,10 +1,8 @@
 /**
  * Beat-grid helpers + the waveform editor's computeBeats.
  *
- *   node --import ./frontend/src/audio/dawState/dawReducer.test.resolver.mjs \
- *        --test frontend/src/audio/beatGrid.test.js
- *
- * The resolver is needed for computeBeats' extensionless Vite import.
+ * Plain suite (CI runs it without a resolver), so the import chain carries `.js`:
+ *   node --test frontend/src/audio/beatGrid.test.js
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';

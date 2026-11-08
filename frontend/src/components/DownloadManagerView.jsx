@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import api from '../api/api';
+import React, { useState, useMemo } from 'react';
+import { useTaskPolling, IMPORT_TASKS_ENDPOINT, SC_TASKS_ENDPOINT } from '../hooks/useTaskPolling';
 import RecognitionPanel from './downloads/RecognitionPanel';
 import {
     Download,
@@ -39,6 +39,7 @@ const FAILURE_STATES = new Set(['Failed', 'Error', 'Analysis Failed']);
 // "Linked"  = registry hit + linked into a SC_<…> playlist.
 // "Duplicate" = SHA-256 matched an existing imported file.
 const SKIP_STATES = new Set(['Skipped', 'Linked', 'Duplicate']);
+const NO_TASKS = {};
 
 const STATUS_LABELS = {
     Linked: 'Verlinkt',
@@ -286,31 +287,27 @@ const StatCard = ({ icon: Icon, label, value, color = 'text-amber2' }) => (
 );
 
 const DownloadManagerView = () => {
-    const [scTasks, setScTasks] = useState({});
-    const [importTasks, setImportTasks] = useState({});
+    const scPoll = useTaskPolling(SC_TASKS_ENDPOINT);
+    const importPoll = useTaskPolling(IMPORT_TASKS_ENDPOINT);
     const [source, setSource] = useState('all'); // all | soundcloud | import
     const [filter, setFilter] = useState('all'); // all | active | completed | failed
-    const [autoRefresh, setAutoRefresh] = useState(true);
+    // "Pausiert" freezes the list on this snapshot; the shared pollers keep
+    // running for the progress banner either way. null = live.
+    const [pausedSnapshot, setPausedSnapshot] = useState(null);
+    const autoRefresh = pausedSnapshot === null;
 
-    const fetchTasks = async () => {
-        try {
-            const [sc, imp] = await Promise.all([
-                api.get('/api/soundcloud/tasks').catch(() => ({ data: {} })),
-                api.get('/api/import/tasks').catch(() => ({ data: {} })),
-            ]);
-            setScTasks(sc.data || {});
-            setImportTasks(imp.data || {});
-        } catch (e) {
-            /* backend offline */
-        }
+    const scTasks = (autoRefresh ? scPoll.data : pausedSnapshot.sc) || NO_TASKS;
+    const importTasks = (autoRefresh ? importPoll.data : pausedSnapshot.imp) || NO_TASKS;
+
+    const toggleAutoRefresh = () =>
+        setPausedSnapshot((prev) =>
+            prev === null ? { sc: scPoll.data || {}, imp: importPoll.data || {} } : null
+        );
+
+    const refreshNow = async () => {
+        const [sc, imp] = await Promise.all([scPoll.refresh(), importPoll.refresh()]);
+        if (!autoRefresh) setPausedSnapshot({ sc: sc.data || {}, imp: imp.data || {} });
     };
-
-    useEffect(() => {
-        fetchTasks();
-        if (!autoRefresh) return;
-        const i = setInterval(fetchTasks, 1500);
-        return () => clearInterval(i);
-    }, [autoRefresh]);
 
     const merged = useMemo(() => {
         const sc = Object.values(scTasks).map((t) => ({ ...t, _src: 'soundcloud' }));
@@ -383,7 +380,7 @@ const DownloadManagerView = () => {
                     </div>
                     <div className="flex items-center gap-2">
                         <button
-                            onClick={() => setAutoRefresh((v) => !v)}
+                            onClick={toggleAutoRefresh}
                             className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all ${
                                 autoRefresh
                                     ? 'bg-ok/15 text-ok border-ok/30'
@@ -397,7 +394,7 @@ const DownloadManagerView = () => {
                             {autoRefresh ? 'Live' : 'Pausiert'}
                         </button>
                         <button
-                            onClick={fetchTasks}
+                            onClick={refreshNow}
                             className="px-3 py-1.5 rounded-lg text-xs font-bold bg-mx-card border border-white/10 hover:bg-white/5"
                         >
                             <Activity size={11} className="inline mr-1" /> Refresh
