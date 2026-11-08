@@ -1,4 +1,12 @@
-import React, { useState, useEffect, useRef } from 'react';
+import {
+    useState,
+    useEffect,
+    useLayoutEffect,
+    useRef,
+    useCallback,
+    useMemo,
+    useDeferredValue,
+} from 'react';
 import { createPortal } from 'react-dom';
 import api, { getScAuthMode } from '../api/api';
 import { log } from '../utils/log';
@@ -33,6 +41,7 @@ import RenameModal from './RenameModal';
 import SmartPlaylistEditor from './SmartPlaylistEditor';
 import { confirmModal } from './ConfirmModal';
 import { promptModal } from './PromptModal';
+import { SMART_PLAYLIST_LABEL_THRESHOLD } from '../config/constants';
 
 const PlaylistNode = ({
     node,
@@ -203,6 +212,110 @@ const PlaylistNode = ({
     );
 };
 
+const trackHay = (t) =>
+    [t.Title, t.Artist, t.Album, t.Comment, t.Genre, t.Label]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+
+// Lowercase free-text haystacks, one per track, built lazily on the first
+// search of a list and reused until the list is replaced (every reload sets a
+// new array). Index-aligned with the list: ~4x faster than a per-track lookup.
+const haysByList = new WeakMap();
+const haysFor = (list) => {
+    let hays = haysByList.get(list);
+    if (!hays) {
+        hays = list.map(trackHay);
+        haysByList.set(list, hays);
+    }
+    return hays;
+};
+
+const TEXT_FIELD_PROPS = new Map([
+    ['key', 'Key'],
+    ['genre', 'Genre'],
+    ['label', 'Label'],
+]);
+
+// One token -> track predicate, or null for a token that filters nothing ("bpm:").
+const compileToken = (tok) => {
+    const colon = tok.indexOf(':');
+    if (colon !== -1) {
+        const field = tok.slice(0, colon);
+        const val = tok.slice(colon + 1);
+        if (!val) return null;
+        if (field === 'bpm') {
+            const bpmOf = (t) => parseFloat(t.BPM || 0);
+            if (val.startsWith('>')) {
+                const min = parseFloat(val.slice(1));
+                return (t) => bpmOf(t) > min;
+            }
+            if (val.startsWith('<')) {
+                const max = parseFloat(val.slice(1));
+                return (t) => bpmOf(t) < max;
+            }
+            if (val.includes('-')) {
+                const [lo, hi] = val.split('-').map(parseFloat);
+                return (t) => {
+                    const bpm = bpmOf(t);
+                    return bpm >= lo && bpm <= hi;
+                };
+            }
+            const target = Math.round(parseFloat(val));
+            return (t) => Math.round(bpmOf(t)) === target;
+        }
+        const prop = TEXT_FIELD_PROPS.get(field);
+        if (prop)
+            return (t) =>
+                String(t[prop] || '')
+                    .toLowerCase()
+                    .includes(val);
+        if (field === 'year') return (t) => String(t.ReleaseYear || '') === val;
+        if (field === 'rating') {
+            const ratingOf = (t) => parseInt(t.Rating || 0);
+            if (val.startsWith('>')) {
+                const min = parseInt(val.slice(1));
+                return (t) => ratingOf(t) > min;
+            }
+            if (val.startsWith('<')) {
+                const max = parseInt(val.slice(1));
+                return (t) => ratingOf(t) < max;
+            }
+            const target = parseInt(val);
+            return (t) => ratingOf(t) === target;
+        }
+        // Unknown field -> treat token as plain
+    }
+    return (t, hay) => hay.includes(tok);
+};
+
+// Tokenized search, parsed once per query (not once per track) with operators:
+//   bpm:120-130   bpm:>120   bpm:<128   rating:>3
+//   key:Am   key:8A
+//   genre:techno   label:exfunk   year:2024
+//   plain text -> free-text Title/Artist/Album/Comment/Genre/Label
+const compileQuery = (q) => {
+    const preds = q.toLowerCase().split(/\s+/).filter(Boolean).map(compileToken).filter(Boolean);
+    return (t, hay) => preds.every((pred) => pred(t, hay));
+};
+
+const filterTracks = (list, q) => {
+    if (!q) return list;
+    const match = compileQuery(q);
+    const hays = haysFor(list);
+    return list.filter((t, i) => match(t, hays[i]));
+};
+
+// Non-folder, non-intelligent playlists for the "Add to Playlist" submenu.
+const flattenPlaylists = (nodes) => {
+    let result = [];
+    for (const n of nodes) {
+        if (n.Type === '1') result.push(n);
+        if (n.Children) result = result.concat(flattenPlaylists(n.Children));
+    }
+    return result;
+};
+
 const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatus }) => {
     const toast = useToast();
     const [tree, setTree] = useState([]);
@@ -224,18 +337,14 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
     const [renameNode, setRenameNode] = useState(null);
     const [collectionSearch, setCollectionSearch] = useState('');
     const [playlistSearch, setPlaylistSearch] = useState('');
-    const [displayTracks, setDisplayTracks] = useState([]);
+    // TrackTable's sorted order, read only by the SoundCloud export. A ref, not
+    // state: storing it re-rendered this view and the whole table again.
+    const displayTracksRef = useRef([]);
+    const handleSortedTracksChange = useCallback((sorted) => {
+        displayTracksRef.current = sorted;
+    }, []);
 
-    // Flatten tree to get all non-folder, non-intelligent playlists for "Add to Playlist" submenu
-    const flattenPlaylists = (nodes) => {
-        let result = [];
-        for (const n of nodes) {
-            if (n.Type === '1') result.push(n);
-            if (n.Children) result = result.concat(flattenPlaylists(n.Children));
-        }
-        return result;
-    };
-    const allPlaylists = flattenPlaylists(tree);
+    const allPlaylists = useMemo(() => flattenPlaylists(tree), [tree]);
 
     const loadTree = () => {
         setLoading(true);
@@ -270,13 +379,6 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
         }
     }, [libraryStatus?.loaded]);
 
-    useEffect(() => {
-        if (libraryStatus?.loaded) {
-            loadTree();
-            loadAllTracks();
-        }
-    }, []);
-
     const handleSelectCollection = () => {
         setSelectedPlaylist(null);
         setShowCollection(true);
@@ -294,17 +396,29 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
         });
     };
 
+    // Label playlists only. The "Artists" folder belongs to the Artist Hub
+    // projection now, so this must not claim to have generated artists.
     const handleSmartPlaylists = async () => {
         setIsProcessing(true);
         try {
-            await api.post('/api/library/smart-playlists', {
-                artist_threshold: 3,
-                label_threshold: 3,
+            const res = await api.post('/api/library/smart-playlists', {
+                label_threshold: SMART_PLAYLIST_LABEL_THRESHOLD,
             });
             loadTree();
-            toast.success('Smart Playlists generated!');
+            const created = res.data?.labels_created ?? 0;
+            toast.success(
+                `${created} label playlist(s) written. Artist playlists live in the Artist Hub.`
+            );
+            const legacy = res.data?.legacy_by_artist;
+            if (legacy) {
+                toast.info(
+                    `An old "By Artist" folder with ${legacy.playlists} playlist(s) is still in ` +
+                        `your library. Nothing touched it — the Artist Hub replaces it.`
+                );
+            }
         } catch (err) {
-            toast.error('Failed to generate smart playlists.');
+            console.error('[PlaylistBrowser] smart-playlists failed', err);
+            toast.error('Failed to generate label playlists.');
         } finally {
             setIsProcessing(false);
         }
@@ -567,7 +681,8 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
                 return;
             }
             const { invoke } = await import('@tauri-apps/api/core');
-            const exportTracks = displayTracks.length > 0 ? displayTracks : tracks;
+            const sorted = displayTracksRef.current;
+            const exportTracks = sorted.length > 0 ? sorted : tracks;
             const scTracks = exportTracks.map((t) => ({
                 artist: t.Artist || '',
                 title: t.Title || '',
@@ -630,104 +745,95 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
         return () => document.removeEventListener('contextmenu', handleDocCtx, true);
     }, [tree]);
 
-    // Tokenized search supports operators:
-    //   bpm:120-130   bpm:>120   bpm:<128
-    //   key:Am   key:8A
-    //   genre:techno   label:exfunk   year:2024
-    //   plain text → free-text Title/Artist/Album/Comment
-    const matchesQuery = React.useCallback((t, q) => {
-        if (!q) return true;
-        const tokens = q.toLowerCase().split(/\s+/).filter(Boolean);
-        for (const tok of tokens) {
-            if (tok.includes(':')) {
-                const [field, ...rest] = tok.split(':');
-                const val = rest.join(':');
-                if (!val) continue;
-                if (field === 'bpm') {
-                    const bpm = parseFloat(t.BPM || 0);
-                    if (val.startsWith('>')) {
-                        if (!(bpm > parseFloat(val.slice(1)))) return false;
-                        continue;
-                    }
-                    if (val.startsWith('<')) {
-                        if (!(bpm < parseFloat(val.slice(1)))) return false;
-                        continue;
-                    }
-                    if (val.includes('-')) {
-                        const [lo, hi] = val.split('-').map(parseFloat);
-                        if (!(bpm >= lo && bpm <= hi)) return false;
-                        continue;
-                    }
-                    if (Math.round(bpm) !== Math.round(parseFloat(val))) return false;
-                    continue;
-                }
-                if (field === 'key') {
-                    if (
-                        !String(t.Key || '')
-                            .toLowerCase()
-                            .includes(val)
-                    )
-                        return false;
-                    continue;
-                }
-                if (field === 'genre') {
-                    if (
-                        !String(t.Genre || '')
-                            .toLowerCase()
-                            .includes(val)
-                    )
-                        return false;
-                    continue;
-                }
-                if (field === 'label') {
-                    if (
-                        !String(t.Label || '')
-                            .toLowerCase()
-                            .includes(val)
-                    )
-                        return false;
-                    continue;
-                }
-                if (field === 'year') {
-                    if (String(t.ReleaseYear || '') !== val) return false;
-                    continue;
-                }
-                if (field === 'rating') {
-                    const r = parseInt(t.Rating || 0);
-                    if (val.startsWith('>')) {
-                        if (!(r > parseInt(val.slice(1)))) return false;
-                        continue;
-                    }
-                    if (val.startsWith('<')) {
-                        if (!(r < parseInt(val.slice(1)))) return false;
-                        continue;
-                    }
-                    if (r !== parseInt(val)) return false;
-                    continue;
-                }
-                // Unknown field → treat token as plain
-            }
-            // Free-text against multiple fields
-            const hay = [t.Title, t.Artist, t.Album, t.Comment, t.Genre, t.Label]
-                .filter(Boolean)
-                .join(' ')
-                .toLowerCase();
-            if (!hay.includes(tok)) return false;
-        }
-        return true;
-    }, []);
+    // Deferred: the keystroke render reuses the previous result (memo hit) and
+    // the re-filter + table update run in a background render React can drop
+    // when the next key arrives.
+    const deferredCollectionSearch = useDeferredValue(collectionSearch);
+    const deferredPlaylistSearch = useDeferredValue(playlistSearch);
 
-    // Filtered collection tracks
-    const filteredCollectionTracks = React.useMemo(() => {
-        if (!collectionSearch) return allTracks;
-        return allTracks.filter((t) => matchesQuery(t, collectionSearch));
-    }, [allTracks, collectionSearch, matchesQuery]);
+    const filteredCollectionTracks = useMemo(
+        () => filterTracks(allTracks, deferredCollectionSearch),
+        [allTracks, deferredCollectionSearch]
+    );
 
-    // Filtered playlist tracks
-    const filteredPlaylistTracks = React.useMemo(() => {
-        if (!playlistSearch) return tracks;
-        return tracks.filter((t) => matchesQuery(t, playlistSearch));
-    }, [tracks, playlistSearch, matchesQuery]);
+    const filteredPlaylistTracks = useMemo(
+        () => filterTracks(tracks, deferredPlaylistSearch),
+        [tracks, deferredPlaylistSearch]
+    );
+
+    const currentViewTracks = showCollection ? filteredCollectionTracks : filteredPlaylistTracks;
+    const isIntelligentSelected = selectedPlaylist?.Type === '4';
+    const canEditPlaylist = !!selectedPlaylist && !isIntelligentSelected;
+    const tablePlaylistId = showCollection ? 'COLLECTION' : selectedPlaylist?.ID;
+
+    const handleReorderTrack = (trackId, newIndex) => {
+        api.post('/api/playlists/reorder', {
+            pid: selectedPlaylist.ID,
+            track_id: trackId,
+            target_index: newIndex,
+        })
+            .then(() => {
+                toast.success('Track reordered');
+                handleSelect(selectedPlaylist);
+            })
+            .catch(() => toast.error('Reorder failed'));
+    };
+
+    // Latest handlers behind stable wrappers, so the memoised table below keeps
+    // its props across renders that change nothing it shows.
+    const tableHandlersRef = useRef(null);
+    useLayoutEffect(() => {
+        tableHandlersRef.current = {
+            reorder: handleReorderTrack,
+            remove: handleRemoveTrack,
+            deleteFromCollection: handleDeleteFromCollection,
+            addToPlaylist: handleAddToPlaylist,
+        };
+    });
+    const tableHandlers = useMemo(
+        () => ({
+            reorder: (...args) => tableHandlersRef.current.reorder(...args),
+            remove: (...args) => tableHandlersRef.current.remove(...args),
+            deleteFromCollection: (...args) =>
+                tableHandlersRef.current.deleteFromCollection(...args),
+            addToPlaylist: (...args) => tableHandlersRef.current.addToPlaylist(...args),
+        }),
+        []
+    );
+
+    // TrackTable renders every row and is not memoised itself. As a memoised
+    // element React skips it on renders that leave its inputs alone: the
+    // keystroke render before the deferred search lands (~600 ms per key at
+    // 4.7k rows otherwise), context-menu / modal / spinner state, etc.
+    const trackTable = useMemo(
+        () => (
+            <TrackTable
+                tracks={currentViewTracks}
+                onSelectTrack={onSelectTrack}
+                onEditTrack={onEditTrack}
+                onPlay={onPlayTrack}
+                variant="minimal"
+                onSortedTracksChange={handleSortedTracksChange}
+                onReorder={canEditPlaylist ? tableHandlers.reorder : undefined}
+                onRemove={canEditPlaylist ? tableHandlers.remove : undefined}
+                onDelete={tableHandlers.deleteFromCollection}
+                onAddToPlaylist={tableHandlers.addToPlaylist}
+                availablePlaylists={allPlaylists}
+                playlistId={tablePlaylistId}
+            />
+        ),
+        [
+            currentViewTracks,
+            onSelectTrack,
+            onEditTrack,
+            onPlayTrack,
+            handleSortedTracksChange,
+            canEditPlaylist,
+            tableHandlers,
+            allPlaylists,
+            tablePlaylistId,
+        ]
+    );
 
     if (!loading && tree.length === 0 && !dbLoaded) {
         return (
@@ -751,10 +857,8 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
     }
 
     // Determine what to show in the main content area
-    const currentViewTracks = showCollection ? filteredCollectionTracks : filteredPlaylistTracks;
     const currentViewTitle = showCollection ? 'Collection' : selectedPlaylist?.Name || '';
     const currentViewCount = showCollection ? allTracks.length : tracks.length;
-    const isIntelligentSelected = selectedPlaylist?.Type === '4';
 
     return (
         <div className="flex h-full relative">
@@ -1004,10 +1108,10 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
                 {selectedPlaylist || showCollection ? (
                     <div className="flex-1 overflow-y-auto flex flex-col">
                         {/* Header */}
-                        <div className="p-5 border-b border-white/5 bg-mx-shell/40 backdrop-blur-xl flex justify-between items-end shrink-0">
+                        <div className="pb-head p-5 border-b border-white/5 bg-mx-shell/40 backdrop-blur-xl flex justify-between items-end shrink-0">
                             <div className="flex items-center gap-4">
                                 <div
-                                    className={`p-2.5 rounded-xl ${showCollection ? 'bg-amber2/15' : isIntelligentSelected ? 'bg-purple-500/15' : 'bg-mx-card'}`}
+                                    className={`pb-head-icon p-2.5 rounded-xl ${showCollection ? 'bg-amber2/15' : isIntelligentSelected ? 'bg-purple-500/15' : 'bg-mx-card'}`}
                                 >
                                     {showCollection ? (
                                         <Database size={24} className="text-amber2" />
@@ -1018,7 +1122,7 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
                                     )}
                                 </div>
                                 <div>
-                                    <h1 className="text-2xl font-bold text-white tracking-tight flex items-center gap-2">
+                                    <h1 className="pb-head-title text-2xl font-bold text-white tracking-tight flex items-center gap-2">
                                         {currentViewTitle}
                                         {isIntelligentSelected && (
                                             <span className="text-xs bg-purple-500/20 text-purple-400 px-2 py-0.5 rounded-full font-bold uppercase tracking-wider">
@@ -1087,41 +1191,7 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
                             </div>
                         ) : (
                             <div className="flex-1 overflow-hidden flex flex-col p-3 pt-1">
-                                <TrackTable
-                                    tracks={currentViewTracks}
-                                    onSelectTrack={onSelectTrack}
-                                    onEditTrack={onEditTrack}
-                                    onPlay={onPlayTrack}
-                                    variant="minimal"
-                                    onSortedTracksChange={setDisplayTracks}
-                                    onReorder={
-                                        selectedPlaylist && !isIntelligentSelected
-                                            ? (trackId, newIndex) => {
-                                                  api.post('/api/playlists/reorder', {
-                                                      pid: selectedPlaylist.ID,
-                                                      track_id: trackId,
-                                                      target_index: newIndex,
-                                                  })
-                                                      .then(() => {
-                                                          toast.success('Track reordered');
-                                                          handleSelect(selectedPlaylist);
-                                                      })
-                                                      .catch(() => toast.error('Reorder failed'));
-                                              }
-                                            : undefined
-                                    }
-                                    onRemove={
-                                        selectedPlaylist && !isIntelligentSelected
-                                            ? handleRemoveTrack
-                                            : undefined
-                                    }
-                                    onDelete={handleDeleteFromCollection}
-                                    onAddToPlaylist={handleAddToPlaylist}
-                                    availablePlaylists={allPlaylists}
-                                    playlistId={
-                                        showCollection ? 'COLLECTION' : selectedPlaylist?.ID
-                                    }
-                                />
+                                {trackTable}
                             </div>
                         )}
                     </div>

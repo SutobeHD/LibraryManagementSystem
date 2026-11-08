@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import api, { scLogin } from '../api/api';
+import api, { scAuthTokenBody, scLogin } from '../api/api';
+import { useTaskPolling, SC_TASKS_ENDPOINT } from '../hooks/useTaskPolling';
 import {
     Download,
     Cloud,
@@ -16,6 +17,8 @@ import {
 import { toast } from 'react-hot-toast';
 import { listen } from '@tauri-apps/api/event';
 
+const NO_TASKS = {};
+
 const SoundCloudView = () => {
     const [url, setUrl] = useState('');
     // PRIVACY: do not hold the actual OAuth token in React state — the real
@@ -24,8 +27,11 @@ const SoundCloudView = () => {
     // so the UI can render "Reconnect" vs "Login" without ever touching the
     // secret in the renderer process.
     const [hasToken, setHasToken] = useState(false);
+    // Whether the backend holds a refresh token. Only then may the UI say the
+    // session renews itself — an unrefreshable session expires within the hour.
+    const [renews, setRenews] = useState(false);
     const [isDownloading, setIsDownloading] = useState(false);
-    const [tasks, setTasks] = useState({});
+    const tasks = useTaskPolling(SC_TASKS_ENDPOINT).data || NO_TASKS;
     const [isLoggingIn, setIsLoggingIn] = useState(false);
     const [loginMessage, setLoginMessage] = useState('');
 
@@ -37,23 +43,14 @@ const SoundCloudView = () => {
         // Local-only auth probe — pure keyring lookup, no SC round-trip, no
         // sc:auth-expired interceptor noise on mount.
         api.get('/api/soundcloud/auth-status')
-            .then((res) => setHasToken(Boolean(res.data?.data?.authenticated)))
-            .catch(() => setHasToken(false));
-
-        // EC12: Poll for tasks; .catch() ensures a failed request never freezes the spinner.
-        const interval = setInterval(() => {
-            api.get('/api/soundcloud/tasks')
-                .then((res) => {
-                    setTasks(res.data ?? {});
-                    const active = Object.values(res.data ?? {}).some(
-                        (t) => t.status === 'Downloading' || t.status === 'Starting'
-                    );
-                    if (!active) setIsDownloading(false);
-                })
-                .catch(() => {
-                    // Silently ignore polling errors — avoids frozen spinner (EC12)
-                });
-        }, 3000);
+            .then((res) => {
+                setHasToken(Boolean(res.data?.data?.authenticated));
+                setRenews(Boolean(res.data?.data?.refreshable));
+            })
+            .catch(() => {
+                setHasToken(false);
+                setRenews(false);
+            });
 
         // Listen to native auth events (only available in Tauri desktop context)
         let unlisten = null;
@@ -67,16 +64,25 @@ const SoundCloudView = () => {
         // EC7: React to the global 'sc:auth-expired' event from the Axios interceptor
         const onAuthExpired = () => {
             setHasToken(false);
+            setRenews(false);
             setLoginMessage('');
         };
         window.addEventListener('sc:auth-expired', onAuthExpired);
 
         return () => {
-            clearInterval(interval);
             if (unlisten) unlisten.then((f) => f());
             window.removeEventListener('sc:auth-expired', onAuthExpired);
         };
     }, []);
+
+    // Clear the button spinner once no download is starting or running. A
+    // failed poll leaves `tasks` untouched, so it never freezes the spinner (EC12).
+    useEffect(() => {
+        const active = Object.values(tasks).some(
+            (t) => t.status === 'Downloading' || t.status === 'Starting'
+        );
+        if (!active) setIsDownloading(false);
+    }, [tasks]);
 
     const handleDownload = async () => {
         if (!url) {
@@ -103,13 +109,15 @@ const SoundCloudView = () => {
         setIsLoggingIn(true);
         setLoginMessage('Initializing secure login...');
         try {
-            const newToken = await scLogin();
+            const tokens = await scLogin();
             setLoginMessage('Saving credentials securely...');
-            // Hand the secret straight to the backend keyring — never persisted
-            // in React state. We flip the local auth-flag once the backend has
-            // confirmed it accepted the token.
-            await api.post('/api/soundcloud/auth-token', { token: newToken });
+            // Hand the secrets straight to the backend keyring — never persisted
+            // in React state. The refresh token travels with them; that is what
+            // keeps the session alive across restarts. We flip the local auth-flag
+            // once the backend has confirmed it accepted them.
+            const stored = await api.post('/api/soundcloud/auth-token', scAuthTokenBody(tokens));
             setHasToken(true);
+            setRenews(Boolean(stored.data?.refreshable));
             // Tell the workspace-bar account chip to re-pull /me.
             window.dispatchEvent(new CustomEvent('sc:auth-changed'));
             toast.success('SoundCloud Login erfolgreich!');
@@ -261,7 +269,9 @@ const SoundCloudView = () => {
 
                             <p className="text-xs text-ink-secondary mb-6 leading-relaxed">
                                 {hasToken
-                                    ? 'Your SoundCloud account is connected. You can download high-quality tracks and playlists.'
+                                    ? renews
+                                        ? 'Your SoundCloud account is connected and stays connected — the session renews itself in the background, including after a restart.'
+                                        : 'Your SoundCloud account is connected, but this session was stored without a renewal token: it expires within the hour. Reconnect once to store one.'
                                     : 'Log in to your SoundCloud account to download full tracks in 256kbps AAC or original lossless files.'}
                             </p>
 

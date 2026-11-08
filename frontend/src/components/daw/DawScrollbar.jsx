@@ -8,8 +8,7 @@
 
 import React, { useRef, useEffect, useCallback, useMemo } from 'react';
 
-const DawScrollbar = React.memo(({ state, dispatch }) => {
-    const { totalDuration, zoom, scrollX } = state;
+const DawScrollbar = React.memo(({ totalDuration, zoom, scrollX, dispatch }) => {
     const containerRef = useRef(null);
     const programmaticScroll = useRef(false);
     const rafRef = useRef(null);
@@ -29,23 +28,31 @@ const DawScrollbar = React.memo(({ state, dispatch }) => {
         programmaticScroll.current = true;
         el.scrollLeft = target;
         // Release the flag on the next frame, after the scroll event has fired
-        requestAnimationFrame(() => { programmaticScroll.current = false; });
+        requestAnimationFrame(() => {
+            programmaticScroll.current = false;
+        });
     }, [scrollX]);
 
     // ── User scroll → dispatch (debounced via rAF for smooth UI) ──
-    const handleScroll = useCallback((e) => {
-        if (programmaticScroll.current) return; // ignore our own writes
-        const newScrollX = e.target.scrollLeft;
-        if (rafRef.current) cancelAnimationFrame(rafRef.current);
-        rafRef.current = requestAnimationFrame(() => {
-            dispatch({ type: 'SET_SCROLL_X', payload: newScrollX });
-        });
-    }, [dispatch]);
+    const handleScroll = useCallback(
+        (e) => {
+            if (programmaticScroll.current) return; // ignore our own writes
+            const newScrollX = e.target.scrollLeft;
+            if (rafRef.current) cancelAnimationFrame(rafRef.current);
+            rafRef.current = requestAnimationFrame(() => {
+                dispatch({ type: 'SET_SCROLL_X', payload: newScrollX });
+            });
+        },
+        [dispatch]
+    );
 
     // Cleanup pending rAF on unmount
-    useEffect(() => () => {
-        if (rafRef.current) cancelAnimationFrame(rafRef.current);
-    }, []);
+    useEffect(
+        () => () => {
+            if (rafRef.current) cancelAnimationFrame(rafRef.current);
+        },
+        []
+    );
 
     return (
         <div

@@ -49,7 +49,7 @@ paths = ["app/usb_manager.py", "frontend/src/components/usb/UsbSyncPanel.jsx", "
 routes = ["/api/usb/sync", "/api/usb/sync/all", "/api/usb/diff", "/api/usb/history"]
 depends_on = ["usb-profiles", "usb-onelibrary-export"]
 related = ["performance-overhaul"]
-notes = "Blockierender POST mit Fake-Progress; Scan/Diff mit N+1 (Perf-Overhaul)."
+notes = "Blockierender POST mit Fake-Progress (offen). Scan/Diff-N+1 seit PR #70 (in #60) behoben. Altfund: exportLibrary.db wird mit plain sqlite3 gelesen, Stick-Seite der Diff leer, Datei bei jedem Sync-Start gelöscht."
 
 [[feature]]
 id = "usb-onelibrary-export"
@@ -70,7 +70,7 @@ status = "idea"
 desc = "OneLibrary-Export schreibt max. 16 Tracks (Template-Slots), Rest landet nur in rekordbox.xml."
 related = ["pyrekordbox-upgrade", "rekordbox-free-workflow-toggles"]
 todo = ["echter >16-Track-Export-Test", "Template/Writer erweitern", "mögliches ~500-Track-PDB-Limit belegen"]
-notes = "Bug K4, groß."
+notes = "Bug K4, groß. rbxport baut exportLibrary.db aus Schema (SQLCipher, journal_mode=DELETE) statt Template: docs/reference/rbxport/export.md §3."
 
 [[feature]]
 id = "usb-legacy-pdb"
@@ -80,7 +80,7 @@ status = "partial"
 desc = "export.pdb + exportExt.pdb nach Crate-Digger-Spec, byte-verifiziert gegen echten Stick."
 paths = ["app/usb_pdb.py", "tests/test_pdb_structure.py"]
 depends_on = ["usb-onelibrary-export"]
-notes = "Default aus (usb_write_legacy_pdb), kein UI-Toggle, lineare Suche bis ~500 Tracks."
+notes = "Default aus (usb_write_legacy_pdb), kein UI-Toggle, lineare Suche bis ~500 Tracks. rbxport-Abweichungen (UTF-16 ohne Terminator + 4-Byte-Align, >255-Zeilen-Header, Tabellen 16-19): docs/reference/rbxport/export.md §10-11."
 
 [[feature]]
 id = "usb-anlz-export"
@@ -89,7 +89,7 @@ name = "ANLZ auf den Stick"
 status = "shipped"
 desc = "USBANLZ/<bucket>/ANLZ0000.DAT/EXT/2EX pro Track, kopieren oder neu erzeugen."
 depends_on = ["anlz-writer"]
-notes = "Lebt in usb_one_library.py + anlz_sidecar.py."
+notes = "Lebt in usb_one_library.py + anlz_sidecar.py. rbxport: CDJ-3000 leitet USBANLZ-Ordner aus Hash des USB-Pfads ab (wir: aus content id) - docs/reference/rbxport/export.md §4."
 
 [[feature]]
 id = "usb-anlz-export-fixes"
@@ -97,11 +97,12 @@ group = "Export-Formate"
 parent = "usb-anlz-export"
 name = "ANLZ-Export-Fixes (PPTH/PSSI)"
 status = "unmerged"
-branch = "claude/usb-anlz-export-fixes"
+branch = "claude/dreamy-planck-w7771v"
+pr = 60
 desc = "Stick-PPTH + maskiertes PSSI, explizite Suffixe, Stale-Cleanup, djmdCue kind/comment korrekt lesen."
 paths = ["app/anlz_usb_export.py", "tests/test_anlz_usb_export*.py", "tests/test_live_cue_loading.py"]
 related = ["usb-export-manual-cues"]
-notes = "NIE GEPUSHT - nur lokal im Worktree wf_1fefdec9-6fc-3. Auf PR #58 gestapelt."
+notes = "Auf origin gepusht, in den Integrations-Branch gemergt."
 
 [[feature]]
 id = "usb-export-manual-cues"
@@ -116,17 +117,19 @@ notes = "Bug K5: _generate_or_copy_anlz_for liest keine position_marks. Evtl. te
 id = "usb-artwork"
 group = "Export-Formate"
 name = "Cover auf den Stick"
-status = "shipped"
+status = "partial"
 desc = "Eingebettetes Cover oder cover.jpg nach PIONEER/Artwork (klein + mittel)."
 paths = ["app/usb_artwork.py"]
+todo = ["_bucket_for: id 1 -> 00001 (Referenz-Stick), nicht 00000"]
+notes = "rbxport nutzt id//20+1; docs/reference/rbxport/export.md §5."
 
 [[feature]]
 id = "usb-folder-relocation"
 group = "Export-Formate"
 name = "Stick-Dateien verschieben statt kopieren"
 status = "unmerged"
-branch = "claude/loving-goodall-90uf7w"
-pr = 58
+branch = "claude/dreamy-planck-w7771v"
+pr = 60
 desc = "Nach Artist-Rename die Datei auf dem Stick verschieben (Case-Rename in 2 Schritten, Content-Hash als Beweis)."
 paths = ["tests/test_usb_relocate.py"]
 depends_on = ["usb-onelibrary-export"]

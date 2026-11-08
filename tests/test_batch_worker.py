@@ -1,8 +1,7 @@
-"""Tests for app/batch_worker.py — pure comment-transform logic.
+"""Tests for app/batch_worker.py — the comment transform and the batch loop.
 
-run_batch_update itself needs rbox + a real master.db, so only the extracted
-pure transform (the actual set/append/remove/replace semantics applied to
-every track) is locked here.
+The batch loop runs against a stub of the rbox.MasterDb slice it uses; nothing
+opens a real master.db.
 """
 
 from __future__ import annotations
@@ -13,7 +12,7 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-from app.batch_worker import compute_new_comment  # noqa: E402
+from app.batch_worker import apply_batch_comment, compute_new_comment  # noqa: E402
 
 
 def test_set_overwrites():
@@ -51,3 +50,92 @@ def test_unknown_action_and_none_original():
     # None original treated as empty string, never raises
     assert compute_new_comment("set", None, "", "v") == "v"  # type: ignore[arg-type]
     assert compute_new_comment("append", None, "", "v") == "v"  # type: ignore[arg-type]
+
+
+class _Content:
+    def __init__(self, cid, commnt):
+        self.id = cid
+        self.commnt = commnt
+
+
+class _MasterDb:
+    def __init__(self):
+        self.rows = {"1": _Content(1, "a"), "2": _Content(2, "b"), "3": _Content(3, "b")}
+        self.updated = []
+
+    def get_contents(self):
+        return list(self.rows.values())
+
+    def get_content_by_id(self, tid):
+        if not isinstance(tid, str):
+            raise TypeError("argument 'id': 'int' object cannot be converted to 'PyString'")
+        if tid == "2":
+            raise RuntimeError("row locked")
+        return self.rows.get(tid)
+
+    def update_content(self, item):
+        self.updated.append((str(item.id), item.commnt))
+
+
+def test_batch_passes_string_ids_and_survives_a_failing_row():
+    """rbox declares MasterDb.get_content_by_id(id: str) (_rbox.pyi); the old CLI passed int."""
+    master = _MasterDb()
+
+    assert apply_batch_comment(master, "LIB", "set", "", "z") == 2
+    assert master.updated == [("1", "z"), ("3", "z")]
+
+
+def test_batch_skips_rows_whose_comment_does_not_change():
+    master = _MasterDb()
+
+    assert apply_batch_comment(master, "LIB", "remove", "zzz", "") == 0
+    assert master.updated == []
+
+
+def _lock_held_elsewhere() -> bool:
+    """True when another thread holds ``_db_write_lock`` (probed from a fresh thread)."""
+    import threading
+
+    from app.database import _db_write_lock
+
+    result: list[bool] = []
+
+    def _probe() -> None:
+        got = _db_write_lock.acquire(blocking=False)
+        if got:
+            _db_write_lock.release()
+        result.append(not got)
+
+    t = threading.Thread(target=_probe)
+    t.start()
+    t.join()
+    return result[0]
+
+
+def test_each_row_is_reread_and_written_inside_db_write_lock():
+    """update_content writes the whole row: a read outside the lock clobbers a
+    concurrent rating / artist / analysis edit of the same track."""
+    seen: list[tuple[str, bool]] = []
+
+    class _Locked(_MasterDb):
+        def get_content_by_id(self, tid):
+            seen.append(("read", _lock_held_elsewhere()))
+            return self.rows.get(tid)
+
+        def update_content(self, item):
+            seen.append(("write", _lock_held_elsewhere()))
+            super().update_content(item)
+
+    changed: list[tuple[str, str, bool]] = []
+    apply_batch_comment(
+        _Locked(),
+        "LIB",
+        "replace",
+        "a",
+        "A",
+        on_changed=lambda tid, c: changed.append((tid, c, _lock_held_elsewhere())),
+    )
+
+    assert seen == [("read", True), ("write", True), ("read", True), ("read", True)]
+    assert changed == [("1", "A", True)]
+    assert not _lock_held_elsewhere()

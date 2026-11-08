@@ -9,11 +9,13 @@ use audio::commands::{
 use audio::engine::AudioController;
 use audio::fingerprint::{fingerprint_batch, fingerprint_track};
 use serde::Deserialize;
-use soundcloud_client::Track;
+use soundcloud_client::{ScTokenSet, Track};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::{Emitter, Manager, State};
+#[cfg(not(debug_assertions))]
+use tauri_plugin_shell::{process::CommandEvent, ShellExt};
 
 /// Shared boot-time session token captured from the Python sidecar's stdout.
 ///
@@ -479,7 +481,7 @@ fn open_auth_window(
 ///
 /// Emits three `{stage: "auth", message: ...}` progress events on
 /// `progress_event` as the flow advances (opening page → waiting →
-/// exchanging code) and returns the access token on success. Callers
+/// exchanging code) and returns the issued token set on success. Callers
 /// that need a terminal "done" event must emit it themselves after this
 /// returns — login and export use different final-stage payloads.
 ///
@@ -495,7 +497,7 @@ async fn ensure_oauth_token(
     app: &tauri::AppHandle,
     progress_event: &str,
     surface: AuthSurface,
-) -> Result<String, String> {
+) -> Result<ScTokenSet, String> {
     // Step 1: Generate auth URL with PKCE
     let (auth_url, code_verifier) =
         soundcloud_client::get_auth_url().map_err(|e| format!("Configuration error: {}", e))?;
@@ -560,18 +562,23 @@ async fn ensure_oauth_token(
             "stage": "auth", "message": "Exchanging code for token..."
         }),
     );
-    let token = soundcloud_client::exchange_code_for_token(&code, &code_verifier)
+    let tokens = soundcloud_client::exchange_code_for_token(&code, &code_verifier)
         .await
         .map_err(|e| format!("Token exchange failed: {}", e))?;
 
-    Ok(token)
+    Ok(tokens)
 }
 
-/// Run the full SoundCloud OAuth 2.1 + PKCE flow and return the access token.
+/// Run the full SoundCloud OAuth 2.1 + PKCE flow and return the issued token set.
 ///
 /// `mode` picks the consent surface: `"browser"` (or `"external"`) uses the OS
 /// browser, anything else — including an omitted value — keeps the in-app
 /// window. The frontend passes the user's `sc_auth_mode` setting here.
+///
+/// Returns `{access_token, refresh_token, expires_in}`. The caller hands all
+/// three to the Python sidecar (`POST /api/soundcloud/auth-token`), which stores
+/// them in the OS keyring and owns renewal from then on — that is what makes the
+/// login survive a restart. Nothing here is logged.
 ///
 /// Delegates to `ensure_oauth_token` for the actual handshake, then emits a
 /// final `{stage: "done", message: "Authorization successful."}` on
@@ -579,15 +586,23 @@ async fn ensure_oauth_token(
 /// SC endpoints.
 ///
 /// # Errors
-/// Propagates every variant from `ensure_oauth_token`.
+/// Propagates every variant from `ensure_oauth_token`: "Configuration error"
+/// (missing client credentials), "Callback listener error" (redirect port
+/// taken), "Could not open login window" / "Could not open browser",
+/// "Login window was closed..." (user abort), "Task join error" / "Callback
+/// error" (local listener failure), "Token exchange failed" (SoundCloud
+/// rejected the auth code).
 #[tauri::command]
 async fn login_to_soundcloud(
     app: tauri::AppHandle,
     mode: Option<String>,
-) -> Result<String, String> {
-    let token = ensure_oauth_token(&app, "sc-login-progress", AuthSurface::from_opt(mode)).await?;
+) -> Result<ScTokenSet, String> {
+    let tokens = ensure_oauth_token(&app, "sc-login-progress", AuthSurface::from_opt(mode)).await?;
 
-    log::info!("[SoundCloud] ✓ Authorization successful.");
+    log::info!(
+        "[SoundCloud] ✓ Authorization successful (refreshable: {}).",
+        tokens.refresh_token.is_some()
+    );
     let _ = app.emit(
         "sc-login-progress",
         serde_json::json!({
@@ -595,7 +610,7 @@ async fn login_to_soundcloud(
         }),
     );
 
-    Ok(token)
+    Ok(tokens)
 }
 
 #[derive(Deserialize)]
@@ -636,14 +651,19 @@ async fn export_to_soundcloud(
         })
         .collect();
 
-    let token = ensure_oauth_token(&app, "sc-export-progress", AuthSurface::from_opt(mode)).await?;
+    let tokens =
+        ensure_oauth_token(&app, "sc-export-progress", AuthSurface::from_opt(mode)).await?;
     log::info!("[SoundCloud] ✓ Access token received.");
 
     // Step 4: Search tracks and create playlist
-    let result =
-        soundcloud_client::search_and_create_playlist(&token, &playlist_name, sc_tracks, Some(app))
-            .await
-            .map_err(|e| format!("Playlist creation failed: {}", e))?;
+    let result = soundcloud_client::search_and_create_playlist(
+        &tokens.access_token,
+        &playlist_name,
+        sc_tracks,
+        Some(app),
+    )
+    .await
+    .map_err(|e| format!("Playlist creation failed: {}", e))?;
 
     if result.failed_tracks.is_empty() {
         Ok(format!(
@@ -721,34 +741,29 @@ fn main() {
                 tauri::async_runtime::spawn(async move {
                     // Keep the child alive in this scope
                     let _child = child;
-                    loop {
-                        match rx.recv().await {
-                            Some(event) => {
-                                match event {
-                                    CommandEvent::Stdout(line) => {
-                                        let text = String::from_utf8_lossy(&line);
-                                        let trimmed = text.trim();
-                                        // Detect-and-drop the LMS_TOKEN= banner BEFORE
-                                        // forwarding the line to log::info!, so the
-                                        // token value can't reach Tauri's log file.
-                                        if try_capture_token(trimmed, &token_for_loop) {
-                                            continue;
-                                        }
-                                        log::info!("backend: {}", trimmed);
-                                    }
-                                    CommandEvent::Stderr(line) => {
-                                        log::warn!(
-                                            "backend-error: {}",
-                                            String::from_utf8_lossy(&line).trim()
-                                        );
-                                    }
-                                    CommandEvent::Error(err) => {
-                                        log::error!("backend-critical: {}", err);
-                                    }
-                                    _ => {}
+                    while let Some(event) = rx.recv().await {
+                        match event {
+                            CommandEvent::Stdout(line) => {
+                                let text = String::from_utf8_lossy(&line);
+                                let trimmed = text.trim();
+                                // Detect-and-drop the LMS_TOKEN= banner BEFORE
+                                // forwarding the line to log::info!, so the
+                                // token value can't reach Tauri's log file.
+                                if try_capture_token(trimmed, &token_for_loop) {
+                                    continue;
                                 }
+                                log::info!("backend: {}", trimmed);
                             }
-                            None => break,
+                            CommandEvent::Stderr(line) => {
+                                log::warn!(
+                                    "backend-error: {}",
+                                    String::from_utf8_lossy(&line).trim()
+                                );
+                            }
+                            CommandEvent::Error(err) => {
+                                log::error!("backend-critical: {}", err);
+                            }
+                            _ => {}
                         }
                     }
                 });

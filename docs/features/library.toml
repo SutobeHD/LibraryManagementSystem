@@ -15,7 +15,7 @@ desc = "Sortierbare Track-Liste: Spalten, Camelot-Key-Farben, Cover-Thumb, Drag,
 paths = ["frontend/src/components/TrackTable.jsx"]
 routes = ["/api/file/reveal"]
 related = ["inline-rating-color", "collection-view", "list-context-menus", "perf-frontend-virtualization"]
-notes = "Nicht virtualisiert (Perf-Hotspot). LibraryView.jsx ist ein toter Vorgänger."
+notes = "Virtualisiert seit PR #63 (in #60, perf-frontend-virtualization). LibraryView.jsx ist ein toter Vorgänger."
 
 [[feature]]
 id = "collection-view"
@@ -25,7 +25,7 @@ status = "shipped"
 desc = "Ganze Library als Collection-Knoten, Suche mit bpm:/key:/genre:/year:/rating:, Track löschen."
 routes = ["/api/library/tracks", "/api/track/{tid}", "/api/track/delete", "/api/tracks/move"]
 depends_on = ["track-table", "live-master-db"]
-notes = "/api/tracks/move ist ein Stub. /api/library/tracks ohne Pagination (siehe perf-backend-quickwins)."
+notes = "/api/tracks/move ist ein Stub. /api/library/tracks ohne Pagination; light=true-Projektion in #60 (perf-backend-quickwins)."
 
 [[feature]]
 id = "category-browser"
@@ -121,12 +121,13 @@ id = "ranking-genre-tree"
 group = "Bewertung & Tags"
 parent = "ranking-mode"
 name = "Ranking-Tags als Genre-Baum"
-status = "in_progress"
-branch = "feat/artist-hub"
+status = "unmerged"
+branch = "claude/dreamy-planck-w7771v"
+pr = 60
 desc = "Tag-Chips als Genre > Sub-Genre sortiert, Tokens landen im Comment."
 paths = ["frontend/src/config/tagTaxonomy.js", "frontend/src/config/tagTaxonomy.test.js"]
 related = ["genre-normalization", "genre-definition-schema", "genre-atlas"]
-notes = "f4cf807 (2026-10-25) nur auf feat/artist-hub, nicht in PR #58 - auf #58 cherry-picken (konfliktfrei)."
+notes = "f4cf807 von feat/artist-hub auf PR #58 cherry-picked (0c33733). feat/genre-atlas-hints ändert RankingView.jsx parallel (45892de, Atlas-Vorschläge) - beim zweiten Merge Konflikt in RankingView.jsx möglich; Prettier-Commits beider Branches identisch."
 
 [[feature]]
 id = "mytag-management"
@@ -215,7 +216,8 @@ id = "quality-tiers-audit"
 group = "Qualität & Duplikate"
 name = "Qualitäts-Audit A-D"
 status = "in_progress"
-branch = "feat/artist-hub"
+branch = "claude/dreamy-planck-w7771v"
+pr = 60
 desc = "Ehrliche Qualitätskarte (Papier- + Spektral-Rating, schlechteres gewinnt) als Basis für das große Re-Format."
 paths = ["scripts/dev/scan_audio_quality.py", "scripts/dev/rescan_unreadable.py"]
 related = ["quality-upgrade-finder", "format-converter", "quality-settings-lossless-tagging", "library-health-filters"]
@@ -267,7 +269,8 @@ group = "Format-Konvertierung"
 parent = "format-converter"
 name = "Pioneer-FileType-Codes"
 status = "unmerged"
-branch = "fix/rekordbox-filetype-codes"
+branch = "claude/dreamy-planck-w7771v"
+pr = 60
 desc = "Converter schreibt korrekte FileType-Codes (AIFF 12, WAV 11, FLAC 5)."
 notes = "Basiert auf main. Mit PR #58 nur MAP.md-Konflikt (regen)."
 
@@ -277,8 +280,8 @@ group = "Format-Konvertierung"
 parent = "format-converter"
 name = "MP3 320 CBR statt V0"
 status = "unmerged"
-branch = "claude/loving-goodall-90uf7w"
-pr = 58
+branch = "claude/dreamy-planck-w7771v"
+pr = 60
 desc = "MP3-Export einheitlich 320 kbps CBR (K9), keine Bitrate-Inflation bei lossy Quellen."
 
 [[feature]]
@@ -305,3 +308,30 @@ name = "MP3 >320 / pauschal 320"
 status = "dropped"
 desc = "MP3 freeformat >320 kbps bzw. alles pauschal auf 320 CBR."
 notes = "freeformat ist außerhalb der CDJ-Spec; pauschal 320 erfindet Bitrate bei AAC-Quellen."
+
+[[feature]]
+id = "missing-file-relink"
+group = "Qualität & Duplikate"
+name = "Fehlende Dateien neu verknüpfen"
+status = "idea"
+desc = "Problem-Scan (fehlende Dateien, Playlist-Waisen, verwaiste Sidecars) + Ordner durchsuchen + alle Funde auf einmal relinken."
+related = ["library-health-filters"]
+notes = "Vorbild Syndicate Library Manager: docs/reference/syndicate/library-export.md §5."
+
+[[feature]]
+id = "tag-shelf-filter"
+group = "Bewertung & Tags"
+name = "Tag-Shelf-Filter"
+status = "idea"
+desc = "Tag-Chips mit Live-Counts: Klick = einschließen, Shift-Klick = ausschließen, ALL/ANY-Umschalter."
+related = ["mytag-management"]
+notes = "Vorbild Syndicate Tag Shelf: docs/reference/syndicate/library-export.md §4."
+
+[[feature]]
+id = "m3u-import-export"
+group = "Import"
+name = "M3U/M3U8 Import + Export"
+status = "idea"
+desc = "Playlists als M3U/M3U8 rein und raus; nicht gefundene Pfade bleiben als MISSING-Platzhalter zum späteren Relinken."
+related = ["import-manager", "missing-file-relink"]
+notes = "Vorbild Syndicate: docs/reference/syndicate/library-export.md §3-4, performance-control.md Roadmap."

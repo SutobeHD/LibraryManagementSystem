@@ -184,8 +184,8 @@ group = "Cues & Phrasen"
 parent = "phrase-cue-generator"
 name = "Phrase-Cues in djmdCue"
 status = "unmerged"
-branch = "claude/loving-goodall-90uf7w"
-pr = 58
+branch = "claude/dreamy-planck-w7771v"
+pr = 60
 desc = "Memory-Cues direkt in master.db djmdCue via pyrekordbox, mit Backup/Restore."
 paths = ["app/phrase_db_writer.py", "tests/test_phrase_db_writer.py"]
 depends_on = ["pyrekordbox-upgrade"]
@@ -214,3 +214,21 @@ pr = 26
 desc = "Bump könnte anlz_safe-Quarantäne und OneLibrary-Template-Hack überflüssig machen und verschlüsselte master.db öffnen."
 related = ["anlz-parser-simplify", "phrase-db-writer", "usb-onelibrary-track-limit"]
 notes = "User-Entscheidung. requirements.txt ist heute schon unerfüllbar (pyrekordbox 0.1.7 vs sqlalchemy 2.0.49)."
+
+[[feature]]
+id = "track-lock-flag"
+group = "Cues & Phrasen"
+name = "Track-Sperre"
+status = "idea"
+desc = "Pro Track Lock-Flag: friert Cues, Grid und Metadaten ein; Importe/Re-Analyse überschreiben nichts."
+related = ["cues-beatgrid-io", "daw-cue-loop-grid-edit"]
+notes = "Vorbild Syndicate: docs/reference/syndicate/ui-decks-waveform.md §8."
+
+[[feature]]
+id = "variable-bpm-tempo-markers"
+group = "Cues & Phrasen"
+name = "Tempo-Marker (variable BPM)"
+status = "idea"
+desc = "Grid = Grid-Start + BPM + gestufte Tempo-Marker für Live-/Variable-BPM-Tracks, inkl. Grid-Diagnose-Hilfe."
+related = ["cues-beatgrid-io", "daw-cue-loop-grid-edit", "analysis-engine"]
+notes = "Vorbild Syndicate Edit Mode: docs/reference/syndicate/ui-decks-waveform.md §8. PQTZ kann BPM pro Beat."

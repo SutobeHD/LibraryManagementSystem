@@ -10,32 +10,80 @@ Endpoints that use this:
   GET  /api/audio/analyze/{id}  -> AudioAnalyzer.get_status()
 """
 
+import hashlib
+import importlib.util
 import logging
 import os
 import threading
 from concurrent.futures import Future, ProcessPoolExecutor
+from types import ModuleType
 from typing import Any, ClassVar
 
 logger = logging.getLogger(__name__)
 
-# Check if analysis libraries are available
-LIBROSA_AVAILABLE = False
-try:
-    import librosa
-    import numpy as np
 
-    LIBROSA_AVAILABLE = True
-except ImportError:
+def _module_installed(name: str) -> bool:
+    try:
+        return importlib.util.find_spec(name) is not None
+    except (ImportError, ValueError):
+        return False
+
+
+# Presence check only. Importing librosa/numpy here put the whole numpy/scipy
+# stack on every sidecar boot via app.main; the methods import them on use.
+LIBROSA_AVAILABLE = _module_installed("librosa") and _module_installed("numpy")
+if not LIBROSA_AVAILABLE:
     logger.warning("librosa not found. Audio analysis will use mock fallback.")
 
-# Import the production engine (lazy -- won't load heavy libs until needed)
-try:
-    from .analysis_engine import AnalysisEngine, run_full_analysis
+# analysis_engine imports numpy at module level -> loaded on first use, not boot.
+_engine: ModuleType | None = None
+_engine_checked = False
+_engine_lock = threading.Lock()
 
-    _ENGINE_AVAILABLE = True
-except ImportError:
-    _ENGINE_AVAILABLE = False
-    logger.warning("analysis_engine not available. Using legacy analyzer.")
+
+def _load_engine() -> ModuleType | None:
+    """Return the app.analysis_engine module, or None when it cannot import."""
+    global _engine, _engine_checked
+    if not _engine_checked:
+        with _engine_lock:
+            if not _engine_checked:
+                try:
+                    from . import analysis_engine
+
+                    _engine = analysis_engine
+                except ImportError:
+                    _engine = None
+                    logger.warning("analysis_engine not available. Using legacy analyzer.")
+                _engine_checked = True
+    return _engine
+
+
+def fingerprint_pcm_md5(path: str) -> bytes | None:
+    """MD5 digest of the first 30 s of decoded mono PCM (11025 Hz).
+
+    Duplicate-finder fingerprint. Catches bit-identical files, re-encodes and
+    format conversions of the same master; not remixes. Without librosa it
+    hashes the raw leading file bytes (bit-identical duplicates only).
+
+    Thread-safe (no shared state); the duplicate scan runs it on a thread pool.
+
+    Returns None on any error.
+    """
+    try:
+        try:
+            import librosa
+
+            y, _ = librosa.load(path, sr=11025, mono=True, duration=30.0)
+            raw = (y * 32768).astype("int16").tobytes()
+        except ImportError:
+            with open(path, "rb") as fh:
+                raw = fh.read(30 * 11025 * 2)
+        digest = hashlib.md5(raw, usedforsecurity=False).digest()
+        logger.debug("fingerprint_pcm_md5: %s -> %s", path, digest.hex())
+        return digest
+    except Exception as exc:
+        logger.error("fingerprint_pcm_md5: failed for %s - %s", path, exc)
+        return None
 
 
 class AudioAnalyzer:
@@ -78,11 +126,12 @@ class AudioAnalyzer:
     def analyze_track(cls, task_id: str, file_path: str, mode: str = "accuracy") -> dict[str, Any]:
         """Submit an analysis job to the worker pool."""
         executor = cls.get_executor()
+        engine = _load_engine()
 
-        if _ENGINE_AVAILABLE:
+        if engine is not None:
             # Use the production engine
             duration_cap = 120.0 if mode == "speed" else None
-            future = executor.submit(run_full_analysis, file_path, duration_cap)
+            future = executor.submit(engine.run_full_analysis, file_path, duration_cap)
         else:
             # Legacy fallback
             future = executor.submit(cls._run_legacy_analysis, file_path, mode)
@@ -110,17 +159,19 @@ class AudioAnalyzer:
     @classmethod
     def analyze_sync(cls, file_path: str, mode: str = "accuracy") -> dict[str, Any]:
         """Synchronous analysis. Blocks until done."""
-        if _ENGINE_AVAILABLE:
+        engine = _load_engine()
+        if engine is not None:
             duration_cap = 120.0 if mode == "speed" else None
-            result = run_full_analysis(file_path, duration_cap)
+            result = engine.run_full_analysis(file_path, duration_cap)
             return cls._normalize_result(result)
         return cls._run_legacy_analysis(file_path, mode)
 
     @classmethod
     def capabilities(cls) -> dict[str, Any]:
         """Report which analysis backends are available."""
-        if _ENGINE_AVAILABLE:
-            return AnalysisEngine.capabilities()
+        engine = _load_engine()
+        if engine is not None:
+            return engine.AnalysisEngine.capabilities()
         return {
             "core": LIBROSA_AVAILABLE,
             "madmom": False,
@@ -177,6 +228,9 @@ class AudioAnalyzer:
 
         try:
             import warnings
+
+            import librosa
+            import numpy as np
 
             warnings.filterwarnings("ignore")
 

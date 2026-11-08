@@ -130,8 +130,8 @@ id = "sc-log-credential-scrub"
 group = "Logging"
 name = "SC-Credentials aus Logs"
 status = "unmerged"
-branch = "claude/loving-goodall-90uf7w"
-pr = 58
+branch = "claude/dreamy-planck-w7771v"
+pr = 60
 desc = "client_id/oauth_token aus jeder geloggten URL, jedem Param-Dict und jeder Exception entfernt."
 paths = ["tests/test_soundcloud_log_redaction.py"]
 related = ["sc-api-client", "log-path-redaction"]
@@ -175,10 +175,10 @@ group = "Performance"
 name = "Performance-Overhaul"
 status = "research"
 research = "performance-overhaul"
-desc = "Spürbare Langsamkeit beseitigen (Scroll, Tabwechsel, Playlist-Expand, USB, Start) - 48 Hotspots belegt."
+desc = "Spürbare Langsamkeit beseitigen (Scroll, Tabwechsel, Playlist-Expand, USB, Start) - 48 Hotspots belegt, 17 davon am 2026-11-08 in 11 PRs (#62-#73) behoben."
 related = ["track-table", "usb-sync-engine", "workspace-topbar-nav", "multiband-waveform-data"]
-todo = ["TrackTable virtualisieren + memo-Rows", "/api/library/tracks paginieren + GZip", "schwere Views lazy mounten; SettingsManager.load cachen", "/api/usb/sync als SSE, Export parallel, Scan/Diff ohne N+1", "Waveform-Decode + load_library vom Event-Loop, 2-s-Splash weg", "Virtualisierungs-Lib als Schicht-A-Entscheidung"]
-notes = "Code-Teile auf zwei Branches (siehe Teile)."
+todo = ["/api/library/tracks paginieren + GZip (light=true existiert)", "/api/usb/sync als SSE + Export parallel", "load_library vom Event-Loop, 2-s-Splash weg", "Profiler-Baselines (OQ16) nachholen"]
+notes = "Code der 11 PRs liegt auf claude/dreamy-planck-w7771v (PR 60), siehe Teile unten. Virtualisierung ohne neue Dependency (hand-rolled). Research-Doc steht in drafting_ (Pipeline tot); Lifecycle-Zeile 2026-11-08 fasst den Stand zusammen."
 
 [[feature]]
 id = "perf-backend-quickwins"
@@ -186,22 +186,135 @@ group = "Performance"
 parent = "performance-overhaul"
 name = "Backend-Perf Quick Wins"
 status = "unmerged"
-branch = "claude/perf-backend-quickwins"
+branch = "claude/dreamy-planck-w7771v"
+pr = 60
 desc = "Mappings-Cache, memoisiertes resolve() im Import-Dedup, Light-Projektion für GET /api/library/tracks."
 paths = ["tests/test_import_dedup.py", "tests/test_library_tracks_light.py"]
-notes = "1 Commit ungepusht. Auf PR #58 gestapelt."
+notes = "In PR #60 enthalten. Frontend-Umstellung auf den Light-Fetch liegt uncommittet im Worktree feat/light-library-tracks."
 
 [[feature]]
 id = "perf-frontend-virtualization"
 group = "Performance"
 parent = "performance-overhaul"
-name = "TrackTable-Virtualisierung (Mai-Pass)"
+name = "TrackTable-Virtualisierung"
 status = "unmerged"
-branch = "claude/pensive-wiles-74ad65"
-desc = "Virtualisierte TrackTable, TrackRow-Memo, modulweiter Track-Cache, useDeferredValue-Suche."
-paths = ["frontend/src/hooks/useVirtualRows.js", "frontend/src/hooks/useLibraryTracks.js"]
+branch = "claude/dreamy-planck-w7771v"
+pr = 60
+desc = "Gefensterte TrackTable (hand-rolled useVirtualRows, 0 Deps), memoisierte TrackRow, Row-Edits in State statt Props-Mutation."
+paths = ["frontend/src/hooks/useVirtualRows.js", "frontend/src/hooks/useVirtualRows.test.js"]
 related = ["track-table"]
-notes = "372 hinter main. Backend-Teil ist in perf-backend-quickwins neu gebaut - nur das Frontend fehlt noch."
+notes = "PR #63. Alter Mai-Branch claude/pensive-wiles-74ad65 ist tot (372 hinter main). Drag-and-Drop-Umsortieren ungetestet."
+
+[[feature]]
+id = "perf-library-view-quickwins"
+group = "Performance"
+parent = "performance-overhaul"
+name = "Library-View Quick Wins"
+status = "unmerged"
+branch = "claude/dreamy-planck-w7771v"
+pr = 60
+desc = "Ein Library-Fetch pro Mount, Toast-Context memoisiert, toter dj_stats-Aufruf weg, DAW-Browser auf 200 Zeilen, Suche deferred (PlaylistBrowser, MetadataView, UtilitiesView)."
+related = ["track-table", "collection-view"]
+notes = "PR #66. Kleiner Merge-Overlap mit den uncommitteten Light-Fetch-Edits in feat/light-library-tracks erwartet."
+
+[[feature]]
+id = "perf-shell-mount-polling"
+group = "Performance"
+parent = "performance-overhaul"
+name = "Shell-Mounting + Poller-Backoff"
+status = "unmerged"
+branch = "claude/dreamy-planck-w7771v"
+pr = 60
+desc = "Views mounten erst beim Tab-Öffnen; ein geteilter Task-Poller (useTaskPolling) mit Idle-Backoff 1,5 s auf 10 s. Idle-Last 3,5 req/s auf 2 req/10 s."
+paths = ["frontend/src/hooks/useTaskPolling.js", "frontend/src/hooks/useTaskPolling.test.js"]
+related = ["workspace-topbar-nav"]
+notes = "PR #65. Tauri-Desktop und echter Download/Import nicht getestet."
+
+[[feature]]
+id = "perf-daw-playhead-store"
+group = "Performance"
+parent = "performance-overhaul"
+name = "DAW-Playhead-Store"
+status = "unmerged"
+branch = "claude/dreamy-planck-w7771v"
+pr = 60
+desc = "Playhead + Dead-Reckoning in externem Store statt Reducer; DAW-Kinder rendern bei Wiedergabe nicht mehr (139 auf 0 Renders je 5 s)."
+paths = ["frontend/src/audio/dawState/playheadStore.js", "frontend/src/audio/dawState/playheadStore.test.js", "frontend/src/components/daw/usePlayheadClock.js"]
+notes = "PR #64."
+
+[[feature]]
+id = "perf-ranking-waveform"
+group = "Performance"
+parent = "performance-overhaul"
+name = "Ranking-Waveform-Pipeline"
+status = "unmerged"
+branch = "claude/dreamy-planck-w7771v"
+pr = 60
+desc = "Ranking pro Track: 1 Decode statt 11, 0 OfflineAudioContext statt 6, 1 Stream statt 3; RankingView ohne Doppel-Fetch und Settings-Waterfall."
+related = ["multiband-waveform-data", "ranking-mode"]
+notes = "PR #72. Browser-Check gegen Mock-Backend; echter /api/audio/waveform-Pfad in der App ungeprüft."
+
+[[feature]]
+id = "perf-backend-event-loop"
+group = "Performance"
+parent = "performance-overhaul"
+name = "Backend Event-Loop + Duplikat-Scan"
+status = "unmerged"
+branch = "claude/dreamy-planck-w7771v"
+pr = 60
+desc = "Waveform off-loop + Disk-Cache, Stream-Generatoren sync (1 MiB), librosa lazy beim Boot, clean_xml off-loop, Duplikat-Scan parallel + O(n), Shutdown-Flush vor os._exit, Phrase-Batch mit einem MasterDb-Open."
+paths = ["tests/test_waveform_cache.py", "tests/test_stream_chunking.py", "tests/test_librosa_lazy_import.py", "tests/test_xml_clean_offloop.py", "tests/test_duplicate_grouping.py", "tests/test_shutdown_flush.py", "tests/test_phrase_anlz_dirs.py"]
+related = ["duplicate-finder", "phrase-cue-generator"]
+notes = "PR #71. Tauri-App nicht geprüft."
+
+[[feature]]
+id = "perf-database-cache-xml"
+group = "Performance"
+parent = "performance-overhaul"
+name = "database.py Settings-Cache + XML-Save"
+status = "unmerged"
+branch = "claude/dreamy-planck-w7771v"
+pr = 60
+desc = "hide_streaming per settings.json-mtime gecacht, gefilterte Track-Sicht memoisiert; XML-Saves gebündelt (2 s Debounce, 10 s max, Flush bei save/load/exit)."
+paths = ["tests/test_database_save_cache.py"]
+notes = "PR #67. 100 XML-Mutationen 318 s auf 3,4 s; Ausgabe byte-identisch. Kein manueller App-Test im XML-Modus."
+
+[[feature]]
+id = "perf-sc-fuzzy-index"
+group = "Performance"
+parent = "performance-overhaul"
+name = "SoundCloud Fuzzy-Match Index"
+status = "unmerged"
+branch = "claude/dreamy-planck-w7771v"
+pr = 60
+desc = "Lokale Library einmal pro Sync indexiert (bit-parallele LCS-Schranke statt SequenceMatcher über alles); 20k x 500 in 0,69 s statt ~335 s, Ergebnisse identisch. numpy lazy, damit app.main ohne numpy bootet."
+paths = ["tests/test_sc_fuzzy_index.py", "tests/test_sc_lazy_numpy.py"]
+notes = "PRs #68 + #73."
+
+[[feature]]
+id = "perf-usb-lookups"
+group = "Performance"
+parent = "performance-overhaul"
+name = "USB-Export N+1 Lookups"
+status = "unmerged"
+branch = "claude/dreamy-planck-w7771v"
+pr = 60
+desc = "Artist/Album-Maps einmal pro Export, ein MasterDb-Open pro Diff, Diff per Index; 8498 Einzelabfragen auf 0, Export byte-identisch."
+paths = ["tests/test_usb_lookup_batching.py"]
+related = ["usb-sync-engine"]
+notes = "PR #70. Nebenbei gefixt: Diff-Vorschau zeigte leere Artists (rbox hat kein get_artist). Altfund offen: exportLibrary.db wird mit plain sqlite3 gelesen, Stick-Seite der Diff leer, Datei bei jedem Sync-Start gelöscht (eigene Karte). Kein Test an echtem Stick."
+
+[[feature]]
+id = "perf-build-profile"
+group = "Performance"
+parent = "performance-overhaul"
+name = "Cargo Release-Profil + Release-Build-Fix"
+status = "unmerged"
+branch = "claude/dreamy-planck-w7771v"
+pr = 60
+desc = "Cargo [profile.release] thin-LTO, codegen-units=1, strip (EXE 18,7 MB); html2canvas entfernt; cfg-gated Shell-Imports wiederhergestellt + Release-Clippy in CI."
+related = ["pyinstaller-backend-bundle"]
+notes = "PRs #62 + #69. Release-Build mit gebündeltem Sidecar nicht geprüft."
 
 # ── Mobile ────────────────────────────────────────────────────────────────
 
@@ -233,8 +346,8 @@ group = "Release & CI"
 parent = "ci-pipeline"
 name = "node:test-Suites in der CI"
 status = "unmerged"
-branch = "claude/loving-goodall-90uf7w"
-pr = 58
+branch = "claude/dreamy-planck-w7771v"
+pr = 60
 desc = "Frontend-Unit-Tests blockierend in der CI (Plain-Suites, dawReducer, Artist-Hook)."
 notes = "Auf main laufen Frontend-Tests in der CI gar nicht."
 

@@ -53,14 +53,16 @@ class LibrarySource:
         path = track.get("path")
         if not path:
             return None
-        import hashlib
+        from .anlz_sidecar import sidecar_dir_for
 
-        p = Path(path)
-        sidecar_root = p.parent / ".lms_anlz"
-        if not sidecar_root.exists():
+        # The writer keys the folder on the RESOLVED path. Hashing the stored
+        # string instead missed every sidecar whose path differs from it (`..`,
+        # a relative path, letter case on Windows) and re-ran a full analysis.
+        try:
+            candidate = sidecar_dir_for(Path(path))
+        except (OSError, ValueError) as exc:
+            logger.debug("sidecar lookup skipped for %r: %s", path, exc)
             return None
-        h = hashlib.sha1(str(p).encode("utf-8")).hexdigest()[:16]
-        candidate = sidecar_root / h
         return candidate if candidate.exists() else None
 
 

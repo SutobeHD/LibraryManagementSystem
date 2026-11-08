@@ -11,6 +11,7 @@ on this stack and additionally lets us spoof the remote client tuple
 (``client=("ip", port)``) so we can exercise the loopback gate in
 finding #2 without monkey-patching the route.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -40,13 +41,14 @@ def _post(
     middleware stack so the global exception handler can convert them to
     a 500 — same behaviour the live uvicorn server gives.
     """
+
     async def _go() -> httpx.Response:
         transport = httpx.ASGITransport(
-            app=app, client=client, raise_app_exceptions=False,
+            app=app,
+            client=client,
+            raise_app_exceptions=False,
         )
-        async with httpx.AsyncClient(
-            transport=transport, base_url="http://testserver"
-        ) as ac:
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as ac:
             return await ac.post(url, json=json, headers=headers)
 
     return asyncio.run(_go())
@@ -76,14 +78,14 @@ def sandbox_root(tmp_path: Path) -> Iterator[Path]:
 class TestNoDuplicateHeartbeatRoute:
     def test_only_one_heartbeat_route_registered(self) -> None:
         matches = [
-            r for r in app.routes
+            r
+            for r in app.routes
             if getattr(r, "path", None) == "/api/system/heartbeat"
             and "POST" in getattr(r, "methods", set())
         ]
-        assert len(matches) == 1, (
-            f"Expected exactly one POST /api/system/heartbeat, "
-            f"found {len(matches)}: {matches!r}"
-        )
+        assert (
+            len(matches) == 1
+        ), f"Expected exactly one POST /api/system/heartbeat, found {len(matches)}: {matches!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -105,9 +107,7 @@ class TestHeartbeatNoTokenLeak:
             ("8.8.8.8", 5555),
         ],
     )
-    def test_heartbeat_never_returns_token_field(
-        self, client_tuple: tuple[str, int]
-    ) -> None:
+    def test_heartbeat_never_returns_token_field(self, client_tuple: tuple[str, int]) -> None:
         r = _post("/api/system/heartbeat", client=client_tuple)
         assert r.status_code == 200
         body = r.json()
@@ -120,18 +120,15 @@ class TestHeartbeatNoTokenLeak:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.usefixtures("empty_library")
 class TestValidateAudioPathSandbox:
-    def test_valid_audio_file_inside_root_accepted(
-        self, sandbox_root: Path
-    ) -> None:
+    def test_valid_audio_file_inside_root_accepted(self, sandbox_root: Path) -> None:
         mp3 = sandbox_root / "song.mp3"
         mp3.write_bytes(b"\x00")  # 1 byte; we never decode
         result = validate_audio_path(str(mp3))
         assert result == mp3.resolve()
 
-    def test_sibling_root_with_shared_prefix_is_rejected(
-        self, tmp_path: Path
-    ) -> None:
+    def test_sibling_root_with_shared_prefix_is_rejected(self, tmp_path: Path) -> None:
         """Regression: the str.startswith bug accepted '<root>_evil' as inside '<root>'."""
         good_root = (tmp_path / "lib").resolve()
         evil_root = (tmp_path / "lib_evil").resolve()
@@ -148,9 +145,7 @@ class TestValidateAudioPathSandbox:
         finally:
             ALLOWED_AUDIO_ROOTS.remove(good_root)
 
-    def test_path_outside_roots_rejected(
-        self, tmp_path: Path, sandbox_root: Path
-    ) -> None:
+    def test_path_outside_roots_rejected(self, tmp_path: Path, sandbox_root: Path) -> None:
         # File exists, audio extension, but outside any allowed root and not
         # in db.tracks.
         outside = (tmp_path / "elsewhere").resolve()
