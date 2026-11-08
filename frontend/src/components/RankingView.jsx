@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useDeferredValue } from 'react';
 import api from '../api/api';
 import { log } from '../utils/log';
 import {
@@ -183,47 +183,59 @@ const RankingView = ({ libraryStatus, appMode }) => {
     );
 
     useEffect(() => {
-        if (libraryStatus?.loaded) {
+        if (!libraryStatus?.loaded) return;
+        api.get('/api/genres')
+            .then((res) => setGenres(res.data))
+            .catch((err) => console.error('[RankingView] Failed to load genres:', err));
+    }, [libraryStatus?.loaded]);
+
+    // Source State
+    const [sourceMode, setSourceMode] = useState('playlist'); // 'playlist', 'artist', 'label', 'album'
+    const [sourceItems, setSourceItems] = useState([]);
+    const [searchTerm, setSearchTerm] = useState('');
+    // Typing re-filters a list of thousands of cards — let the input stay responsive.
+    const deferredSearchTerm = useDeferredValue(searchTerm);
+
+    // One fetch per (source tab, library load) — the tree is not fetched again on mount.
+    useEffect(() => {
+        if (!libraryStatus?.loaded) return;
+        setSearchTerm('');
+        let cancelled = false;
+        if (sourceMode === 'playlist') {
             api.get('/api/playlists/tree')
                 .then((res) => {
+                    if (cancelled) return;
                     setTree(res.data);
                     log.debug('[RankingView] Loaded tree:', res.data);
                     if (res.data.length === 0)
                         console.warn('[RankingView] Warning: Tree is empty!');
                 })
                 .catch((err) => console.error('[RankingView] Failed to load tree:', err));
-            api.get('/api/genres').then((res) => setGenres(res.data));
-        }
-    }, [libraryStatus?.loaded]);
-
-    // Source State
-    const [sourceMode, setSourceMode] = useState('playlist'); // 'playlist', 'artist', 'label', 'album'
-    const [sourceItems, setSourceItems] = useState([]);
-    const [filteredItems, setFilteredItems] = useState([]);
-    const [searchTerm, setSearchTerm] = useState('');
-
-    useEffect(() => {
-        if (!libraryStatus?.loaded) return;
-        setSearchTerm('');
-        if (sourceMode === 'playlist') {
-            api.get('/api/playlists/tree').then((res) => setTree(res.data));
         } else {
+            setSourceItems([]);
             const endpoint =
                 sourceMode === 'artist'
                     ? '/api/artists'
                     : sourceMode === 'label'
                       ? '/api/labels'
                       : '/api/albums';
-            api.get(endpoint).then((res) => setSourceItems(res.data));
+            api.get(endpoint)
+                .then((res) => {
+                    if (!cancelled) setSourceItems(res.data);
+                })
+                .catch((err) => console.error(`[RankingView] Failed to load ${endpoint}:`, err));
         }
+        return () => {
+            cancelled = true;
+        };
     }, [sourceMode, libraryStatus?.loaded]);
 
-    useEffect(() => {
-        if (sourceMode === 'playlist') return;
-        setFilteredItems(
-            sourceItems.filter((i) => i.name.toLowerCase().includes(searchTerm.toLowerCase()))
-        );
-    }, [sourceItems, searchTerm, sourceMode]);
+    const filteredItems = useMemo(() => {
+        if (sourceMode === 'playlist') return [];
+        const term = deferredSearchTerm.trim().toLowerCase();
+        if (!term) return sourceItems;
+        return sourceItems.filter((i) => (i.name || '').toLowerCase().includes(term));
+    }, [sourceItems, deferredSearchTerm, sourceMode]);
 
     const loadTrack = (track) => {
         if (!track) return;
@@ -340,13 +352,20 @@ const RankingView = ({ libraryStatus, appMode }) => {
         else if (sourceMode === 'label') endpoint = `/api/label/${item.id}/tracks`;
         else if (sourceMode === 'album') endpoint = `/api/album/${item.id}/tracks`;
 
-        api.get(endpoint)
-            .then(async (res) => {
+        // Tracks + filter setting in parallel. Settings are NOT cached: this view stays mounted
+        // (hidden) while the user edits ranking_filter_mode in Settings, and no settings-saved
+        // event exists to invalidate a cache.
+        Promise.all([
+            api.get(endpoint),
+            api.get('/api/settings').catch((err) => {
+                console.warn('[RankingView] Settings unavailable, ranking all tracks:', err);
+                return { data: {} };
+            }),
+        ])
+            .then(([res, settingsRes]) => {
                 if (!isMountedRef.current) return;
 
-                // Get filter settings
-                const settingsRes = await api.get('/api/settings');
-                const filterMode = settingsRes.data.ranking_filter_mode || 'all';
+                const filterMode = settingsRes.data?.ranking_filter_mode || 'all';
 
                 let tracks = res.data;
                 if (filterMode === 'unrated') {
