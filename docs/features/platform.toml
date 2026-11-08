@@ -11,6 +11,8 @@ id = "tauri-sidecar-supervisor"
 group = "Desktop-Runtime"
 name = "Sidecar-Supervisor"
 status = "shipped"
+test = "getestet"
+tested = "2026-09-04"
 desc = "Startet die Python-Sidecar, fängt das Token aus stdout ab und filtert es, Kill bei Exit, Dev-Autospawn."
 related = ["bearer-session-auth", "pyinstaller-backend-bundle"]
 notes = "Code in src-tauri/src/main.rs (Hub)."
@@ -130,11 +132,14 @@ id = "sc-log-credential-scrub"
 group = "Logging"
 name = "SC-Credentials aus Logs"
 status = "unmerged"
+test = "getestet"
+tested = "2026-11-07"
 branch = "claude/dreamy-planck-w7771v"
 pr = 60
 desc = "client_id/oauth_token aus jeder geloggten URL, jedem Param-Dict und jeder Exception entfernt."
 paths = ["tests/test_soundcloud_log_redaction.py"]
 related = ["sc-api-client", "log-path-redaction"]
+notes = "2026-11-07: Backend-Log nach 401-Pfad frei von Credentials. 2026-11-07 Erfolgspfad (Login, Token speichern, /me, Playlists, Artist-Katalog mit ~60 SC-Calls): tauri-dev-Log + logs/app.log ohne Access-/Refresh-Token, OAuth-Code, Bearer, client_secret. Nur OAuth-state geloggt (todo bei sc-oauth-pkce)."
 
 # ── Infra ─────────────────────────────────────────────────────────────────
 
@@ -186,11 +191,13 @@ group = "Performance"
 parent = "performance-overhaul"
 name = "Backend-Perf Quick Wins"
 status = "unmerged"
+test = "testen"
 branch = "claude/dreamy-planck-w7771v"
 pr = 60
 desc = "Mappings-Cache, memoisiertes resolve() im Import-Dedup, Light-Projektion für GET /api/library/tracks."
 paths = ["tests/test_import_dedup.py", "tests/test_library_tracks_light.py"]
-notes = "In PR #60 enthalten. Frontend-Umstellung auf den Light-Fetch liegt uncommittet im Worktree feat/light-library-tracks."
+todo = ["Fix liegt auf feat/light-library-tracks (PR #75) + feat/editor-rekordbox-beatgrid für Grids pro Track (PR #77, auf #75 gestapelt) - #75 hat PR #60 seit 2d40d66 drin und ist konfliktfrei; #77 kollidiert danach in WaveformEditor, DjEditDaw, DawControlStrip, useWaveSurfer (DAW-Playhead-Store #64, Ranking-Waveform-Pipeline #72). Live nachgemessen 2026-11-08 (tauri dev, eigener Stack, nach Beatgrid-Loader): Liste 3,19 MB in 0,2-2,8 s, keine Ansicht fragt die volle Liste an, 178 Health-Pings max. 1,08 s (Boot), sonst < 0,25 s, keine abgebrochenen API-Requests; Ranking + Editor holen das Grid per /api/track/{id}/beatgrid (Editor: 155 BPM + Grid-Linien)", "War: Frontend fragt light=true nirgends ab (9 Aufrufer von /api/library/tracks). Sobald der Beatgrid-Loader fertig ist (~37 s nach Boot), hängt jedes Track-Dict sein volles beatGrid an: Antwort 140 MB, 20 s bis zum ersten Byte, das ganze Backend steht so lange (Health-Ping 19,7 s). Alle App-Requests in dem Fenster laufen ins 10-s-axios-Timeout und werden abgebrochen (Polls, library/mode, SC-Token-Übergabe)", "Backend: Light-Projektion als Default für die Listenansicht, beatGrid nur pro Track laden"]
+notes = "In PR #60 enthalten. Frontend-Umstellung auf den Light-Fetch: PR #75 (feat/light-library-tracks). 2026-11-07 Live-DB: light=true liefert 4760 Tracks ohne Heavy-Felder, aber nur 3,19 statt 3,31 MB (~3,5 %), ~0,25 s - gemessen VOR dem Beatgrid-Loader. Danach: volle Antwort 140,7 MB, fast komplett beatGrid (ca. 417 Beats pro Track)."
 
 [[feature]]
 id = "perf-frontend-virtualization"
@@ -198,6 +205,7 @@ group = "Performance"
 parent = "performance-overhaul"
 name = "TrackTable-Virtualisierung"
 status = "unmerged"
+test = "testen"
 branch = "claude/dreamy-planck-w7771v"
 pr = 60
 desc = "Gefensterte TrackTable (hand-rolled useVirtualRows, 0 Deps), memoisierte TrackRow, Row-Edits in State statt Props-Mutation."
@@ -316,6 +324,18 @@ desc = "Cargo [profile.release] thin-LTO, codegen-units=1, strip (EXE 18,7 MB); 
 related = ["pyinstaller-backend-bundle"]
 notes = "PRs #62 + #69. Release-Build mit gebündeltem Sidecar nicht geprüft."
 
+[[feature]]
+id = "playlist-tracks-light"
+group = "Performance"
+parent = "performance-overhaul"
+name = "Playlist-Tracks ohne Beatgrids"
+status = "idea"
+desc = "Playlist-, Smart-Playlist- und Artist-Tracklisten ohne beatGrid/Cues ausliefern wie die leichte Collection-Liste."
+routes = ["/api/playlist/{pid}/tracks"]
+related = ["perf-backend-quickwins", "collection-view"]
+todo = ["/api/playlist/{pid}/tracks liefert volle beatGrids: ~31 kB pro Track (31 Tracks = 0,96 MB), 1000er-Playlist ~30 MB -> Backend blockiert wieder Sekunden", "Smart-Playlist-evaluate und /api/artists/{id}/local-tracks auf dasselbe prüfen"]
+notes = "Gefunden 2026-11-07 beim Nachmessen von feat/light-library-tracks: dort ist nur /api/library/tracks leicht (light=true)."
+
 # ── Mobile ────────────────────────────────────────────────────────────────
 
 [[feature]]
@@ -346,10 +366,12 @@ group = "Release & CI"
 parent = "ci-pipeline"
 name = "node:test-Suites in der CI"
 status = "unmerged"
+test = "getestet"
+tested = "2026-11-07"
 branch = "claude/dreamy-planck-w7771v"
 pr = 60
 desc = "Frontend-Unit-Tests blockierend in der CI (Plain-Suites, dawReducer, Artist-Hook)."
-notes = "Auf main laufen Frontend-Tests in der CI gar nicht."
+notes = "Auf main laufen Frontend-Tests in der CI gar nicht. 2026-11-07 CI-Lauf 42383467162 (Stand PR #60/#61): 3 Suites, 124 Tests grün, ohne continue-on-error."
 
 [[feature]]
 id = "cross-platform-release"
@@ -368,6 +390,7 @@ id = "linux-macos-support"
 group = "Linux/macOS"
 name = "Linux/macOS-Support"
 status = "partial"
+test = "testen"
 desc = "CI baut deb/rpm + dmg, platformdirs-Pfade, xdg-open/open-Zweige."
 related = ["config-platform-paths", "usb-device-detect"]
 notes = "AppImage übersprungen, macOS ungetestet, Rekordbox-Root + USB-Detektor Windows-zentriert."
