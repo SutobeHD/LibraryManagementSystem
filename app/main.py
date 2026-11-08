@@ -5058,6 +5058,25 @@ def folder_watcher_remove(r: PathRequest):
 _shutdown_event = threading.Event()
 
 
+def _flush_pending_db_saves() -> None:
+    """Write coalesced XML-library saves before an exit that skips atexit.
+
+    os._exit / os.execv bypass atexit, where app.database registers its flush
+    of debounced XML writes. No-op on a database.py without coalescing; never
+    raises (its lock wait is bounded) so shutdown always proceeds.
+    """
+    from . import database as _database
+
+    flush = getattr(_database, "flush_pending_saves", None)
+    if not callable(flush):
+        return
+    try:
+        if flush() is False:
+            logger.warning("Shutdown: some pending library saves could not be written")
+    except Exception as exc:
+        logger.warning("Shutdown: flushing pending library saves failed: %s", exc)
+
+
 def _graceful_shutdown():
     """Performs cleanup before shutting down the backend."""
     logger.info("Graceful shutdown initiated...")
@@ -5068,6 +5087,7 @@ def _graceful_shutdown():
         logger.warning("FolderWatcher shutdown error: %s", exc)
     # Give time for pending requests to complete
     time.sleep(0.5)
+    _flush_pending_db_saves()
     logger.info("Shutdown complete.")
     os._exit(0)
 
@@ -5171,6 +5191,7 @@ async def restart(request: Request):
     def restart_proc():
         logger.info("Restarting backend...")
         time.sleep(0.5)
+        _flush_pending_db_saves()
         if getattr(sys, "frozen", False):
             os.execv(sys.executable, sys.argv)
         else:
