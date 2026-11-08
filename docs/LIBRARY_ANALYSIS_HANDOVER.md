@@ -3,7 +3,7 @@
 **For:** a fresh Claude instance with no prior context.
 **From:** session of 2026-11-08 that built v1 (`scripts/library_analysis.py`).
 **User:** tb. Talks German. Wants every claim measured, not assumed ("Teste immer selber"). Short sentences, tables, paste-ready commands, one command per block (the user switches between cmd and PowerShell; `&&` and `;` each break in one of them).
-**Goal (user's words, 2026-11-08):** "Ich will das volle Ausmaß, alles messen was geht." Measure everything that can be measured about the user's library: metadata, file properties, Rekordbox's own analysis data, and the audio itself. Then cross-check the sources against each other. The user also wants a setting for how deep a track is analysed: **Rekordbox level or high level** (§3.6).
+**Goal (user's words, 2026-11-08):** "Ich will das volle Ausmaß, alles messen was geht." Measure everything that can be measured about the user's library: metadata, file properties, Rekordbox's own analysis data, and the audio itself. Then cross-check the sources against each other. The user also wants a setting for how deep a track is analysed: **Rekordbox level or high level** (§3.6). Later the user wants to sort by **individual sound parts**: similar basses, bass depth, bells, hi-hat amount, similar hi-hats, how melodic, melody type, similar melodies. That block is to be **planned, not built** (§9).
 
 Read first: `CLAUDE.md`, `.claude/rules/*.md`, then this file. `docs/ANALYSIS_HANDOVER.md` is the older handover for engine *accuracy* work; read §2 (setup) only if you touch the engine itself.
 
@@ -320,6 +320,7 @@ These are optional and not started without the user's say:
 | P4 | Stage E runner | `--limit 50` run with timing + peak RSS; then the full run in the background; resume tested by killing it once |
 | P5 | Cross-checks + report sections + CSV columns | report renders; every section has real numbers |
 | P5b | Analysis depth setting (§3.6) | engine `depth` argument, depth-aware cache, setting in `/api/settings`, settings UI replaces the dead "Analysis Quality" block; per-stage timing at both levels measured on 50 tracks and written into §3.6; engine tests + `audio-stack-reviewer` + `e2e-tester` green |
+| P7 (plan only) | Sound-component sorting (§9): research doc, user's answers, measured isolation choice, per-wish feature definitions | doc reaches the approval gate; no code before the user approves |
 | P6 (separate, ask first) | Expose measured features to the app (route + sortable columns via `SORT_VALUES` in `trackSort.js`) | start `route-architect` before touching `app/main.py` |
 
 For every phase:
@@ -347,7 +348,65 @@ Registry: keep `library-analysis-report` (`docs/features/analysis.toml`) current
 
 ---
 
-## 9. First commands
+## 9. Sound-component sorting — wishes to plan, not solved here
+
+The user stated these on 2026-11-08 and asked explicitly that they be **recorded, not solved**, so that you can plan them without hurdles. Your job for this block is a plan (phase P7), not code. The user's words:
+
+> "Ich möchte am Ende zum Beispiel auch nach gleichen Bässen sortieren können oder Bässen mit einer gewissen Tiefe, dann will ich z.B. auch nach Bells sortieren können, nach Hi-Hat-Anteil und gleichen Hi-Hats oder so und wie melodisch und was für Melodien und nach ähnlichen Melodien z.B."
+
+"Zum Beispiel" and "oder so": these are examples of a direction. The direction is **sorting by individual sound components of a track**, not only whole-track features. Plan for the direction, starting with these eight.
+
+### 9.1 The wishes, split by kind of sort
+
+Two kinds of sort hide in the list:
+
+- **Value:** a number per track, so it becomes a sortable column.
+- **Similarity:** "like this track", so it needs a seed track and a ranking.
+
+| # | Wish (user's word) | Kind | Signal it needs | Open question for the user |
+|---|---|---|---|---|
+| W1 | gleiche Bässe | similarity | bass part isolated: sound (timbre) and/or line (rhythm, notes) | similar *sound*, similar *line*, or both? Kick included or not? |
+| W2 | Bässe mit einer gewissen Tiefe | value | how low and how strong the bass is | "Tiefe" = pitch in Hz, sub-bass amount, or length/boom of the bass? |
+| W3 | Bells | value (amount), maybe similarity | detection of bell-like sounds | which sounds count (bell synth, tubular bell, metallic pluck, cowbell)? 5 example tracks with, 5 without |
+| W4 | Hi-Hat-Anteil | value | hi-hat part isolated: loudness and/or density | loudness, density (8ths / 16ths / offbeat), open vs closed? |
+| W5 | gleiche Hi-Hats | similarity | hi-hat sound and/or pattern | sound or pattern? |
+| W6 | wie melodisch | value | amount of pitched / tonal content vs percussive | is a pad / chord bed "melodic", or only a lead line? |
+| W7 | was für Melodien | category | melody type per track | which categories (e.g. arpeggio, lead, chords/pad, acid line, vocal hook)? The user names them |
+| W8 | ähnliche Melodien | similarity | melody line isolated, as a note sequence or contour | same notes or same feel? Does a transposed melody count as similar? |
+
+Ask the 8 questions as **one numbered list** in German; the user answers numbered lists fast. Add these two:
+
+- **(9)** Is a new dependency (torch, a source-separation model) OK, and may it use the GPU?
+- **(10)** Does this belong to the "Hoch" depth level (§3.6), or a third level such as "Maximal"?
+
+### 9.2 Hurdles the plan must clear (facts, measured 2026-11-08 unless marked)
+
+| Hurdle | Fact | Consequence for the plan |
+|---|---|---|
+| Parts are mixed together | W1, W4, W5, W6-W8 need the bass, the hi-hats or the melody **separately**. The engine today only has whole-track features plus band energy (§3.5 E6/E7) | Choose how to isolate the parts. Approach families, none chosen or tested: frequency-band heuristics (no deps, crude: kick and bass share a band); harmonic/percussive split (`librosa.effects.hpss`, installed, crude); model-based source separation (e.g. Demucs class, needs torch). Benchmark on the user's example tracks before you decide |
+| No ML stack installed | `.venv` has librosa, madmom, numba, sklearn. **Not** installed: torch, torchaudio, demucs, onnxruntime, tensorflow, crepe, essentia (no Windows wheel), faiss, hnswlib | Every model-based path is a **new dependency**. It needs the user's approval, exact pinning (`requirements.txt` `==`, `.claude/rules/coding-rules.md`), and a check of installer size (`backend.spec`) |
+| torch decision already pending elsewhere | `docs/research/implement/inprogress_recommender-taste-llm-audio.md` gates torch at its M2 benchmark (CLAP / MERT embeddings). It estimates the installer at +200-500 MB (from that doc, not re-measured) | Make **one** torch decision for both features. Read that doc first; do not contradict it |
+| Similarity storage already planned | `docs/research/implement/accepted_recommender-similar-tracks.md` (accepted, 0/12 tasks) plans a whole-track vector (about 46 dims: MFCC, chroma, spectral, BPM, key, LUFS). It is stored in `app_data/track_vectors.db` as **named slices** so reasons ("similar bass") can be computed per slice | Component similarity (W1, W5, W8) = **more named slices** (bass, hats, melody) in the same store. Extend that plan; do not build a second store |
+| Hardware | GPU: NVIDIA RTX 2070 SUPER, 8 GB, driver 617.14. CPU: 16 cores / 32 threads. RAM: 62 GB | Measure CPU vs GPU time on 10 tracks before you estimate the full run. The base audio pass alone is about 53 CPU-hours (§3.5) |
+| Disk | Storing separated parts as audio: 392.5 h × 4 stems at 44.1 kHz 16-bit stereo = about **1 TB**. Free on the home drive: 178 GB | **Never persist stems.** Separate, extract features, discard, in the same worker |
+| Melody pitch tracking | `librosa.pyin` is installed (slow; time not measured here). Model trackers (CREPE etc.) need torch or TF. essentia's melody extractor is unavailable on Windows | Plan the pitch tracker together with the separation decision, since a pitch tracker works far better on an isolated melody part |
+| Instrument detection (W3 bells, W4 hats) | No tagger installed. Choices: a pretrained sound-event tagger (dependency), handcrafted detectors (e.g. inharmonic partials for bells, high-band onsets for hats), or a small classifier trained on the user's labelled examples (sklearn installed) | The user's example tracks (questions 3-5) are the ground truth for any choice |
+| Ground truth | The user's rule is to measure, not assume. No labelled set exists | First plan step: collect from the user 10-20 example tracks per wish (and pairs that "sound alike") and keep them as the evaluation set. Store only track IDs, never audio, in the repo |
+| UI fit | TrackTable sorts by one value per column (`SORT_VALUES` in `frontend/src/utils/trackSort.js` on `feat/sortable-columns`) | Value wishes (W2, W3, W4, W6) become columns. Similarity wishes (W1, W5, W8) need a new action, "Nach Ähnlichkeit zu diesem Track sortieren" (bass / hats / melody). Category W7 becomes a filter or column. Plan both paths |
+
+### 9.3 What the plan must deliver (P7)
+
+- A research doc via `/research-new sound-component-sorting` (`docs/research/README.md`). Put the user's quote above, verbatim, as `## Original Idea`. The remote research routines are dead (memory note 2026-09-03), so run the stages interactively.
+- The user's answers to the 10 questions, recorded in the doc.
+- The isolation approach chosen **by measurement** on the user's example tracks: quality and time per track, CPU vs GPU. Include the option "no new dependency" as a baseline.
+- Per wish: the feature definition, its unit or value range, how it is evaluated against the example set, and the column or similarity slice it lands in.
+- Total cost for the whole library (time, RAM, dependency size), and how it fits the depth levels (§3.6).
+- How it extends `recommender-similar-tracks` (named slices) and shares the torch decision with `recommender-taste`.
+- A stop at the approval gate. The user signs off before any code.
+
+---
+
+## 10. First commands
 
 ```bash
 cd C:\Users\tb\Documents\GitHub\LibraryManagementSystem\.claude\worktrees\library-analysis

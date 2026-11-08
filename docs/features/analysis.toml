@@ -200,3 +200,13 @@ name = "Verworfene Analyse-Experimente"
 status = "dropped"
 desc = "octave-snap, Even-Grid-Regularisierung, Octave-Window abschalten."
 notes = "Gemessen schlechter (Beat-F 0.921 -> 0.900, Phase-Fehler 4.5 -> 18.6 ms, Acc-1 regrediert)."
+
+[[feature]]
+id = "sound-component-sorting"
+group = "Ideen"
+name = "Nach Klang-Bestandteilen sortieren"
+status = "idea"
+desc = "Nach einzelnen Klang-Bestandteilen sortieren: gleiche Bässe, Bass-Tiefe, Bells, Hi-Hat-Anteil, gleiche Hi-Hats, wie melodisch, Melodie-Art, ähnliche Melodien."
+related = ["recommender-similar-tracks", "recommender-taste", "analysis-depth", "library-analysis-report"]
+notes = "Wunsch 2026-11-08, ausdrücklich nur festhalten, nicht lösen. Planung (P7) nach docs/LIBRARY_ANALYSIS_HANDOVER.md §9: 8 Wünsche in Wert / Ähnlichkeit / Kategorie geteilt, 10 Fragen an den User, Hürden gemessen (kein torch/ONNX installiert, RTX 2070 SUPER 8 GB, Stems für die Library ~1 TB vs 178 GB frei -> nie speichern). Ähnlichkeit erweitert die Named Slices von recommender-similar-tracks; torch-Entscheidung gemeinsam mit recommender-taste M2."
+todo = ["Forschungsdokument sound-component-sorting anlegen (Original Idea = Zitat aus §9)", "10 Fragen an den User", "Beispiel-Tracks je Wunsch sammeln (nur IDs)", "Trennungs-Ansatz an Beispielen messen, CPU vs GPU"]
