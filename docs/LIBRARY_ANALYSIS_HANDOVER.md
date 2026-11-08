@@ -30,7 +30,7 @@ Read first: `CLAUDE.md`, `.claude/rules/*.md`, then this file. `docs/ANALYSIS_HA
 | v1 report script | `scripts/library_analysis.py` on `feat/library-analysis` (commit `d520daf`) | done, 10 tests in `tests/test_library_analysis.py` |
 | Registry entry | `library-analysis-report` in `docs/features/analysis.toml` | `in_progress`, todos listed |
 | Genre atlas | `app/genre_atlas.py` + `app/data/genre_atlas.json` (301 genres, 29 tags, 116 scenes) | in PR #59, which is also merged into the integration PR #60 |
-| Quality scanner (ffprobe) | `scripts/dev/scan_audio_quality.py` + `scripts/dev/rescan_unreadable.py`, **only on `feat/artist-hub`** (commit `15fb92f`) | registry `quality-tiers-audit`, `in_progress` |
+| Quality scanner (ffprobe) | `scripts/dev/scan_audio_quality.py` (230 lines, CLI `root --out --workers`) + `scripts/dev/rescan_unreadable.py` (138 lines), on `feat/artist-hub` (commit `15fb92f`) **and on PR #60** (checked 2026-11-08); not on `feat/library-analysis` | registry `quality-tiers-audit`, `in_progress` |
 | PSSI mask code | `app/anlz_usb_export.py:mask_pssi` on `claude/dreamy-planck-w7771v` (PR #60) | masks for USB export; XOR, so the same op unmasks |
 | Light track list | `GET /api/library/tracks?light=true` on PR #60's backend | drops `beatGrid`, `Cues`, `positionMarks`, `phrases` |
 | Sortable columns | `frontend/src/utils/trackSort.js` on `feat/sortable-columns` | `SORT_VALUES` maps a column id to a sort value; new measured columns plug in there later |
@@ -52,11 +52,19 @@ v1 run (2026-11-07, 4760 tracks, 6 s): report at `tmp/library-analysis/{report.m
 
 **Recommendation:** create a new branch `feat/library-measure` from `origin/claude/dreamy-planck-w7771v` (PR #60) and cherry-pick `d520daf`, plus the `library-analysis-report` registry entry from `docs/features/analysis.toml`. Cherry-pick needs the user's go-ahead (`.claude/rules/agentic-mode.md`), so ask: "Neuer Branch auf Basis von PR #60, Analyse-Commit rüberholen?" If the user says no, stay on `feat/library-analysis` and copy the 10-line mask routine with a comment that points to `anlz_usb_export.py`.
 
+**Dry run (2026-11-08, `git merge-tree --write-tree`, nothing checked out):**
+
+- PR #60 contains all of `main` (0 commits behind) and `app/genre_atlas.py` + `app/data/genre_atlas.json`.
+- `feat/library-analysis` has 7 commits PR #60 lacks: `d520daf` (script + tests) and 6 docs commits (registry, handover).
+- Cherry-pick of `d520daf` onto PR #60: **clean**. Merge of the whole branch onto PR #60: **0 conflicts.**
+- So either path works without conflict: rebase the 7 commits onto `origin/claude/dreamy-planck-w7771v`, or a new branch from PR #60 + cherry-pick. Both are rebase/cherry-pick operations → user's go-ahead first.
+
 Fresh worktree: `npm install` is not needed (Python only). Use the main checkout's `.venv` through a junction: `cmd //c "mklink /J .venv C:\Users\tb\Documents\GitHub\LibraryManagementSystem\.venv"`.
 
 ### 1.3 Environment (measured 2026-11-08)
 
 - `.venv` is CPython 3.11. `AnalysisEngine.capabilities()` = madmom RNN beats, **no essentia** (no Windows wheel), so key detection uses the K-S + Temperley fallback.
+- **`import madmom` on its own fails on 3.11** (`ImportError: cannot import name 'MutableSequence' from 'collections'`). It only works after `app/analysis_engine.py:_apply_madmom_compat_shims` ran: import the engine first (`from app import analysis_engine as ae; ae._ensure_libs()`), also in every worker process.
 - pyrekordbox 0.1.7. ffprobe and ffmpeg are on PATH (WindowsApps alias).
 - Machine: 16 cores / 32 threads, 62 GB RAM, 178 GB free in the home drive.
 - Print on a cp1252 console breaks on non-ASCII (`→` raised UnicodeEncodeError in the backend). Write files as UTF-8 and set `PYTHONIOENCODING=utf-8` for runs.
@@ -198,7 +206,7 @@ New measurements in the same pass (cheap once decoded):
 - **Hangs:** use a per-track time budget (for example 10 × duration). If a worker hangs, record the track and recycle the pool.
 - **CLI:** `--limit`, `--workers`, `--only-ids`, `--input <tracks.json>`, `--depth rekordbox|high` (default `high`, see §3.6).
 - **Progress:** print a one-line progress every 50 tracks with the rate and ETA.
-- **Sleep:** Windows sleep kills the night run. Tell the user to keep the machine awake, or use the app's keep-awake tool if available.
+- **Sleep:** Windows sleep kills the night run. Tell the user to keep the machine awake, or use the app's keep-awake tool (`mcp__ccd_host__request_keep_awake` exists in the desktop app's tool list, checked 2026-11-08).
 
 ### 3.6 Analysis depth setting — Rekordbox level vs high level (user requirement 2026-11-08)
 
@@ -407,6 +415,7 @@ Registry: keep `library-analysis-report` (`docs/features/analysis.toml`) current
 ## 8. Known traps
 
 - The full track list is 140 MB and the frontend times out after 10 s. The script uses its own 180 s timeout. Prefer a snapshot (`--save-input`).
+- **On `feat/library-analysis` the backend already returns the light shape** (measured 2026-11-08: 4765 tracks, 3.5 MB, 0.2 s, `beatGrid` present for 0 tracks, `Cues` present for 700). "beatGrid present" (§3.2 preparation state) is therefore unavailable from the track list on this branch; take grid presence from Stage D (PQTZ) instead.
 - 20 local files are missing on disk. 112 tracks are streams with no file. Skip both in Stages C-E and list them.
 - `essentia` is absent, so `key_method` = K-S fallback. Report the method next to key agreement numbers.
 - `AnalysisCache` holds 2 old failed entries (LUFS -100). Ignore them; they are not your data.
