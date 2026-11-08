@@ -59,9 +59,7 @@ from app.anlz_usb_export import (  # noqa: E402
     _PSSI_MOOD,
     _pssi_is_plain,
 )
-from app.anlz_usb_export import (
-    mask_pssi as mask_pssi,  # re-exported: the tests mask their fixtures through this module
-)
+from app.anlz_usb_export import mask_pssi as mask_pssi  # noqa: E402  # re-exported for the tests
 from app.anlz_writer import PMAI_HEADER_LEN  # noqa: E402
 
 logger = logging.getLogger("library_measure_anlz")
