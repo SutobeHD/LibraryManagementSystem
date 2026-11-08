@@ -14,6 +14,8 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::{Emitter, Manager, State};
+#[cfg(not(debug_assertions))]
+use tauri_plugin_shell::{process::CommandEvent, ShellExt};
 
 /// Shared boot-time session token captured from the Python sidecar's stdout.
 ///
@@ -739,34 +741,29 @@ fn main() {
                 tauri::async_runtime::spawn(async move {
                     // Keep the child alive in this scope
                     let _child = child;
-                    loop {
-                        match rx.recv().await {
-                            Some(event) => {
-                                match event {
-                                    CommandEvent::Stdout(line) => {
-                                        let text = String::from_utf8_lossy(&line);
-                                        let trimmed = text.trim();
-                                        // Detect-and-drop the LMS_TOKEN= banner BEFORE
-                                        // forwarding the line to log::info!, so the
-                                        // token value can't reach Tauri's log file.
-                                        if try_capture_token(trimmed, &token_for_loop) {
-                                            continue;
-                                        }
-                                        log::info!("backend: {}", trimmed);
-                                    }
-                                    CommandEvent::Stderr(line) => {
-                                        log::warn!(
-                                            "backend-error: {}",
-                                            String::from_utf8_lossy(&line).trim()
-                                        );
-                                    }
-                                    CommandEvent::Error(err) => {
-                                        log::error!("backend-critical: {}", err);
-                                    }
-                                    _ => {}
+                    while let Some(event) = rx.recv().await {
+                        match event {
+                            CommandEvent::Stdout(line) => {
+                                let text = String::from_utf8_lossy(&line);
+                                let trimmed = text.trim();
+                                // Detect-and-drop the LMS_TOKEN= banner BEFORE
+                                // forwarding the line to log::info!, so the
+                                // token value can't reach Tauri's log file.
+                                if try_capture_token(trimmed, &token_for_loop) {
+                                    continue;
                                 }
+                                log::info!("backend: {}", trimmed);
                             }
-                            None => break,
+                            CommandEvent::Stderr(line) => {
+                                log::warn!(
+                                    "backend-error: {}",
+                                    String::from_utf8_lossy(&line).trim()
+                                );
+                            }
+                            CommandEvent::Error(err) => {
+                                log::error!("backend-critical: {}", err);
+                            }
+                            _ => {}
                         }
                     }
                 });

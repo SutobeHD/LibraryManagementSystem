@@ -104,6 +104,8 @@
 | `frontend/src/audio/dawState/dawReducer.test.js` | Tests for the composed dawReducer (DawState.js barrel) — Phase 4B split. |
 | `frontend/src/audio/dawState/helpers.js` | DawState helpers — pure utilities and the initial-state factory. |
 | `frontend/src/audio/dawState/history.js` | historyReducer — undo / redo full-state snapshots + HYDRATE. |
+| `frontend/src/audio/dawState/playheadStore.js` | playheadStore — live transport position, kept outside the DAW reducer. |
+| `frontend/src/audio/dawState/playheadStore.test.js` | Tests for the live playhead store (playheadStore.js). |
 | `frontend/src/audio/dawState/regions.js` | regionsReducer — region create / split / move / delete / resize / clipboard. |
 | `frontend/src/audio/dawState/selection.js` | selectionReducer — region selection set and time-range selection. |
 | `frontend/src/audio/dawState/transport.js` | transportReducer — playhead, BPM, zoom/scroll, snap-grid, edit-mode, project metadata, and audio-source actio… |
@@ -128,6 +130,7 @@
 | `frontend/src/components/daw/useDawKeyhandlers.js` | useDawKeyhandlers — Pure key-event handlers for the DJ Edit DAW. |
 | `frontend/src/components/daw/useDawProject.js` | useDawProject — Project persistence hook for the DJ Edit DAW Owns: • File input ref used by the hidden <input… |
 | `frontend/src/components/daw/useDawShortcuts.js` | useDawShortcuts — keyboard-shortcut binding for the DJ Edit DAW. |
+| `frontend/src/components/daw/usePlayheadClock.js` | usePlayheadClock — owns the live playhead store for one DAW instance. |
 | `frontend/src/components/daw/useTrackLoader.js` | useTrackLoader — Effect hook that hydrates DAW state when activeTrack changes. |
 | `frontend/src/components/downloads/recognitionCopy.js` | Copy for the download recognizer (artist hub T-31): who a downloaded track is by, whether the library knows t… |
 | `frontend/src/components/downloads/recognitionCopy.test.js` | node:test — `node --test frontend/src/components/downloads/recognitionCopy.test.js` |
@@ -151,6 +154,8 @@
 | `frontend/src/config/tagTaxonomy.test.js` | node --test frontend/src/config/tagTaxonomy.test.js Pure module, imports carry extensions — no resolver neede… |
 | `frontend/src/hooks/useTaskPolling.js` | useTaskPolling — one shared poller per endpoint for background-task status. |
 | `frontend/src/hooks/useTaskPolling.test.js` | node:test for the shared task-polling store (refcount, back-off, pause, kick). |
+| `frontend/src/hooks/useVirtualRows.js` | Row windowing for long tables: only the rows in (and near) the viewport are mounted; spacers above and below … |
+| `frontend/src/hooks/useVirtualRows.test.js` | Range math of the TrackTable row windowing (computeVirtualRange). |
 | `frontend/src/store/authStore.js` | Tiny module-level auth state shared across the frontend. |
 | `frontend/src/utils/AudioBandAnalyzer.js` | AudioBandAnalyzer Splits an AudioBuffer into 3 frequency bands (Rekordbox-style): - Low: < 400 Hz (Bass / Kic… |
 | `frontend/src/utils/log.js` | Dev-only logging utility. |
@@ -332,6 +337,7 @@
 | `tests/test_pairing_store.py` | Phase-2 pairing-code store tests (T2 — app/pairing_store.py). |
 | `tests/test_pdb_atomic_write.py` | The USB PDB writers must never leave a truncated file behind. |
 | `tests/test_pdb_structure.py` | PDB writer structural test against F: drive Pioneer reference. |
+| `tests/test_phrase_anlz_dirs.py` | One master.db open per phrase batch via `resolve_anlz_dirs`. |
 | `tests/test_phrase_batch.py` | Tests for the phrase-batch backend (app/main.py): |
 | `tests/test_phrase_db_writer.py` | Unit tests for app/phrase_db_writer.py (djmdCue memory-cue writer). |
 | `tests/test_playcount_sync.py` | Tests for app/playcount_sync.py — USB <-> PC play-count sync engine. |
@@ -341,6 +347,7 @@
 | `tests/test_rekordbox_bridge.py` | Tests for app/rekordbox_bridge.py — Rekordbox XML <-> local DB import. |
 | `tests/test_require_session.py` | Phase-2 require_session dual-acceptance tests (T3 — app/auth.py). |
 | `tests/test_route_uniqueness.py` | Routing-table invariant: no duplicate (method, path) registrations. |
+| `tests/test_sc_fuzzy_index.py` | SoundCloud sync matcher: the indexed matcher answers exactly like the old brute force. |
 | `tests/test_security_compare.py` | Tests for ``app/security_compare.py::safe_compare``. |
 | `tests/test_security_hotfixes.py` | Regression tests for the 5 security hotfixes in commit e3a5ae8. |
 | `tests/test_services.py` | Tests for `app/services.py`. |
@@ -358,6 +365,7 @@
 | `tests/test_system_health.py` | Contract tests for ``GET /api/system/health`` -- unauth'd liveness probe. |
 | `tests/test_track_metadata_fields.py` | Track-metadata writes refuse fields and values the backend cannot store (issue K8). |
 | `tests/test_usb_copy_atomic.py` | USB audio copies must not leave a truncated file that never self-heals. |
+| `tests/test_usb_lookup_batching.py` | Batched master.db lookups in the USB scan / diff / legacy-export paths. |
 | `tests/test_usb_manager.py` | Tests for `app/usb_manager.py`. |
 | `tests/test_usb_mysettings.py` | Tests for app/usb_mysettings.py — Pioneer MYSETTING file schema + I/O. |
 | `tests/test_usb_relocate.py` | Tests for the USB relocation pass (`app/usb_one_library.py`). |

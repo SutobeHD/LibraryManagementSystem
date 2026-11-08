@@ -42,3 +42,9 @@ features = ["mp3", "flac", "wav", "isomp4", "alac"]
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]
+
+# panic stays "unwind" (default): the sidecar supervisor and Tauri plugins rely on it.
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
