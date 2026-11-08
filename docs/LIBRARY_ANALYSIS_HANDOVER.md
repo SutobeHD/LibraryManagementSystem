@@ -3,7 +3,7 @@
 **For:** a fresh Claude instance with no prior context.
 **From:** session of 2026-11-08 that built v1 (`scripts/library_analysis.py`).
 **User:** tb. Talks German. Wants every claim measured, not assumed ("Teste immer selber"). Short sentences, tables, paste-ready commands, one command per block (the user switches between cmd and PowerShell; `&&` and `;` each break in one of them).
-**Goal (user's words, 2026-11-08):** "Ich will das volle Ausmaß, alles messen was geht." Measure everything that can be measured about the user's library: metadata, file properties, Rekordbox's own analysis data, and the audio itself. Then cross-check the sources against each other.
+**Goal (user's words, 2026-11-08):** "Ich will das volle Ausmaß, alles messen was geht." Measure everything that can be measured about the user's library: metadata, file properties, Rekordbox's own analysis data, and the audio itself. Then cross-check the sources against each other. The user also wants a setting for how deep a track is analysed: **Rekordbox level or high level** (§3.6).
 
 Read first: `CLAUDE.md`, `.claude/rules/*.md`, then this file. `docs/ANALYSIS_HANDOVER.md` is the older handover for engine *accuracy* work; read §2 (setup) only if you touch the engine itself.
 
@@ -196,11 +196,54 @@ New measurements in the same pass (cheap once decoded):
 - **Output:** one JSON line per track to `tmp/library-analysis/measure/audio.jsonl`. The key is `ID + path + mtime + size`; a re-run skips rows whose key is unchanged. That makes the run resumable after a crash or sleep.
 - **Errors:** an error is a row too (`status: error`, type, message). Never drop a track silently.
 - **Hangs:** use a per-track time budget (for example 10 × duration). If a worker hangs, record the track and recycle the pool.
-- **CLI:** `--limit`, `--workers`, `--only-ids`, `--input <tracks.json>`.
+- **CLI:** `--limit`, `--workers`, `--only-ids`, `--input <tracks.json>`, `--depth rekordbox|high` (default `high`, see §3.6).
 - **Progress:** print a one-line progress every 50 tracks with the rate and ETA.
 - **Sleep:** Windows sleep kills the night run. Tell the user to keep the machine awake, or use the app's keep-awake tool if available.
 
-### 3.6 Stage F — network (only if the user asks)
+### 3.6 Analysis depth setting — Rekordbox level vs high level (user requirement 2026-11-08)
+
+The user's words: "Man soll einstellen können, wie intensiv analysiert werden soll beim Track-Analysieren, ob Rekordbox-Level oder High-Level."
+
+| Level | Computes | Purpose |
+|---|---|---|
+| **Rekordbox** | BPM, beats + downbeat, grid confidence, key, waveforms (PWAV … PWV7), phrases, tempo anchors, PVBR, auto cues | everything ANLZ / USB export and the CDJs need; nothing more |
+| **Hoch** (high) | Rekordbox level + LUFS, ReplayGain, peak, stereo, mood / brightness / warmth / texture, genre hint, and every new Stage-E measurement (E1-E8) | the full measurement |
+
+What exists:
+
+- `run_quick_analysis` is the internal pass 1 (BPM / key / beats) for instant playback. It stays and is not a user level.
+- `run_full_analysis` today sits between the two levels: Rekordbox data plus LUFS, mood and stereo, but none of E1-E8.
+- **Dead setting to replace:** the "Analysis Quality" section in `frontend/src/components/settings/SettingsAnalysis.jsx` offers `analysis_quality` = fast / standard / thorough. The default `'standard'` is set in `SettingsView.jsx`. **No backend code reads it** (registry `analysis-settings` note), and its per-track times are not measured. Replace that section with the depth selector rather than adding a second one.
+
+Design (verify each point in code before building):
+
+1. **One setting, `analysis_depth`** = `"rekordbox"` | `"high"`.
+   - It is stored with the other app settings through `GET`/`POST /api/settings`, which go through the `settings.json` manager in `app/services.py`.
+   - The default is `"rekordbox"`.
+   - Measure both levels on the same 50 tracks. If high costs little extra, show the user the numbers and ask whether high becomes the default.
+2. **The engine takes a `depth` argument.**
+   - Split `run_full_analysis` so the high-only parts run only at `depth="high"`.
+   - Time every stage once on the 50 tracks. The engine already has stage boundaries (`emit(...)`). Put the measured split per stage into this file.
+3. **Cache.** Results carry `"depth"`. A cached entry satisfies a request only if its depth is ≥ the requested depth. A cached Rekordbox-level result must never answer a high-level request. Bump `ANALYSIS_VERSION` in `app/analysis_cache.py` if the result shape changes.
+4. **Every caller passes the setting.** The callers of `run_full_analysis` on PR #60 are:
+   - `app/analysis_db_writer.py:204`
+   - `app/anlz_sidecar.py:52`
+   - `app/audio_analyzer.py:134` and `:165`
+   - `app/services.py:1067` (import)
+
+   Read the setting once per job, not per track.
+5. **Optional per-run override:** "Analysieren (Rekordbox)" / "Analysieren (Hoch)" in the track context menu or batch dialog. Ask the user before building it.
+6. **The measurement runner (§3.5) uses the same switch:** `--depth rekordbox|high`, default `high` for the library run.
+
+This touches backend, engine, cache and settings UI:
+
+- Run `python scripts/feature_map.py --who analysis-settings` and `--who analysis-engine` first.
+- `analysis-api-manual` has active work on PR #58 / #60.
+- Spawn `route-architect` if a route changes.
+- Spawn `audio-stack-reviewer` for the engine edit, and `e2e-tester` for the settings UI.
+- Registry entry: `analysis-depth` in `docs/features/analysis.toml`.
+
+### 3.7 Stage F — network (only if the user asks)
 
 These are optional and not started without the user's say:
 
@@ -276,6 +319,7 @@ These are optional and not started without the user's say:
 | P3 | Stage D ANLZ reader incl. PSSI unmask | unit test with a masked + plain PSSI fixture built in the test (no user files in the repo); real run; phrase-kind mapping checked against Rekordbox UI on 3 tracks (ask the user for a screenshot) |
 | P4 | Stage E runner | `--limit 50` run with timing + peak RSS; then the full run in the background; resume tested by killing it once |
 | P5 | Cross-checks + report sections + CSV columns | report renders; every section has real numbers |
+| P5b | Analysis depth setting (§3.6) | engine `depth` argument, depth-aware cache, setting in `/api/settings`, settings UI replaces the dead "Analysis Quality" block; per-stage timing at both levels measured on 50 tracks and written into §3.6; engine tests + `audio-stack-reviewer` + `e2e-tester` green |
 | P6 (separate, ask first) | Expose measured features to the app (route + sortable columns via `SORT_VALUES` in `trackSort.js`) | start `route-architect` before touching `app/main.py` |
 
 For every phase:
