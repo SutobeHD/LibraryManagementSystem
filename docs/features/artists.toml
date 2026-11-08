@@ -197,6 +197,35 @@ related = ["artist-hub"]
 todo = ["Artist-Liste virtualisieren (3364 Artists bei Threshold 0)", "Liste nach Threshold-Save live neu berechnen", "DJ-Prefix-Normalisierung nur am Stringanfang (DJ Koze/Hell/Shadow)", "downloadable nur als Ranking-/Badge-Signal", "Namensvetter-Auto-Download-Sperre lockern (nur auf Wunsch)", "SKIPPED_TRACK_CAP_NOTE aus discoveryCopy importieren (Text-Drift)"]
 
 [[feature]]
+id = "release-hub"
+group = "Folgeideen"
+name = "Label & Album Hub"
+status = "idea"
+desc = "Artist-Hub-Prinzip für Labels und Alben/EPs: ab 2-3 eigenen Tracks wird das Release bzw. Label vorgeschlagen, Katalog-Diff zeigt fehlende Tracks auf SoundCloud."
+depends_on = ["artist-store-sidecar", "artist-catalogue-diff", "sc-api-client", "external-track-match"]
+related = ["artist-hub", "category-browser", "auto-label-playlists", "release-hub-providers"]
+todo = ["kind label/album in artists.db (Schema v4)", "Album-Gruppierung + Junk-Filter (Imported/Unknown/Titelfragmente)", "Label-Anreicherung aus SC label_name (lokaler Label-Tag fast leer)", "SC-Auflösung über Uploader-/Label-Playlists + /playlists?q=, Verifikation per Tracklist-Diff", "Dismiss für Vorschläge persistieren"]
+notes = "SC-Probe 2026-11-08: playlist_type ep/album/compilation/single/PLAYLIST; /tracks/{urn}/playlists|albums = 405 (kein Rückwärts-Lookup); label_name auf Tracks zuverlässig, auf Playlists meist leer. Library: 4231 Album-Tags auf 4550 Tracks (231 mit >=2), Label-Tag nur 391 Tracks / 4 Labels."
+
+[[feature]]
+id = "release-hub-providers"
+group = "Folgeideen"
+name = "Hub-Provider Beatport & Co."
+status = "idea"
+desc = "Katalog-Provider-Schnitt, damit Label/Album/Artist-Kataloge später auch aus Beatport, Discogs oder MusicBrainz kommen."
+related = ["release-hub", "artist-links-musicbrainz"]
+todo = ["Beatport-API-Zugang klären (v4 nur mit Partner-Credentials?)", "SC purchase_url zeigt oft auf Beatport-Releases - als Brücke nutzen"]
+
+[[feature]]
+id = "artist-hub-ui-polish"
+group = "Folgeideen"
+name = "Hub-Optik + Einstellungen im Hub"
+status = "idea"
+desc = "Artist Hub optisch an die Library-View angleichen; alle Hub-Einstellungen direkt im Hub statt verteilt auf Settings > Analysis/Network."
+related = ["artist-hub", "settings-panel", "release-hub"]
+todo = ["Ist-Screenshots + Mockup", "PanelHead/Chip/EmptyHint deduplizieren", "Settings-Drawer im Hub; schmaler Merge-Endpoint statt POST /api/settings (überschreibt alles)", "hartcodierte Budgets/Limits (25/60/15, 20 Artists, 6 h TTL) als Settings"]
+
+[[feature]]
 id = "artist-hub-dropped-designs"
 group = "Folgeideen"
 name = "Verworfene Artist-Hub-Varianten"
