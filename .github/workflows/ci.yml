@@ -3,8 +3,11 @@ name: CI
 on:
   push:
     branches: [main]
+  # Every base branch, not only main. PRs stacked on an integration branch
+  # (nine perf PRs against claude/dreamy-planck-w7771v on 2026-11-08) ran
+  # without any CI under `branches: [main]`. Pushes to feature branches are
+  # covered by the PR event, so `push` stays main-only (no double runs).
   pull_request:
-    branches: [main]
 
 # Cancel in-flight runs on the same ref — saves minutes on rebase-heavy PRs.
 concurrency:
