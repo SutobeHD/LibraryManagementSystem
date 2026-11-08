@@ -30,6 +30,7 @@ never as a cache key.
 
 from __future__ import annotations
 
+import functools
 import logging
 import os
 import re
@@ -38,12 +39,14 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse, urlsplit, urlunsplit
 
-import numpy as np
-import numpy.typing as npt
 import requests
+
+if TYPE_CHECKING:
+    import numpy as np
+    import numpy.typing as npt
 
 logger = logging.getLogger(__name__)
 
@@ -1612,8 +1615,25 @@ def search_tracks_many(
 #: Minimum combined ``artist - title`` ``SequenceMatcher`` ratio for a fuzzy match.
 _FUZZY_MATCH_THRESHOLD = 0.65
 _LCS_WORD_BITS = 64
-_ALL_ONES_U64 = np.uint64(0xFFFF_FFFF_FFFF_FFFF)
-_BYTE_POPCOUNT = np.array([bin(i).count("1") for i in range(256)], dtype=np.int64)
+
+
+@functools.lru_cache(maxsize=1)
+def _numpy() -> Any:
+    """numpy on first use only: ``app.main`` imports this module at sidecar boot."""
+    import numpy
+
+    return numpy
+
+
+@functools.lru_cache(maxsize=1)
+def _bit_tables() -> tuple[Any, Any]:
+    """``(all-ones uint64, per-byte popcount table)``, built on the first index query."""
+    np = _numpy()
+    all_ones = np.uint64(0xFFFF_FFFF_FFFF_FFFF)
+    byte_popcount = np.array([bin(i).count("1") for i in range(256)], dtype=np.int64)
+    return all_ones, byte_popcount
+
+
 #: A char present in at least this share of rows gets a dense mask column (whole-array
 #: ops); rarer chars update only their own rows via fancy indexing.
 _DENSE_COLUMN_MIN_SHARE = 0.25
@@ -1641,6 +1661,9 @@ class _LocalTrackIndex:
     Tracks are then scored best-bound-first and the scan stops once no bound can beat the
     best ratio found.
     """
+
+    _dense: dict[str, npt.NDArray[np.uint64]]
+    _sparse: dict[str, tuple[npt.NDArray[np.intp], npt.NDArray[np.uint64]]]
 
     def __init__(self, local_tracks: Mapping[str, Mapping[str, Any]]) -> None:
         self._source = local_tracks
@@ -1680,12 +1703,13 @@ class _LocalTrackIndex:
                 row_lengths.append(len(chunk))
 
         self._n_rows = len(row_lengths)
+        np = _numpy()
         self._lengths = np.array([len(c) for c in self._combined], dtype=np.int64)
         self._first_row = np.array(first_row, dtype=np.intp)
         self._row_lengths = np.array(row_lengths, dtype=np.int64)
         self._row_low_bits = np.array([(1 << n) - 1 for n in row_lengths], dtype=np.uint64)
-        self._dense: dict[str, npt.NDArray[np.uint64]] = {}
-        self._sparse: dict[str, tuple[npt.NDArray[np.intp], npt.NDArray[np.uint64]]] = {}
+        self._dense = {}
+        self._sparse = {}
         dense_min_rows = self._n_rows * _DENSE_COLUMN_MIN_SHARE
         for ch, (rows, row_masks) in char_rows.items():
             row_idx = np.array(rows, dtype=np.intp)
@@ -1714,9 +1738,11 @@ class _LocalTrackIndex:
 
         Exact for local strings up to 64 chars, sum of per-chunk LCS beyond that.
         """
+        np = _numpy()
+        all_ones, byte_popcount = _bit_tables()
         if not self._tids:
             return np.zeros(0, dtype=np.int64)
-        v = np.full(self._n_rows, _ALL_ONES_U64, dtype=np.uint64)
+        v = np.full(self._n_rows, all_ones, dtype=np.uint64)
         u = np.empty_like(v)
         kept = np.empty_like(v)
         for ch in query:
@@ -1738,7 +1764,7 @@ class _LocalTrackIndex:
             u_rows = v_rows & row_masks
             v[rows] = (v_rows + u_rows) | (v_rows - u_rows)
         np.bitwise_and(v, self._row_low_bits, out=v)
-        ones = _BYTE_POPCOUNT[v.view(np.uint8)].reshape(-1, 8).sum(axis=1)
+        ones = byte_popcount[v.view(np.uint8)].reshape(-1, 8).sum(axis=1)
         return np.add.reduceat(self._row_lengths - ones, self._first_row)
 
     def best_match(self, sc_title: str, sc_artist: str) -> tuple[str | None, float]:
@@ -1752,6 +1778,7 @@ class _LocalTrackIndex:
         if not self._tids:
             return None, 0.0
 
+        np = _numpy()
         bounds = 2.0 * self.lcs_upper_bounds(sc_combined) / (self._lengths + len(sc_combined))
         candidates = np.flatnonzero(bounds >= _FUZZY_MATCH_THRESHOLD - _BOUND_SLACK)
         # Highest bound first; equal bounds in dict order so ties resolve like the old loop.

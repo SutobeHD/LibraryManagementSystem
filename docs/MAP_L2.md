@@ -4566,6 +4566,13 @@ SoundCloud sync matcher: the indexed matcher answers exactly like the old brute 
 - `  TestIndexReuse.test_preview_and_sync_index_once_per_engine()`
 - `test_benchmark_20k_library_500_track_playlist()`
 
+### `tests/test_sc_lazy_numpy.py`
+
+``import app.soundcloud_api`` must not import numpy.
+
+- `test_import_soundcloud_api_does_not_load_numpy()`
+- `test_index_still_matches_after_lazy_import()`
+
 ### `tests/test_security_compare.py`
 
 Tests for ``app/security_compare.py::safe_compare``.
