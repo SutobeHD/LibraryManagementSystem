@@ -15,7 +15,7 @@ desc = "Sortierbare Track-Liste: Spalten, Camelot-Key-Farben, Cover-Thumb, Drag,
 paths = ["frontend/src/components/TrackTable.jsx"]
 routes = ["/api/file/reveal"]
 related = ["inline-rating-color", "collection-view", "list-context-menus", "perf-frontend-virtualization"]
-notes = "Nicht virtualisiert (Perf-Hotspot). LibraryView.jsx ist ein toter Vorgänger."
+notes = "Virtualisiert seit PR #63 (in #60, perf-frontend-virtualization). LibraryView.jsx ist ein toter Vorgänger."
 
 [[feature]]
 id = "collection-view"
@@ -25,7 +25,7 @@ status = "shipped"
 desc = "Ganze Library als Collection-Knoten, Suche mit bpm:/key:/genre:/year:/rating:, Track löschen."
 routes = ["/api/library/tracks", "/api/track/{tid}", "/api/track/delete", "/api/tracks/move"]
 depends_on = ["track-table", "live-master-db"]
-notes = "/api/tracks/move ist ein Stub. /api/library/tracks ohne Pagination (siehe perf-backend-quickwins)."
+notes = "/api/tracks/move ist ein Stub. /api/library/tracks ohne Pagination; light=true-Projektion in #60 (perf-backend-quickwins)."
 
 [[feature]]
 id = "category-browser"

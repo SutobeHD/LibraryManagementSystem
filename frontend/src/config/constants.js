@@ -127,3 +127,7 @@ export const ARTIST_DISCOVER_LIMIT = 25;
 // scRefreshClassification.js therefore keys
 // on the `auth_expired` marker, and a client abort (no response) reads as transient.
 export const SC_REFRESH_TIMEOUT_MS = 20_000;
+
+// TrackTable: width reserved for each %-width text column (Title/Artist/Album)
+// when computing the table's min width, so they never collapse to 0 px.
+export const TRACK_TABLE_TEXT_COL_MIN_PX = 160;

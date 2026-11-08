@@ -83,6 +83,7 @@ const UtilitiesView = lazy(() => import('./components/UtilitiesView'));
 const InsightsView = lazy(() => import('./components/InsightsView'));
 
 import api from './api/api';
+import { connectTaskPolling } from './hooks/useTaskPolling';
 
 // Error Boundary Configuration
 class ErrorBoundary extends Component {
@@ -217,6 +218,21 @@ const TAB_WORKSPACE = {
     'util-no_artwork': 'utilities',
     insights: 'utilities',
 };
+
+/** tab id → content view (all non-artist library tabs share MetadataView). */
+const viewOfTab = (tab) =>
+    tab === 'lib-artists' ? 'artists' : tab.startsWith('lib-') ? 'library' : tab;
+
+/**
+ * Views holding state the backend cannot hand back: the library browse
+ * position, artist-hub drafts, the DAW project (DawEngine is disposed on
+ * unmount), the staged import queue, the ranking session (queue position +
+ * unsaved edits) and the SoundCloud playlist list (a live SC fetch, no backend
+ * cache). They mount on first visit, then stay mounted but hidden while another
+ * tab is active. Every other view mounts only while its tab is active, so boot
+ * loads a single view chunk and a view's effects and pollers stop on tab leave.
+ */
+const KEEP_ALIVE_VIEWS = new Set(['library', 'artists', 'editor', 'import', 'ranking', 'sc-sync']);
 
 /**
  * TopBar — single unified app bar. Carries the brand, the Blender-style
@@ -702,6 +718,22 @@ const ViewLoader = () => (
     </div>
 );
 
+// STABILITY: every view gets its own ErrorBoundary + Suspense, so a crash or a
+// chunk still loading for one view never blanks — or re-suspends — the others.
+const ViewSlot = ({ children }) => (
+    <ErrorBoundary>
+        <Suspense fallback={<ViewLoader />}>{children}</Suspense>
+    </ErrorBoundary>
+);
+
+// Full-height view pane; `active={false}` hides a kept-alive view without
+// unmounting it.
+const ViewPane = ({ active = true, children }) => (
+    <div className={active ? 'h-full' : 'hidden'}>
+        <ViewSlot>{children}</ViewSlot>
+    </div>
+);
+
 const App = () => {
     const [appMode, setAppMode] = useState('choice');
     const [activeTab, setActiveTab] = useState('lib-playlists');
@@ -718,6 +750,18 @@ const App = () => {
         playlists: 0,
     });
     const [isInitialLoading, setIsInitialLoading] = useState(false);
+
+    // Keep-alive views visited so far (see KEEP_ALIVE_VIEWS). Updated during
+    // render, not in an effect, so the first visit mounts the view in the same
+    // commit instead of one blank frame later.
+    const activeView = viewOfTab(activeTab);
+    const [visitedViews, setVisitedViews] = useState(
+        () => new Set(KEEP_ALIVE_VIEWS.has(activeView) ? [activeView] : [])
+    );
+    if (KEEP_ALIVE_VIEWS.has(activeView) && !visitedViews.has(activeView)) {
+        setVisitedViews((prev) => new Set(prev).add(activeView));
+    }
+    const isKeptMounted = (view) => view === activeView || visitedViews.has(view);
 
     // The Artists tab renders ArtistHubView, not MetadataView. MetadataView stays
     // mounted (hidden) for the other library tabs, so it holds the last non-artist
@@ -1095,126 +1139,106 @@ const App = () => {
                     />
                 )}
                 <div className={`flex-1 min-h-0 w-full relative ${playerTrack ? 'pb-20' : ''}`}>
-                    <Suspense fallback={<ViewLoader />}>
-                        {/* STABILITY: Each view wrapped in its own ErrorBoundary */}
-                        <div
-                            className={
-                                activeTab.startsWith('lib-') && activeTab !== 'lib-artists'
-                                    ? 'h-full'
-                                    : 'hidden'
-                            }
-                        >
-                            <ErrorBoundary key="eb-library">
-                                <MetadataView
-                                    mode={metadataMode}
-                                    navSlot={
-                                        activeTab.startsWith('lib-') && activeTab !== 'lib-artists'
-                                            ? libraryNavSlot
-                                            : null
-                                    }
-                                    onSelectTrack={handleTrackSelect}
-                                    onEditTrack={handleTrackEdit}
-                                    onPlayTrack={handlePlayTrack}
-                                    libraryStatus={libraryStatus}
-                                />
-                            </ErrorBoundary>
-                        </div>
+                    {/* Kept-alive views: mounted on first visit, then hidden. */}
+                    {isKeptMounted('library') && (
+                        <ViewPane key="eb-library" active={activeView === 'library'}>
+                            <MetadataView
+                                mode={metadataMode}
+                                navSlot={activeView === 'library' ? libraryNavSlot : null}
+                                onSelectTrack={handleTrackSelect}
+                                onEditTrack={handleTrackEdit}
+                                onPlayTrack={handlePlayTrack}
+                                libraryStatus={libraryStatus}
+                            />
+                        </ViewPane>
+                    )}
+                    {isKeptMounted('artists') && (
+                        <ViewPane key="eb-artist-hub" active={activeView === 'artists'}>
+                            <ArtistHubView
+                                active={activeView === 'artists'}
+                                onSelectTrack={handleTrackSelect}
+                                onEditTrack={handleTrackEdit}
+                                onPlayTrack={handlePlayTrack}
+                                libraryStatus={libraryStatus}
+                            />
+                        </ViewPane>
+                    )}
+                    {isKeptMounted('import') && (
+                        <ViewPane key="eb-import" active={activeView === 'import'}>
+                            <ImportView
+                                onSelectTrack={handleTrackEdit}
+                                onImportComplete={checkLibraryStatus}
+                                onPlayTrack={handlePlayTrack}
+                            />
+                        </ViewPane>
+                    )}
+                    {isKeptMounted('ranking') && (
+                        <ViewPane key="eb-ranking" active={activeView === 'ranking'}>
+                            <RankingView
+                                libraryStatus={libraryStatus}
+                                onSelectTrack={handleTrackSelect}
+                                onEditTrack={handleTrackEdit}
+                            />
+                        </ViewPane>
+                    )}
+                    {isKeptMounted('editor') && (
+                        <ViewPane key="eb-editor" active={activeView === 'editor'}>
+                            <DjEditDaw track={activeTrack} />
+                        </ViewPane>
+                    )}
+                    {isKeptMounted('sc-sync') && (
+                        <ViewPane key="eb-sc-sync" active={activeView === 'sc-sync'}>
+                            <SoundCloudSyncView />
+                        </ViewPane>
+                    )}
 
-                        <div className={activeTab === 'lib-artists' ? 'h-full' : 'hidden'}>
-                            <ErrorBoundary key="eb-artist-hub">
-                                <ArtistHubView
-                                    active={activeTab === 'lib-artists'}
-                                    onSelectTrack={handleTrackSelect}
-                                    onEditTrack={handleTrackEdit}
-                                    onPlayTrack={handlePlayTrack}
-                                    libraryStatus={libraryStatus}
-                                />
-                            </ErrorBoundary>
-                        </div>
-
-                        <div className={activeTab === 'xml' ? 'h-full' : 'hidden'}>
-                            <ErrorBoundary key="eb-xml">
-                                <XmlCleanView libraryStatus={libraryStatus} />
-                            </ErrorBoundary>
-                        </div>
-
-                        <div className={activeTab === 'import' ? 'h-full' : 'hidden'}>
-                            <ErrorBoundary key="eb-import">
-                                <ImportView
-                                    onSelectTrack={handleTrackEdit}
-                                    onImportComplete={checkLibraryStatus}
-                                    onPlayTrack={handlePlayTrack}
-                                />
-                            </ErrorBoundary>
-                        </div>
-
-                        <div className={activeTab === 'ranking' ? 'h-full' : 'hidden'}>
-                            <ErrorBoundary key="eb-ranking">
-                                <RankingView
-                                    libraryStatus={libraryStatus}
-                                    onSelectTrack={handleTrackSelect}
-                                    onEditTrack={handleTrackEdit}
-                                />
-                            </ErrorBoundary>
-                        </div>
-
-                        <div className={activeTab === 'editor' ? 'h-full' : 'hidden'}>
-                            <ErrorBoundary key="eb-editor">
-                                <DjEditDaw track={activeTrack} />
-                            </ErrorBoundary>
-                        </div>
-
-                        <div className={activeTab === 'insights' ? 'h-full' : 'hidden'}>
-                            <ErrorBoundary key="eb-insights">
-                                <InsightsView libraryStatus={libraryStatus} />
-                            </ErrorBoundary>
-                        </div>
-
-                        <div className={activeTab === 'soundcloud' ? 'h-full' : 'hidden'}>
-                            <ErrorBoundary key="eb-soundcloud">
-                                <SoundCloudView />
-                            </ErrorBoundary>
-                        </div>
-
-                        <div className={activeTab === 'sc-sync' ? 'h-full' : 'hidden'}>
-                            <ErrorBoundary key="eb-sc-sync">
-                                <SoundCloudSyncView />
-                            </ErrorBoundary>
-                        </div>
-
-                        <div className={activeTab === 'downloads' ? 'h-full' : 'hidden'}>
-                            <ErrorBoundary key="eb-downloads">
-                                <DownloadManagerView />
-                            </ErrorBoundary>
-                        </div>
-
-                        {activeTab === 'usb' && (
-                            <ErrorBoundary key="eb-usb">
-                                <UsbView />
-                            </ErrorBoundary>
-                        )}
-                        {activeTab === 'usb-settings' && (
-                            <ErrorBoundary key="eb-usb-settings">
-                                <UsbSettingsView />
-                            </ErrorBoundary>
-                        )}
-                        {activeTab.startsWith('util-') && (
-                            <ErrorBoundary key="eb-utilities">
-                                <UtilitiesView
-                                    mode={activeTab.replace('util-', '')}
-                                    onSelectTrack={handleTrackSelect}
-                                    onEditTrack={handleTrackEdit}
-                                    onPlayTrack={(track) => setPlayerTrack(track)}
-                                    libraryStatus={libraryStatus}
-                                />
-                            </ErrorBoundary>
-                        )}
-                        {activeTab === 'settings' && (
-                            <ErrorBoundary key="eb-settings">
-                                <SettingsView />
-                            </ErrorBoundary>
-                        )}
-                    </Suspense>
+                    {/* Everything else mounts only while its tab is active. */}
+                    {activeTab === 'xml' && (
+                        <ViewPane key="eb-xml">
+                            <XmlCleanView libraryStatus={libraryStatus} />
+                        </ViewPane>
+                    )}
+                    {activeTab === 'insights' && (
+                        <ViewPane key="eb-insights">
+                            <InsightsView libraryStatus={libraryStatus} />
+                        </ViewPane>
+                    )}
+                    {activeTab === 'soundcloud' && (
+                        <ViewPane key="eb-soundcloud">
+                            <SoundCloudView />
+                        </ViewPane>
+                    )}
+                    {activeTab === 'downloads' && (
+                        <ViewPane key="eb-downloads">
+                            <DownloadManagerView />
+                        </ViewPane>
+                    )}
+                    {activeTab === 'usb' && (
+                        <ViewSlot key="eb-usb">
+                            <UsbView />
+                        </ViewSlot>
+                    )}
+                    {activeTab === 'usb-settings' && (
+                        <ViewSlot key="eb-usb-settings">
+                            <UsbSettingsView />
+                        </ViewSlot>
+                    )}
+                    {activeTab.startsWith('util-') && (
+                        <ViewSlot key="eb-utilities">
+                            <UtilitiesView
+                                mode={activeTab.replace('util-', '')}
+                                onSelectTrack={handleTrackSelect}
+                                onEditTrack={handleTrackEdit}
+                                onPlayTrack={(track) => setPlayerTrack(track)}
+                                libraryStatus={libraryStatus}
+                            />
+                        </ViewSlot>
+                    )}
+                    {activeTab === 'settings' && (
+                        <ViewSlot key="eb-settings">
+                            <SettingsView />
+                        </ViewSlot>
+                    )}
                 </div>
             </main>
 
@@ -1236,6 +1260,7 @@ window.addEventListener('unhandledrejection', (event) => {
 });
 
 applyTheme(getStoredTheme());
+connectTaskPolling(api);
 
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(
