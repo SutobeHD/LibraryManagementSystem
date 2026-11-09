@@ -18,6 +18,7 @@
 | `app/analysis_cache.py` | LibraryManagementSystem -- Analysis Result Cache |
 | `app/analysis_db_writer.py` | LibraryManagementSystem -- Analysis-to-Database Writer |
 | `app/analysis_engine.py` | LibraryManagementSystem -- High-Accuracy Analysis Engine (v2.0) |
+| `app/analysis_extras.py` | Stage-E audio extras E1-E8 (docs/LIBRARY_ANALYSIS_HANDOVER.md §3.5 + §5 tier rule). |
 | `app/analysis_settings.py` | LibraryManagementSystem -- Analysis Settings |
 | `app/anlz_cue_patch.py` | anlz_cue_patch.py — non-destructive memory-cue injection into existing ANLZ files. |
 | `app/anlz_safe.py` | Safe wrapper around `rbox.MasterDb` + `rbox.Anlz` for PQTZ beatgrid loading. |
@@ -109,6 +110,7 @@
 | `frontend/src/audio/dawState/regions.js` | regionsReducer — region create / split / move / delete / resize / clipboard. |
 | `frontend/src/audio/dawState/selection.js` | selectionReducer — region selection set and time-range selection. |
 | `frontend/src/audio/dawState/transport.js` | transportReducer — playhead, BPM, zoom/scroll, snap-grid, edit-mode, project metadata, and audio-source actio… |
+| `frontend/src/components/analysisDepth.js` | Copy for the two depth levels — shared by the Settings cards and the per-run dialog. |
 | `frontend/src/components/artistHub/artistCatalogueApi.js` | artistCatalogueApi — the SoundCloud half of the Artist Hub's HTTP surface. |
 | `frontend/src/components/artistHub/artistDiscoveryApi.js` | artistDiscoveryApi — the discovery + background-sync half of the Artist Hub's HTTP surface. |
 | `frontend/src/components/artistHub/artistHubApi.js` | artistHubApi — the merge + projection half of the Artist Hub's HTTP surface. |
@@ -220,7 +222,7 @@
 | `frontend/src/components/editor/RegionBlock.jsx` | RegionBlock - Visual representation of an audio region on the timeline Displays the waveform, envelope overla… |
 | `frontend/src/components/editor/TimelineCanvas.jsx` | TimelineCanvas - Main editing canvas for the non-destructive audio editor Features: - Zoomable timeline with … |
 | `frontend/src/components/format-swap/ScopeBucketPicker.jsx` | ScopeBucketPicker — 4-bucket scope chooser for the Format Converter. |
-| `frontend/src/components/settings/SettingsAnalysis.jsx` | SettingsAnalysis — Quality preset, ranking filter, library insight thresholds. |
+| `frontend/src/components/settings/SettingsAnalysis.jsx` | SettingsAnalysis — Analysis depth, ranking filter, library insight thresholds. |
 | `frontend/src/components/settings/SettingsAppearance.jsx` | SettingsAppearance — UI theme (skin), waveform band colours, locale picker. |
 | `frontend/src/components/settings/SettingsAudio.jsx` | SettingsAudio — CPAL output device picker (Tauri-only enumeration). |
 | `frontend/src/components/settings/SettingsControls.jsx` | SettingsControls — Shared building blocks for the tabbed Settings panel. |
@@ -274,7 +276,10 @@
 | `tests/test_analysis.py` | Regression tests for the analysis pipeline. |
 | `tests/test_analysis_cache.py` | Tests for app/analysis_cache.py — persistent analysis-result cache. |
 | `tests/test_analysis_db_writer.py` | Unit tests for AnalysisDBWriter — the values it writes into Rekordbox master.db. |
+| `tests/test_analysis_depth_settings.py` | The `analysis_depth` setting ("rekordbox" | "high") and how the analyze routes resolve it. |
 | `tests/test_analysis_edge.py` | Edge-case robustness for the analysis engine entry points. |
+| `tests/test_analysis_engine_depth.py` | run_full_analysis depth switch ("rekordbox" | "high"). |
+| `tests/test_analysis_extras.py` | Tests for app/analysis_extras.py: E1-E8 on synthetic signals, the A1 tier rule and the |
 | `tests/test_analyze_db_routes.py` | POST /api/track/{tid}/analyze-full and POST /api/library/analyze-batch. |
 | `tests/test_anlz_cue_layout.py` | Byte-layout regression tests for the ANLZ cue + VBR tags. |
 | `tests/test_anlz_cue_patch.py` | Round-trip tests for app/anlz_cue_patch.py. |
@@ -325,7 +330,7 @@
 | `tests/test_library_analysis.py` | Tests for scripts/library_analysis.py on a synthetic atlas and a handful of tracks. |
 | `tests/test_library_format_swap.py` | Tests for app.library_format_swap. |
 | `tests/test_library_measure_anlz.py` | Tests for scripts/library_measure_anlz.py on synthetic ANLZ bytes. |
-| `tests/test_library_measure_audio.py` | Tests for scripts/library_measure_audio.py: the Stage-E extras (E1-E7) on synthetic signals, |
+| `tests/test_library_measure_audio.py` | Tests for scripts/library_measure_audio.py: resume key / skip logic, error rows, the summary |
 | `tests/test_library_source.py` | Tests for app/library_source.py — the Live/XML normalization layer. |
 | `tests/test_library_tracks_light.py` | GET /api/library/tracks — the optional ``light`` projection (app/main.py). |
 | `tests/test_librosa_lazy_import.py` | Booting the sidecar (``import app.main``) must not import librosa / numpy. |

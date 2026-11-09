@@ -23,7 +23,7 @@ name = "Analyse-Einstellungen"
 status = "shipped"
 desc = "Tunables (BPM-Range, Cue-Limits, Memory-Grid, Samplerate) per RB_ANALYSIS_-Env, Settings-Tab Analysis."
 paths = ["app/analysis_settings.py", "frontend/src/components/settings/SettingsAnalysis.jsx"]
-notes = "DSP-Tunables nur per Env. UI-Preset analysis_quality liest kein Backend (toter Wert)."
+notes = "DSP-Tunables nur per Env (get_settings liest kein settings.json). Der tote UI-Preset analysis_quality ist seit 2026-11-09 durch analysis_depth ersetzt (siehe analysis-depth)."
 
 [[feature]]
 id = "analysis-depth"
@@ -31,12 +31,12 @@ group = "DSP-Engine"
 name = "Analysetiefe: Rekordbox oder Hoch"
 status = "in_progress"
 branch = "feat/library-measure"
-paths = ["app/analysis_extras.py", "tests/test_analysis_extras.py"]
+paths = ["app/analysis_extras.py", "tests/test_analysis_extras.py", "tests/test_analysis_engine_depth.py", "tests/test_analysis_depth_settings.py", "frontend/src/components/analysisDepth.js"]
 parent = "analysis-settings"
 desc = "Einstellbar, wie tief ein Track analysiert wird: Rekordbox-Level (BPM, Key, Grid, Waveforms, Phrasen, Cues) oder Hoch (zusätzlich Lautheit, Stereo, Stimmung, Frequenzgrenze, Clipping, Dynamik, Bass-Anteil)."
 related = ["analysis-engine", "analysis-cache", "analysis-api-manual", "library-analysis-report"]
-notes = "Wunsch 2026-11-08. Ersetzt den toten UI-Preset analysis_quality (fast/standard/thorough, von keinem Backend gelesen). Plan in docs/LIBRARY_ANALYSIS_HANDOVER.md §3.6: depth-Argument in run_full_analysis, Cache nur bei Tiefe >= angefragt, Setting über /api/settings, alle 5 Aufrufer reichen es durch."
-todo = ["Stufen-Zeiten beider Level an 50 Tracks messen", "Default mit dem User klären, wenn Hoch kaum teurer ist", "Optional: Pro-Lauf-Auswahl im Kontextmenü (erst fragen)"]
+notes = "Wunsch 2026-11-08, gebaut 2026-11-09 auf feat/library-measure (Handover §3.6.2): run_full_analysis(depth=) als letzter kwarg, Rekordbox-Stufe = Rekordbox-Daten + LUFS/Peak, Hoch = plus Stereo/Mood/Genre-Hint/Extras E1-E8 (app/analysis_extras.py); Cache ANALYSIS_VERSION 4 mit Tiefen-Rang, kein Downgrade eines high-Eintrags, Cue-Toggles werden bei Cache-Treffer neu angewendet; Setting analysis_depth (Default rekordbox) über /api/settings, analysis_quality wird beim Laden verworfen; audio_analyzer-Regler mode entfernt; depth-Feld an /api/track/{tid}/analyze, analyze-full, /api/library/analyze-batch, /api/audio/analyze; UI: Settings-Karten + Pro-Lauf-Dialog (ConfirmModal mit Radios) im Kontextmenü Analysieren... und beim Drop-Detect. 1-Track-Smoke: rekordbox 30.7 s, high 29.6 s (+2.3 s Extras, Kaltstart-Rauschen)."
+todo = ["Stufen-Zeiten beider Level an 50 Tracks messen (bisher 1-Track-Smoke)", "process_import liest das Setting pro Datei statt pro Job (Folder-Scan-Loops in main.py)", "Batch-Analyse hat kein UI (analyze-batch streamt NDJSON, braucht fetch-Consumer); askAnalysisDepth({count}) ist vorbereitet", "/api/audio/analyze prüft file_path nur auf Existenz, kein validate_audio_path (vorbestehend, security-api-auth-hardening)"]
 
 [[feature]]
 id = "analysis-cache"

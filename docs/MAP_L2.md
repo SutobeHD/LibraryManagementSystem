@@ -18,9 +18,10 @@
 
 LibraryManagementSystem -- Analysis Result Cache
 
+- `validate_depth()` — Return ``depth`` unchanged or raise ``ValueError`` for anything outside ANALYSIS_DEPTHS.
 - `AnalysisCache` — File-based cache for AnalysisEngine results.
-- `  AnalysisCache.get()` — Return cached result if file is unchanged, else None.
-- `  AnalysisCache.put()` — Store analysis result, replacing any prior cached entry.
+- `  AnalysisCache.get()` — Return the cached result if the file is unchanged and the entry is at least
+- `  AnalysisCache.put()` — Store an analysis result for its ``result["depth"]`` (missing → "rekordbox").
 - `  AnalysisCache.invalidate()` — Remove a cache entry without deleting the underlying audio file.
 - `  AnalysisCache.clear()` — Empty the entire cache.
 - `  AnalysisCache.stats()` — Return cache size + entry count.
@@ -73,6 +74,27 @@ LibraryManagementSystem -- High-Accuracy Analysis Engine (v2.0)
 - `  AnalysisEngine.capabilities()` — Report which backends are available.
 - `run_quick_analysis()` — Pass-1 analysis: BPM, key, beats only.
 - `run_full_analysis()` — Full analysis pipeline.
+
+### `app/analysis_extras.py`
+
+Stage-E audio extras E1-E8 (docs/LIBRARY_ANALYSIS_HANDOVER.md §3.5 + §5 tier rule).
+
+- `power_spectrum_stats()` — Hann STFT; returns (freqs_hz, median magnitude per bin in dBFS, mean power per bin).
+- `tier_a_threshold_hz()` — A threshold per handover §5: 20.5 kHz up to 44.1 kHz, 21 kHz above.
+- `spectral_cutoff()` — E1 geometry.
+- `cutoff_tier()` — Measured tier (handover §5 thresholds, decision A1 rule).
+- `bass_share()` — E6.
+- `analyze_spectrum()` — E1 + E6 from one STFT of the native-rate signal (stereo is downmixed here, not resampled:
+- `clipping_stats()` — E2.
+- `true_peak_dbtp()` — 4x oversampled peak (chunked so hi-res files don't quadruple in RAM).
+- `dynamics_stats()` — E3.
+- `loudness_range()` — E3 optional.
+- `silence_stats()` — E4.
+- `dc_offset()` — E5.
+- `low_band_correlation()` — E7.
+- `find_fpcalc()` — fpcalc on PATH, else $FPCALC_DIR, else the winget AcoustID.Chromaprint package dir.
+- `fingerprint_file()` — E8.
+- `compute_extras()` — E1-E8 on the decoded track.
 
 ### `app/analysis_settings.py`
 
@@ -762,6 +784,7 @@ Log redaction helpers — scrub absolute paths from log lines + tracebacks.
 - `TrackPlReq`
 - `AudioImportReq`
 - `AudioStatusReq`
+- `AnalyzeTrackReq`
 - `AnalyzeFullReq`
 - `AnalyzeBatchReq`
 - `MergeReq`
@@ -974,7 +997,7 @@ Log redaction helpers — scrub absolute paths from log lines + tracebacks.
 - `merge_all_duplicates()` — Auto-merge all duplicate groups using best-metadata heuristic.
 - `rbep_list()` — List available .rbep project files.
 - `rbep_get()` — Parse and return a .rbep project by name.
-- `analyze_audio()` — Submit an audio file for high-accuracy background analysis.
+- `analyze_audio()` — Submit an audio file for background analysis at the requested or stored depth.
 - `get_analysis_status()` — Check the status/result of a background audio analysis job.
 - `analyze_track_full()` — Analyze a track with our engine and write BPM, key, waveforms, beatgrid
 - `analyze_batch()` — Batch-analyze tracks and write results to Rekordbox DB + ANLZ.
@@ -1201,6 +1224,7 @@ Constant-time equality helper for tokens, secrets, HMAC outputs.
 - `  LibraryTools.generate_smart_playlists()` — Build the "By Label" auto-playlists.
 - `  LibraryTools.smart_rename()`
 - `SettingsManager`
+- `  SettingsManager.analysis_depth()` — The analysis depth to run with: ``override`` if given, else the stored setting.
 - `  SettingsManager.load()`
 - `  SettingsManager.save()` — Write settings atomically: tmp file + os.replace.
 - `MetadataManager` — Manual name mappings (artist / label / album merges).
@@ -1444,7 +1468,8 @@ variant_schema — DDL + idempotent migration runner for the variants sidecar.
 ─── EC2: Runtime detection of Tauri context ───────────────────────────────────
 
 - `setScAuthMode()` — export function ready() { return _bootstrapPromise; } // ─── SoundCloud consent surface (in-app win…
-- `scLogin()` — export async function getScAuthMode() { if (_scAuthMode) return _scAuthMode; try { const res = awai…
+- `setAnalysisDepth()` — export async function getScAuthMode() { if (_scAuthMode) return _scAuthMode; try { const res = awai…
+- `scLogin()` — export async function getAnalysisDepth() { if (_analysisDepth) return _analysisDepth; try { const r…
 - `scAuthTokenBody()` — The `POST /api/soundcloud/auth-token` body for one `scLogin()` result.
 - `cancellableGet()` — ─── AbortController helpers ────────────────────────────────────────────────── export function crea…
 
@@ -1593,6 +1618,13 @@ selectionReducer — region selection set and time-range selection.
 transportReducer — playhead, BPM, zoom/scroll, snap-grid, edit-mode, project metadata, and audio-source actions.
 
 - `transportReducer()` — transportReducer — playhead, BPM, zoom/scroll, snap-grid, edit-mode, project metadata, and audio-so…
+
+### `frontend/src/components/analysisDepth.js`
+
+Copy for the two depth levels — shared by the Settings cards and the per-run dialog.
+
+- `ANALYSIS_DEPTH_OPTIONS()` — Copy for the two depth levels — shared by the Settings cards and the per-run dialog.
+- `askAnalysisDepth()` — Per-run depth dialog, preset to the global `analysis_depth` setting (decision B12).
 
 ### `frontend/src/components/artistHub/artistCatalogueApi.js`
 
@@ -1929,6 +1961,9 @@ Frontend-wide constants.
 - `ARTIST_ASSIGN_PICKER_LIMIT()` — Artists the app-wide "Artist zuordnen…" picker lists per search.
 - `ARTIST_DISCOVER_LIMIT()` — Suggestions requested from GET /api/artists/discover.
 - `SC_REFRESH_TIMEOUT_MS()` — Headroom over the backend's own SoundCloud call (SC_REFRESH_TIMEOUT_S = 15 s in app/soundcloud_auth…
+- `ANALYSIS_DEPTHS()` — Analysis depth levels — settings key `analysis_depth`, request field `depth` on the analysis routes.
+- `ANALYSIS_DEPTH_DEFAULT()`
+- `ANALYZE_FULL_TIMEOUT_MS()` — Axios timeout for POST /api/track/{id}/analyze-full.
 - `TRACK_TABLE_TEXT_COL_MIN_PX()` — TrackTable: width reserved for each %-width text column (Title/Artist/Album) when computing the tab…
 
 ### `frontend/src/config/tagTaxonomy.js`
@@ -2289,7 +2324,7 @@ ScopeBucketPicker — 4-bucket scope chooser for the Format Converter.
 
 ### `frontend/src/components/settings/SettingsAnalysis.jsx`
 
-SettingsAnalysis — Quality preset, ranking filter, library insight thresholds.
+SettingsAnalysis — Analysis depth, ranking filter, library insight thresholds.
 
 ### `frontend/src/components/settings/SettingsAppearance.jsx`
 
@@ -2614,6 +2649,19 @@ Tests for app/analysis_cache.py — persistent analysis-result cache.
 - `test_stats_reports_entries_and_bytes()`
 - `test_stats_tolerates_file_vanishing_mid_scan()` — Regression: a *.json.gz that stat() can't read — standing in for a file
 - `test_json_default_handles_numpy()`
+- `test_version_bumped_to_4_for_depth_entries()`
+- `test_validate_depth_rejects_unknown_values()`
+- `test_get_rejects_an_unknown_min_depth()`
+- `test_high_entry_satisfies_both_depths()`
+- `test_rekordbox_entry_never_answers_a_high_request()`
+- `test_entry_without_depth_is_a_miss()` — A version-4 index entry that lost its depth (hand-edited) must not hit.
+- `test_rekordbox_put_does_not_downgrade_a_valid_high_entry()`
+- `test_rekordbox_put_replaces_a_high_entry_once_the_file_changed()`
+- `test_high_put_upgrades_a_rekordbox_entry()`
+- `test_put_with_an_unknown_depth_is_not_cached()`
+- `test_old_version_entries_miss_regardless_of_depth()`
+- `test_payload_depth_is_checked_not_just_the_index()` — Cross-process: a worker with a stale index can rewrite the shared gz at a
+- `test_unhashable_depth_values_on_disk_are_a_miss_not_a_crash()`
 
 ### `tests/test_analysis_db_writer.py`
 
@@ -2633,6 +2681,40 @@ Unit tests for AnalysisDBWriter — the values it writes into Rekordbox master.d
 - `test_writes_into_the_recorded_dir_then_flags_the_row()`
 - `test_analysis_runs_in_the_worker_pool_not_the_sidecar()` — librosa/madmom in the sidecar process held the GIL for minutes per batch.
 - `test_a_crashed_worker_drops_the_pool_for_the_next_track()`
+- `test_the_worker_gets_the_requested_depth()`
+- `test_batch_depth_reaches_every_track_without_a_settings_read()` — The route resolves depth once; the writer only threads it through.
+
+### `tests/test_analysis_depth_settings.py`
+
+The `analysis_depth` setting ("rekordbox" | "high") and how the analyze routes resolve it.
+
+- `cfg()` — A private settings.json; absent until a test writes it.
+- `TestSettingsManagerDepth`
+- `  TestSettingsManagerDepth.test_default_is_rekordbox()`
+- `  TestSettingsManagerDepth.test_stored_value_is_returned()`
+- `  TestSettingsManagerDepth.test_override_wins_over_the_stored_value()`
+- `  TestSettingsManagerDepth.test_invalid_override_raises()`
+- `  TestSettingsManagerDepth.test_null_or_invalid_stored_value_normalises_to_the_default()`
+- `  TestSettingsManagerDepth.test_legacy_analysis_quality_is_dropped_on_load()`
+- `  TestSettingsManagerDepth.test_legacy_key_does_not_survive_a_save_round_trip()`
+- `TestSetReqDepth`
+- `  TestSetReqDepth.test_accepts_both_levels_and_defaults_to_none()`
+- `  TestSetReqDepth.test_rejects_anything_else()`
+- `quiet_settings_side_effects()`
+- `test_settings_post_stores_analysis_depth()`
+- `test_settings_post_rejects_an_unknown_depth()`
+- `test_settings_get_reports_the_default_without_a_file()`
+- `test_settings_post_without_the_key_still_reads_back_a_valid_depth()` — SetReq dumps undeclared Literal fields as null; GET must still hand out a level.
+- `audio_file()`
+- `analyze_track_stub()`
+- `test_audio_analyze_passes_the_body_depth()`
+- `test_audio_analyze_falls_back_to_the_stored_depth()`
+- `test_audio_analyze_ignores_the_retired_mode_knob()` — B9: a legacy client sending `mode` gets the stored depth, no 422, no 120 s cap.
+- `test_audio_analyze_rejects_an_unknown_depth()`
+- `beat_analyze_stub()`
+- `test_track_analyze_passes_the_body_depth()`
+- `test_track_analyze_without_a_body_uses_the_stored_depth()`
+- `test_track_analyze_rejects_an_unknown_depth()`
 
 ### `tests/test_analysis_edge.py`
 
@@ -2643,6 +2725,60 @@ Edge-case robustness for the analysis engine entry points.
 - `test_detect_beats_none_input_no_crash()`
 - `test_detect_key_none_input_no_crash()`
 - `test_empty_returns_have_consistent_shape()` — The empty-input dicts must carry the same keys as a normal result so
+
+### `tests/test_analysis_engine_depth.py`
+
+run_full_analysis depth switch ("rekordbox" | "high").
+
+- `calls()`
+- `wav()`
+- `test_rekordbox_depth_skips_mood_stereo_genre_and_extras()`
+- `test_default_depth_is_rekordbox()`
+- `test_high_depth_runs_everything_and_calls_extras_with_the_contract()`
+- `test_missing_extras_module_yields_none_and_warns_once()`
+- `test_extras_runtime_failure_does_not_fail_the_analysis()`
+- `test_unknown_depth_raises_before_any_work()`
+- `test_cache_hit_recomputes_cues_with_the_current_toggles()` — B10: the cached cue lists belong to the toggles of the run that produced them.
+- `test_rekordbox_cache_entry_does_not_answer_a_high_request()`
+- `test_cache_stores_the_depth()`
+- `test_submit_appends_depth_as_the_last_positional_argument()`
+- `test_analyze_sync_forwards_depth()`
+
+### `tests/test_analysis_extras.py`
+
+Tests for app/analysis_extras.py: E1-E8 on synthetic signals, the A1 tier rule and the
+
+- `test_e1_brickwall_16k_is_hard_edge_tier_d()`
+- `test_e1_brickwall_19500_is_tier_b_lame_256()`
+- `test_e1_brickwall_20500_hard_edge_is_b_not_a()`
+- `test_e1_full_band_noise_is_tier_a_no_edge()`
+- `test_e1_dark_master_gentle_rolloff_is_no_tier_pruefen()`
+- `test_e1_soft_lowpass_into_digital_zero_takes_tier_from_zero_start()`
+- `test_e1_lowest_edge_wins_over_higher_encoder_lowpass()`
+- `test_e1_anti_alias_filter_near_nyquist_is_not_an_edge()`
+- `test_e1_band_width_parameter_changes_sensitivity()`
+- `test_e1_sample_rate_meta_below_44k_forces_d()`
+- `test_cutoff_tier_a1_rule_unit()`
+- `test_cutoff_tier_digital_zero_paths()`
+- `test_e2_clipped_square_counts_runs_sine_does_not()`
+- `test_e2_short_runs_below_three_are_ignored()`
+- `test_e2_true_peak_of_sine_matches_amplitude()`
+- `test_e3_dynamics_plr_and_crest()`
+- `test_e3_loudness_range_steady_tone_is_near_zero_and_short_is_none()`
+- `test_e4_silence_leading_and_trailing()`
+- `test_e5_dc_offset_per_channel()`
+- `test_e6_bass_share_of_50hz_tone()`
+- `test_e7_low_band_correlation_same_inverted_mono()`
+- `no_fpcalc()`
+- `test_e8_fingerprint_unavailable_when_fpcalc_missing()`
+- `test_e8_find_fpcalc_via_fpcalc_dir_prepends_path()`
+- `test_e8_find_fpcalc_via_winget_package_dir()`
+- `test_e8_fingerprint_never_raises()`
+- `test_e8_fingerprint_maps_sentinels()`
+- `test_compute_extras_contract_and_json()`
+- `test_compute_extras_mono_input_and_empty_native_fallback()`
+- `test_compute_extras_block_failure_is_isolated()`
+- `test_compute_extras_unsupported_shape_never_raises()`
 
 ### `tests/test_analyze_db_routes.py`
 
@@ -2666,6 +2802,10 @@ POST /api/track/{tid}/analyze-full and POST /api/library/analyze-batch.
 - `test_analyze_full_holds_the_slot_and_frees_it_on_every_exit()`
 - `test_analyze_batch_holds_the_slot_while_streaming_then_frees_it()`
 - `test_analyze_batch_stream_that_never_starts_still_frees_the_slot()` — Client gone before the first chunk: the generator's `finally` never runs.
+- `test_analyze_full_passes_the_requested_depth()`
+- `test_analyze_full_rejects_an_unknown_depth()`
+- `test_analyze_batch_resolves_the_stored_depth_once_per_batch()`
+- `test_analyze_batch_body_depth_overrides_the_stored_one()`
 
 ### `tests/test_anlz_cue_layout.py`
 
@@ -3613,6 +3753,9 @@ Tests for app/audio_analyzer.py — the pure _normalize_result mapping.
 - `test_no_beats_key_adds_no_beatgrid()`
 - `test_legacy_default_fields_added()`
 - `test_does_not_mutate_input()`
+- `test_analyze_track_passes_depth_and_no_duration_cap()`
+- `test_analyze_track_default_depth_is_rekordbox()`
+- `test_duration_cap_is_an_explicit_argument_only()` — B9: no 120 s cap hides behind a mode string any more.
 
 ### `tests/test_audio_tags.py`
 
@@ -4151,27 +4294,15 @@ Tests for scripts/library_measure_anlz.py on synthetic ANLZ bytes.
 
 ### `tests/test_library_measure_audio.py`
 
-Tests for scripts/library_measure_audio.py: the Stage-E extras (E1-E7) on synthetic signals,
+Tests for scripts/library_measure_audio.py: resume key / skip logic, error rows, the summary
 
-- `test_e1_brickwall_16k_is_hard_edge_tier_d()`
-- `test_e1_brickwall_19500_is_tier_b_lame_256()`
-- `test_e1_brickwall_20500_hard_edge_is_b_not_a()`
-- `test_e1_full_band_noise_is_tier_a_no_edge()`
-- `test_e1_tier_thresholds_unit()`
-- `test_e2_clipped_square_counts_runs_sine_does_not()`
-- `test_e2_short_runs_below_three_are_ignored()`
-- `test_e2_true_peak_of_sine_matches_amplitude()`
-- `test_e3_dynamics_plr_and_crest()`
-- `test_e3_loudness_range_steady_tone_is_near_zero_and_short_is_none()`
-- `test_e4_silence_leading_and_trailing()`
-- `test_e5_dc_offset_per_channel()`
-- `test_e6_bass_share_of_50hz_tone()`
-- `test_e7_low_band_correlation_same_inverted_mono()`
 - `test_plan_tracks_splits_streams_missing_local_and_skips_done()`
 - `test_plan_tracks_seeded_sample_is_stable()`
 - `test_key_changes_when_file_changes()`
 - `test_load_done_keys_ignores_garbage_lines()`
 - `test_track_budget()`
+- `test_cli_defaults_follow_handover_3_5_1()`
+- `test_summary_path_and_summarize_rows()`
 - `test_measure_task_turns_undecodable_file_into_error_row()`
 - `mocked_engine()`
 - `test_measure_track_high_and_rekordbox()`
@@ -5533,9 +5664,7 @@ Whole-library analysis: which track fields are filled, how the Genre field is us
 
 Stage D of docs/LIBRARY_ANALYSIS_HANDOVER.md: read Rekordbox's own ANLZ analysis files.
 
-- `pssi_is_plain()`
 - `pssi_is_masked()`
-- `mask_pssi()` — Plain PSSI -> masked (the USB-export form).
 - `unmask_pssi()` — Masked PSSI -> plain.
 - `unmask_anlz_bytes()` — `data` with every PSSI tag unmasked, plus True (was masked) / False (plain) / None (no PSSI).
 - `parse_anlz()` — Unmask PSSI, then parse with pyrekordbox.
@@ -5562,24 +5691,15 @@ Stage D of docs/LIBRARY_ANALYSIS_HANDOVER.md: read Rekordbox's own ANLZ analysis
 
 Decode-once audio measurement runner: Stage E of docs/LIBRARY_ANALYSIS_HANDOVER.md (§3.5).
 
-- `power_spectrum_stats()` — Hann STFT; returns (freqs_hz, median magnitude per bin in dBFS, mean power per bin).
-- `spectral_cutoff()` — E1.
-- `cutoff_tier()` — Measured tier from the cutoff (handover §5).
-- `bass_share()` — E6.
-- `clipping_stats()` — E2.
-- `true_peak_dbtp()` — 4x oversampled peak (chunked so hi-res files don't quadruple in RAM).
-- `dynamics_stats()` — E3.
-- `loudness_range()` — E3 optional.
-- `silence_stats()` — E4.
-- `dc_offset()` — E5.
-- `low_band_correlation()` — E7.
 - `compact_phrases()`
 - `compact_anchors()`
-- `measure_track()` — Decode once; run the engine blocks in run_full_analysis order; add E1-E7 at depth 'high'.
+- `measure_track()` — Decode once; run the engine blocks in run_full_analysis order; add E1-E8 at depth 'high'
 - `make_key()`
 - `base_row()`
 - `error_row()`
 - `measure_task()` — Pool entry point.
+- `summary_path_for()` — audio.jsonl -> audio.summary.json, next to the JSONL.
+- `summarize_rows()` — Aggregate every row in the JSONL (all runs so far): status / tier / flag / fingerprint
 - `load_done_keys()`
 - `Plan`
 - `plan_tracks()` — Split the snapshot into streams / missing / local; sample; drop rows already measured.
