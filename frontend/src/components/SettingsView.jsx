@@ -15,14 +15,15 @@
  *   Export     — format, bitrate, sample rate, default output dir, RB bridge
  *   USB        — per-stick USB profile CRUD
  *   Audio      — CPAL output device picker (Tauri)
- *   Analysis   — quality preset, ranking filter, insights thresholds
+ *   Analysis   — analysis depth, ranking filter, insights thresholds
  *   Appearance — waveform band colors, language/locale
  *   Shortcuts  — configurable DAW keyboard shortcuts
  *   Network    — HTTP proxy, SoundCloud sync, backend restart
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
-import api, { setScAuthMode } from '../api/api';
+import api, { setAnalysisDepth, setScAuthMode } from '../api/api';
+import { ANALYSIS_DEPTHS, ANALYSIS_DEPTH_DEFAULT } from '../config/constants';
 import toast from 'react-hot-toast';
 import {
     Settings,
@@ -66,7 +67,7 @@ const DEFAULTS = {
     audio_output_device: '', // '' = system default
 
     // Analysis
-    analysis_quality: 'standard', // 'fast' | 'standard' | 'thorough'
+    analysis_depth: ANALYSIS_DEPTH_DEFAULT, // 'rekordbox' | 'high'
     ranking_filter_mode: 'all',
     insights_bitrate_threshold: 320,
     insights_playcount_threshold: 0,
@@ -133,10 +134,17 @@ const SettingsView = () => {
     const loadSettings = useCallback(async () => {
         try {
             const res = await api.get('/api/settings');
+            // `analysis_quality` is the retired preset nobody read; drop it so Save
+            // stops re-persisting it (decision B11).
+            const loaded = { ...res.data };
+            delete loaded.analysis_quality;
             setSettings({
                 ...DEFAULTS,
-                ...res.data,
-                shortcuts: { ...DEFAULTS.shortcuts, ...(res.data.shortcuts || {}) },
+                ...loaded,
+                analysis_depth: ANALYSIS_DEPTHS.includes(loaded.analysis_depth)
+                    ? loaded.analysis_depth
+                    : ANALYSIS_DEPTH_DEFAULT,
+                shortcuts: { ...DEFAULTS.shortcuts, ...(loaded.shortcuts || {}) },
             });
             setLoaded(true);
         } catch (err) {
@@ -159,6 +167,7 @@ const SettingsView = () => {
         try {
             await api.post('/api/settings', settings);
             setScAuthMode(settings.sc_auth_mode);
+            setAnalysisDepth(settings.analysis_depth);
             toast.success('Settings saved');
         } catch {
             toast.error('Failed to save settings');
