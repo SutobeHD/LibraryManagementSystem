@@ -22,6 +22,7 @@ import pytest
 from app import main
 from app.database import RekordboxDB
 from app.main import app
+from app.services import SettingsManager
 
 
 def _post(url: str, headers: dict[str, str], body: dict[str, Any] | None = None) -> httpx.Response:
@@ -46,17 +47,24 @@ class _FakeWriter:
         self.calls: list[tuple[str, Any, bool]] = []
         self.batch_on_loop: list[bool] = []
         self.slot_held: list[bool] = []
+        self.depths: list[str] = []
         self.result: dict[str, Any] | None = None
 
-    def analyze_and_save(self, tid: str, force: bool = False) -> dict[str, Any]:
+    def analyze_and_save(
+        self, tid: str, force: bool = False, depth: str = "rekordbox"
+    ) -> dict[str, Any]:
         self.calls.append(("one", tid, force))
+        self.depths.append(depth)
         self.slot_held.append(main._analysis_db_run_lock.locked())
         if self.result is not None:
             return self.result
         return {"status": "ok", "track_id": tid, "bpm": 124.0}
 
-    def analyze_batch(self, track_ids: list[str], force: bool = False) -> Iterator[dict[str, Any]]:
+    def analyze_batch(
+        self, track_ids: list[str], force: bool = False, depth: str = "rekordbox"
+    ) -> Iterator[dict[str, Any]]:
         self.calls.append(("batch", list(track_ids), force))
+        self.depths.append(depth)
         for i, tid in enumerate(track_ids):
             self.batch_on_loop.append(_on_event_loop())
             self.slot_held.append(main._analysis_db_run_lock.locked())
@@ -284,3 +292,44 @@ def test_analyze_batch_stream_that_never_starts_still_frees_the_slot(
 
     assert not main._analysis_db_run_lock.locked()
     assert live.writer.calls == []
+
+
+# --- analysis depth ------------------------------------------------------------
+
+
+def test_analyze_full_passes_the_requested_depth(
+    live: _FakeLiveDB, auth_token: dict[str, str]
+) -> None:
+    r = _post("/api/track/1/analyze-full", auth_token, {"depth": "high"})
+    assert r.status_code == 200, r.text
+    assert live.writer.depths == ["high"]
+
+
+def test_analyze_full_rejects_an_unknown_depth(
+    live: _FakeLiveDB, auth_token: dict[str, str]
+) -> None:
+    r = _post("/api/track/1/analyze-full", auth_token, {"depth": "fast"})
+    assert r.status_code == 422
+    assert live.writer.calls == []
+
+
+def test_analyze_batch_resolves_the_stored_depth_once_per_batch(
+    live: _FakeLiveDB, auth_token: dict[str, str], tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cfg = tmp_path / "settings.json"
+    cfg.write_text(json.dumps({"analysis_depth": "high"}), encoding="utf-8")
+    monkeypatch.setattr(SettingsManager, "CONFIG", cfg)
+    r = _post("/api/library/analyze-batch", auth_token, {"track_ids": ["1", "2", "3"]})
+    assert r.status_code == 200, r.text
+    assert live.writer.depths == ["high"]
+
+
+def test_analyze_batch_body_depth_overrides_the_stored_one(
+    live: _FakeLiveDB, auth_token: dict[str, str], tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cfg = tmp_path / "settings.json"
+    cfg.write_text(json.dumps({"analysis_depth": "high"}), encoding="utf-8")
+    monkeypatch.setattr(SettingsManager, "CONFIG", cfg)
+    r = _post("/api/library/analyze-batch", auth_token, {"depth": "rekordbox"})
+    assert r.status_code == 200, r.text
+    assert live.writer.depths == ["rekordbox"]
