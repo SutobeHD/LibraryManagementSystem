@@ -1,19 +1,16 @@
 """Decode-once audio measurement runner: Stage E of docs/LIBRARY_ANALYSIS_HANDOVER.md (§3.5).
 
 Loads every track ONCE (native rate, stereo) and runs the engine's building blocks in the order of
-app.analysis_engine.run_full_analysis, minus waveforms / PVBR / cues, plus the Stage-E extras:
-
-  E1 spectral cutoff + measured quality tier (§5 thresholds)   E5 DC offset per channel
-  E2 clipping (runs >= 3 samples at |x| >= 0.999) + true peak    E6 bass share (< 60 Hz, < 120 Hz)
-  E3 dynamics (PLR, crest factor, loudness range)               E7 low-band L/R correlation (< 150 Hz)
-  E4 silence (leading / trailing below -60 dBFS)                E8 fingerprint: skipped (no fpcalc)
+app.analysis_engine.run_full_analysis, minus waveforms / PVBR / cues, plus the Stage-E extras
+E1-E8 from app.analysis_extras.compute_extras at depth "high" (spectrum / clipping / dynamics /
+silence / dc / bass / lowband / fingerprint sub-dicts, see that module).
 
 Read-only towards the library: no AnalysisCache, no master.db, no ANLZ, no backend calls.
 Output: one JSON line per track, resumable via track_key = ID|path|mtime|size
-("key" is the musical key, as in the engine).
+("key" is the musical key, as in the engine), plus <out>.summary.json after every run.
 
 Usage:
-  python scripts/library_measure_audio.py --limit 50 --seed 1 --workers 12 --depth high
+  python scripts/library_measure_audio.py --limit 50 --seed 1 --workers 10 --depth high
   python scripts/library_measure_audio.py --only-ids 123,456 --out tmp/x.jsonl --inline
 """
 
@@ -51,6 +48,8 @@ import numpy as np  # noqa: E402
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+from app.analysis_extras import compute_extras  # noqa: E402
+
 logger = logging.getLogger("library_measure_audio")
 
 DEFAULT_INPUT = ROOT / "tmp" / "library-analysis" / "tracks.json"
@@ -59,28 +58,15 @@ STREAM_PREFIXES = ("soundcloud:", "spotify:")
 DEPTHS = ("rekordbox", "high")
 ANALYSIS_SR = 44100
 
-SILENCE_DBFS = -60.0
-CUTOFF_FLOOR_REL_DB = -60.0
-HARD_EDGE_DB = 20.0
-HARD_EDGE_BAND_HZ = 300.0
-HARD_EDGE_SCAN_FROM_HZ = 8000.0
-CLIP_THRESHOLD = 0.999
-CLIP_MIN_RUN = 3
-LOW_BAND_HZ = 150.0
-TIER_BOUNDARY_SLACK_HZ = 300.0
-# LAME lowpass per bitrate (handover §5): nearest match within LAME_MATCH_HZ names the bitrate.
-LAME_LOWPASS: tuple[tuple[int, float], ...] = (
-    (128, 17000.0),
-    (160, 17500.0),
-    (192, 18600.0),
-    (256, 19700.0),
-    (320, 20500.0),
-)
-LAME_MATCH_HZ = 400.0
 MIN_BUDGET_S = 120.0
 BUDGET_FACTOR = 10.0
 DEFAULT_BUDGET_S = 600.0
 MAX_ATTEMPTS = 2
+# §3.5.1: madmom peaks at +5 GB per worker, 12 x 7-9 GB exceeded 62 GB only by luck -> 10 workers;
+# recycle a worker every 10 tasks to bound leaked RSS.
+DEFAULT_WORKERS = 10
+DEFAULT_MAX_TASKS_PER_CHILD = 10
+DEFAULT_PROGRESS_EVERY = 50
 
 _ENGINE: Any = None
 
@@ -101,272 +87,6 @@ def _engine() -> Any:
             raise RuntimeError("analysis libraries not available (librosa / scipy)")
         _ENGINE = ae
     return _ENGINE
-
-
-def _db(x: float, floor: float = -200.0) -> float:
-    return float(20.0 * np.log10(x)) if x > 0 else floor
-
-
-def _channels(y: np.ndarray) -> np.ndarray:
-    """(N,) -> (1, N); (C, N) stays."""
-    return y if y.ndim == 2 else y[None, :]
-
-
-# --------------------------------------------------------------------------- #
-# E1 / E6: one STFT on the native mono signal
-# --------------------------------------------------------------------------- #
-
-
-def power_spectrum_stats(
-    y: np.ndarray, sr: int, n_fft: int = 4096, max_frames: int = 4000
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Hann STFT; returns (freqs_hz, median magnitude per bin in dBFS, mean power per bin).
-
-    0 dBFS = full-scale sine. The hop grows so that at most ~max_frames frames are kept
-    (bounded memory on long / hi-res files; the median needs all frames).
-    """
-    y = np.asarray(y, dtype=np.float32)
-    if y.ndim != 1:
-        y = y.mean(axis=0).astype(np.float32)
-    if len(y) < n_fft:
-        y = np.pad(y, (0, n_fft - len(y)))
-    hop = max(n_fft // 2, (len(y) - n_fft) // max_frames + 1)
-    frames = np.lib.stride_tricks.sliding_window_view(y, n_fft)[::hop]
-    window = np.hanning(n_fft).astype(np.float32)
-    scale = 2.0 / float(window.sum())
-    n_bins = n_fft // 2 + 1
-    mags = np.empty((frames.shape[0], n_bins), dtype=np.float32)
-    chunk = 512
-    for start in range(0, frames.shape[0], chunk):
-        block = frames[start : start + chunk] * window
-        mags[start : start + chunk] = np.abs(np.fft.rfft(block, axis=1)) * scale
-    median_db = 20.0 * np.log10(np.median(mags, axis=0) + 1e-12)
-    mean_power = np.mean(mags.astype(np.float64) ** 2, axis=0)
-    freqs = np.fft.rfftfreq(n_fft, 1.0 / sr)
-    return freqs, median_db, mean_power
-
-
-def spectral_cutoff(freqs: np.ndarray, median_db: np.ndarray) -> dict[str, Any]:
-    """E1. Cutoff = hard edge (>= 20 dB step within ~300 Hz, everything above stays down) if one
-    exists above 8 kHz, else the highest bin within 60 dB of the peak bin (handover §3.5)."""
-    rel = median_db - float(np.max(median_db))
-    above = np.nonzero(rel > CUTOFF_FLOOR_REL_DB)[0]
-    idx_thr = int(above[-1]) if len(above) else 0
-    bin_hz = float(freqs[1] - freqs[0]) if len(freqs) > 1 else 1.0
-    nb = max(2, round(HARD_EDGE_BAND_HZ / bin_hz))
-    first = int(np.searchsorted(freqs, HARD_EDGE_SCAN_FROM_HZ))
-    band_starts = list(range(first, len(rel) - nb + 1, nb))
-    levels = np.array([float(np.median(rel[s : s + nb])) for s in band_starts])
-    edge_idx: int | None = None
-    best_drop = 0.0
-    if len(levels) >= 2:
-        drops = levels[:-1] - levels[1:]
-        for i in np.argsort(drops)[::-1]:
-            drop = float(drops[i])
-            if drop < HARD_EDGE_DB:
-                break
-            if np.all(levels[i + 1 :] <= levels[i] - HARD_EDGE_DB):
-                best_drop = drop
-                lo, hi = band_starts[i], band_starts[i + 1] + nb
-                seg = rel[lo:hi]
-                below = np.nonzero(seg < levels[i] - 10.0)[0]
-                edge_idx = lo + int(below[0]) - 1 if len(below) else band_starts[i + 1]
-                break
-        if edge_idx is None and len(drops):
-            best_drop = float(np.max(drops))
-    hard_edge = edge_idx is not None
-    idx = edge_idx if edge_idx is not None else idx_thr
-    idx = max(0, min(idx, len(freqs) - 1))
-    floor_bins = rel[idx + 1 :]
-    return {
-        "cutoff_hz": round(float(freqs[idx]), 1),
-        "cutoff_thr_hz": round(float(freqs[idx_thr]), 1),
-        "hard_edge": hard_edge,
-        "edge_drop_db": round(best_drop, 1),
-        "floor_rel_db": round(float(np.median(floor_bins)), 1) if len(floor_bins) else None,
-        "peak_bin_hz": round(float(freqs[int(np.argmax(median_db))]), 1),
-        "peak_bin_dbfs": round(float(np.max(median_db)), 1),
-    }
-
-
-def cutoff_tier(cutoff_hz: float, sr: int, hard_edge: bool) -> dict[str, Any]:
-    """Measured tier from the cutoff (handover §5). A needs no hard edge; sr < 44.1k is D."""
-    thr_a = 20500.0 if sr <= 44100 else 21000.0
-    reason = None
-    if sr < 44100:
-        tier, reason = "D", "sample_rate"
-    elif cutoff_hz >= thr_a and not hard_edge:
-        tier = "A"
-    elif cutoff_hz >= 19000.0:
-        tier = "B"
-    elif cutoff_hz > 17000.0:
-        tier = "C"
-    else:
-        tier = "D"
-    near_boundary = any(
-        abs(cutoff_hz - b) <= TIER_BOUNDARY_SLACK_HZ for b in (17000.0, 19000.0, thr_a)
-    )
-    natural_rolloff = tier != "A" and not hard_edge and reason is None
-    lame: int | None = None
-    if hard_edge:
-        bitrate, lowpass = min(LAME_LOWPASS, key=lambda bl: abs(bl[1] - cutoff_hz))
-        if abs(lowpass - cutoff_hz) <= LAME_MATCH_HZ:
-            lame = bitrate
-    return {
-        "tier": tier,
-        "tier_reason": reason,
-        "pruefen": near_boundary or natural_rolloff,
-        "pruefen_reason": "boundary" if near_boundary else ("rolloff" if natural_rolloff else None),
-        "lame_bitrate_est": lame,
-        "thr_a_hz": thr_a,
-    }
-
-
-def bass_share(freqs: np.ndarray, mean_power: np.ndarray) -> dict[str, float | None]:
-    """E6. Energy share below 60 Hz and below 120 Hz."""
-    total = float(np.sum(mean_power))
-    if total <= 0:
-        return {"share_60": None, "share_120": None}
-    return {
-        "share_60": round(float(np.sum(mean_power[freqs < 60.0])) / total, 4),
-        "share_120": round(float(np.sum(mean_power[freqs < 120.0])) / total, 4),
-    }
-
-
-# --------------------------------------------------------------------------- #
-# E2 / E3 / E4 / E5 / E7
-# --------------------------------------------------------------------------- #
-
-
-def clipping_stats(y: np.ndarray) -> dict[str, Any]:
-    """E2. Samples in runs of >= 3 consecutive |x| >= 0.999, per channel."""
-    per: list[dict[str, int]] = []
-    for ch in _channels(y):
-        mask = np.abs(ch) >= CLIP_THRESHOLD
-        if not mask.any():
-            per.append({"samples": 0, "runs": 0, "max_run": 0})
-            continue
-        padded = np.concatenate(([0], mask.astype(np.int8), [0]))
-        edges = np.diff(padded)
-        lengths = np.nonzero(edges == -1)[0] - np.nonzero(edges == 1)[0]
-        long_runs = lengths[lengths >= CLIP_MIN_RUN]
-        per.append(
-            {
-                "samples": int(long_runs.sum()),
-                "runs": len(long_runs),
-                "max_run": int(lengths.max()),
-            }
-        )
-    return {
-        "per_channel": per,
-        "samples_total": sum(p["samples"] for p in per),
-        "runs_total": sum(p["runs"] for p in per),
-    }
-
-
-def true_peak_dbtp(y: np.ndarray, chunk: int = 1 << 20, pad: int = 256) -> float:
-    """4x oversampled peak (chunked so hi-res files don't quadruple in RAM)."""
-    from scipy.signal import resample_poly
-
-    peak = 0.0
-    for ch in _channels(y):
-        n = len(ch)
-        for s in range(0, n, chunk):
-            lo, hi = max(0, s - pad), min(n, s + chunk + pad)
-            up = resample_poly(ch[lo:hi].astype(np.float64), 4, 1)
-            a = (s - lo) * 4
-            b = a + (min(n, s + chunk) - s) * 4
-            peak = max(peak, float(np.max(np.abs(up[a:b]))))
-    return round(_db(peak), 2)
-
-
-def dynamics_stats(y: np.ndarray, lufs: float | None) -> dict[str, float | None]:
-    """E3. Sample peak (dBFS), PLR = peak - LUFS, crest factor (dB) over all channels."""
-    flat = np.asarray(y, dtype=np.float32).ravel()
-    if flat.size == 0:
-        return {"peak_dbfs": None, "plr": None, "crest_db": None}
-    peak = float(np.max(np.abs(flat)))
-    rms = float(np.sqrt(np.mean(flat.astype(np.float64) ** 2)))
-    peak_dbfs = _db(peak)
-    plr = round(peak_dbfs - lufs, 2) if lufs is not None and lufs > -100.0 else None
-    return {
-        "peak_dbfs": round(peak_dbfs, 2),
-        "plr": plr,
-        "crest_db": round(_db(peak / (rms + 1e-12)), 2),
-    }
-
-
-def loudness_range(y: np.ndarray, sr: int) -> float | None:
-    """E3 optional. EBU R128 LRA: 3 s short-term loudness, 100 ms hop, -70 LUFS absolute and
-    -20 LU relative gate, LRA = P95 - P10. Uses pyloudnorm's K-weighting filters; None when
-    pyloudnorm (or its _filters) is missing or the signal is shorter than 3 s."""
-    try:
-        import pyloudnorm
-    except ImportError:
-        return None
-    filters = getattr(pyloudnorm.Meter(sr), "_filters", None)
-    if not filters:
-        return None
-    chans = _channels(y)
-    n = chans.shape[1]
-    win, hop = int(3.0 * sr), max(1, int(0.1 * sr))
-    if n < win:
-        return None
-    # BS.1770 channel weights: L/R/C = 1.0, surrounds = 1.41
-    weights = [1.0, 1.0, 1.0, 1.41, 1.41] + [1.0] * max(0, chans.shape[0] - 5)
-    power = np.zeros(n, dtype=np.float64)
-    for i, ch in enumerate(chans):
-        x = ch.astype(np.float64)
-        for f in filters.values():
-            x = f.apply_filter(x)
-        power += weights[i] * x**2
-    cs = np.concatenate(([0.0], np.cumsum(power)))
-    starts = np.arange(0, n - win + 1, hop)
-    mean_sq = (cs[starts + win] - cs[starts]) / win
-    st = -0.691 + 10.0 * np.log10(mean_sq + 1e-20)
-    st = st[st > -70.0]
-    if len(st) == 0:
-        return None
-    rel_gate = -0.691 + 10.0 * np.log10(np.mean(10.0 ** ((st + 0.691) / 10.0))) - 20.0
-    st = st[st >= rel_gate]
-    if len(st) < 2:
-        return None
-    return round(float(np.percentile(st, 95) - np.percentile(st, 10)), 2)
-
-
-def silence_stats(y: np.ndarray, sr: int, thresh_db: float = SILENCE_DBFS) -> dict[str, Any]:
-    """E4. Leading / trailing stretch where every channel stays below thresh_db."""
-    env = np.max(np.abs(_channels(y)), axis=0)
-    thr = 10.0 ** (thresh_db / 20.0)
-    loud = np.nonzero(env > thr)[0]
-    total_ms = round(len(env) / sr * 1000.0, 1)
-    if len(loud) == 0:
-        return {"leading_ms": total_ms, "trailing_ms": total_ms, "all_silent": True}
-    return {
-        "leading_ms": round(float(loud[0]) / sr * 1000.0, 1),
-        "trailing_ms": round(float(len(env) - 1 - loud[-1]) / sr * 1000.0, 1),
-        "all_silent": False,
-    }
-
-
-def dc_offset(y: np.ndarray) -> list[float]:
-    """E5. Mean per channel."""
-    return [round(float(np.mean(ch, dtype=np.float64)), 6) for ch in _channels(y)]
-
-
-def low_band_correlation(y: np.ndarray, sr: int, cutoff_hz: float = LOW_BAND_HZ) -> float | None:
-    """E7. Pearson L/R correlation of the < cutoff_hz band (4th-order Butterworth, zero-phase).
-    None for mono / multichannel or a silent channel."""
-    if y.ndim != 2 or y.shape[0] != 2:
-        return None
-    from scipy.signal import butter, sosfiltfilt
-
-    sos = butter(4, cutoff_hz, btype="low", fs=sr, output="sos")
-    left = sosfiltfilt(sos, y[0].astype(np.float64))
-    right = sosfiltfilt(sos, y[1].astype(np.float64))
-    if np.std(left) < 1e-10 or np.std(right) < 1e-10:
-        return None
-    return round(float(np.corrcoef(left, right)[0, 1]), 4)
 
 
 # --------------------------------------------------------------------------- #
@@ -394,8 +114,11 @@ def compact_anchors(anchors: list[dict[str, Any]]) -> dict[str, Any]:
 # --------------------------------------------------------------------------- #
 
 
-def measure_track(path: str, depth: str = "high") -> dict[str, Any]:
-    """Decode once; run the engine blocks in run_full_analysis order; add E1-E7 at depth 'high'.
+def measure_track(
+    path: str, depth: str = "high", sample_rate_meta: int | None = None
+) -> dict[str, Any]:
+    """Decode once; run the engine blocks in run_full_analysis order; add E1-E8 at depth 'high'
+    (app.analysis_extras.compute_extras; its sub-dicts land at the top level of the row).
 
     Raises on unreadable audio (the pool wrapper turns that into an error row).
     """
@@ -487,28 +210,17 @@ def measure_track(path: str, depth: str = "high") -> dict[str, Any]:
         genre_hint = ae.hint_genre(beat["bpm"], mood["brightness"], mood["texture"])
         stage("mood", t)
 
-        t = time.process_time()
-        freqs, median_db, mean_power = power_spectrum_stats(y_mono, sr_native)
-        cutoff = spectral_cutoff(freqs, median_db)
-        cutoff.update(cutoff_tier(cutoff["cutoff_hz"], sr_native, cutoff["hard_edge"]))
-        bass = bass_share(freqs, mean_power)
-        stage("spectrum", t)
-
-        t = time.process_time()
-        clipping = clipping_stats(y_native)
-        clipping["true_peak_dbtp"] = true_peak_dbtp(y_native)
-        stage("clipping", t)
-
-        t = time.process_time()
-        dynamics = dynamics_stats(y_native, lufs)
-        dynamics["lra"] = loudness_range(y_native, sr_native)
-        stage("dynamics", t)
-
-        t = time.process_time()
-        silence = silence_stats(y_native, sr_native)
-        dc = dc_offset(y_native)
-        low_corr = low_band_correlation(y_native, sr_native)
-        stage("silence_dc_lowband", t)
+        extras = compute_extras(
+            y_native,
+            sr_native,
+            y,
+            sr,
+            lufs=lufs,
+            first_signal_ms=round(first_signal_t * 1000.0, 2),
+            file_path=path,
+            sample_rate_meta=sample_rate_meta,
+        )
+        t_stage.update(extras.pop("t_stage", {}))
 
         result.update(
             {
@@ -517,15 +229,9 @@ def measure_track(path: str, depth: str = "high") -> dict[str, Any]:
                 "peak": round(float(np.max(np.abs(y))), 4),
                 "mood": mood,
                 "genre_hint": genre_hint,
-                "cutoff": cutoff,
-                "clipping": clipping,
-                "dynamics": dynamics,
-                "silence": silence,
-                "dc_offset": dc,
-                "bass": bass,
-                "low_band_corr": low_corr,
             }
         )
+        result.update(extras)
 
     result["t_stage"] = t_stage
     result["t_cpu_s"] = round(time.process_time() - cpu0, 3)
@@ -595,7 +301,14 @@ def measure_task(track: dict[str, Any], depth: str) -> dict[str, Any]:
     cpu0, wall0 = time.process_time(), time.perf_counter()
     row = base_row(track, depth)
     try:
-        row.update(measure_track(str(track.get("path")), depth))
+        meta_sr = track.get("SampleRate")
+        row.update(
+            measure_track(
+                str(track.get("path")),
+                depth,
+                sample_rate_meta=int(meta_sr) if meta_sr else None,
+            )
+        )
         row["status"] = "ok"
     except Exception as exc:  # any decode / DSP failure becomes a row
         row.update(error_row(track, depth, exc))
@@ -604,6 +317,102 @@ def measure_task(track: dict[str, Any], depth: str) -> dict[str, Any]:
     row["worker_pid"] = os.getpid()
     row["rss_peak_mb"], row["rss_source"] = _peak_rss()
     return row
+
+
+def summary_path_for(out_path: Path) -> Path:
+    """audio.jsonl -> audio.summary.json, next to the JSONL."""
+    return out_path.with_name(out_path.stem + ".summary.json")
+
+
+def _percentiles(values: list[float]) -> dict[str, float] | None:
+    if not values:
+        return None
+    arr = np.asarray(values, dtype=np.float64)
+    return {
+        "min": round(float(arr.min()), 3),
+        "p10": round(float(np.percentile(arr, 10)), 3),
+        "median": round(float(np.median(arr)), 3),
+        "p90": round(float(np.percentile(arr, 90)), 3),
+        "max": round(float(arr.max()), 3),
+    }
+
+
+def summarize_rows(out_path: Path) -> dict[str, Any]:
+    """Aggregate every row in the JSONL (all runs so far): status / tier / flag / fingerprint
+    counts and a few distributions. Rows from the pre-extras schema (``cutoff`` instead of
+    ``spectrum``) are counted under ``legacy_rows``."""
+    status: dict[str, int] = {}
+    tiers: dict[str, int] = {}
+    reasons: dict[str, int] = {}
+    flags: dict[str, int] = {}
+    lame: dict[str, int] = {}
+    fp = {"available": 0, "unavailable": 0, "error": 0, "skipped": 0}
+    cpu: list[float] = []
+    cutoff_edge: list[float] = []
+    legacy = 0
+    extras_errors = 0
+    if not out_path.exists():
+        return {"total": 0}
+    with out_path.open(encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            st = str(row.get("status"))
+            status[st] = status.get(st, 0) + 1
+            if st != "ok":
+                continue
+            if row.get("t_cpu_s") is not None:
+                cpu.append(float(row["t_cpu_s"]))
+            if row.get("depth") != "high":
+                continue
+            spectrum = row.get("spectrum")
+            if spectrum is None:
+                if "cutoff" in row:
+                    legacy += 1
+                continue
+            for block in ("spectrum", "clipping", "dynamics", "silence", "dc", "bass", "lowband"):
+                if isinstance(row.get(block), dict) and "error" in row[block]:
+                    extras_errors += 1
+            if "error" in spectrum:
+                continue
+            tier = str(spectrum.get("tier"))
+            tiers[tier] = tiers.get(tier, 0) + 1
+            reason = str(spectrum.get("tier_reason"))
+            reasons[reason] = reasons.get(reason, 0) + 1
+            for flag in spectrum.get("flags") or []:
+                flags[flag] = flags.get(flag, 0) + 1
+            if spectrum.get("lame_estimate_kbps"):
+                k = str(spectrum["lame_estimate_kbps"])
+                lame[k] = lame.get(k, 0) + 1
+            if spectrum.get("cutoff_edge_hz") is not None:
+                cutoff_edge.append(float(spectrum["cutoff_edge_hz"]))
+            fingerprint = row.get("fingerprint")
+            if fingerprint is None:
+                fp["skipped"] += 1
+            elif not fingerprint.get("available"):
+                fp["unavailable"] += 1
+            elif fingerprint.get("error"):
+                fp["error"] += 1
+            else:
+                fp["available"] += 1
+    return {
+        "total": sum(status.values()),
+        "status": status,
+        "tiers": dict(sorted(tiers.items())),
+        "tier_reasons": reasons,
+        "flags": flags,
+        "lame_estimate_kbps": dict(sorted(lame.items(), key=lambda kv: int(kv[0]))),
+        "fingerprint": fp,
+        "extras_block_errors": extras_errors,
+        "legacy_rows": legacy,
+        "t_cpu_s": _percentiles(cpu),
+        "cutoff_edge_hz": _percentiles(cutoff_edge),
+    }
 
 
 def load_done_keys(out_path: Path) -> set[str]:
@@ -784,8 +593,8 @@ def run_pool(
     depth: str,
     workers: int,
     out_path: Path,
-    every: int = 10,
-    max_tasks_per_child: int = 20,
+    every: int = DEFAULT_PROGRESS_EVERY,
+    max_tasks_per_child: int = DEFAULT_MAX_TASKS_PER_CHILD,
 ) -> RunStats:
     """Submit one task per worker, watch deadlines, recycle the whole pool on a timeout or a
     broken worker (a running task cannot be cancelled individually)."""
@@ -878,11 +687,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     ap.add_argument("--out", type=Path, default=DEFAULT_OUT, help="JSONL output (appended)")
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--seed", type=int, default=None, help="reproducible random sample for --limit")
-    ap.add_argument("--workers", type=int, default=12)
+    ap.add_argument("--workers", type=int, default=DEFAULT_WORKERS)
     ap.add_argument("--only-ids", default=None, help="comma-separated track IDs")
     ap.add_argument("--depth", choices=DEPTHS, default="high")
-    ap.add_argument("--progress-every", type=int, default=10)
-    ap.add_argument("--max-tasks-per-child", type=int, default=20)
+    ap.add_argument("--progress-every", type=int, default=DEFAULT_PROGRESS_EVERY)
+    ap.add_argument("--max-tasks-per-child", type=int, default=DEFAULT_MAX_TASKS_PER_CHILD)
     ap.add_argument("--inline", action="store_true", help="no pool: run in this process")
     return ap.parse_args(argv)
 
@@ -928,7 +737,34 @@ def main(argv: list[str] | None = None) -> int:
             every=args.progress_every,
             max_tasks_per_child=args.max_tasks_per_child,
         )
+    summary = {
+        "finished_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "args": {
+            "input": str(args.input),
+            "out": str(args.out),
+            "limit": args.limit,
+            "seed": args.seed,
+            "workers": args.workers,
+            "only_ids": sorted(only_ids) if only_ids else None,
+            "depth": args.depth,
+            "max_tasks_per_child": args.max_tasks_per_child,
+            "inline": args.inline,
+        },
+        "plan": {
+            "snapshot": len(tracks),
+            "local": plan.candidates,
+            "streams": len(plan.streams),
+            "missing": len(plan.missing),
+            "already_done": plan.skipped,
+            "todo": len(plan.todo),
+        },
+        "run": stats.as_dict(),
+        "rows": summarize_rows(args.out),
+    }
+    summary_path = summary_path_for(args.out)
+    summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=1), encoding="utf-8")
     print(json.dumps({"summary": stats.as_dict()}, ensure_ascii=False), flush=True)
+    print(f"summary written to {summary_path}", flush=True)
     return 0
 
 

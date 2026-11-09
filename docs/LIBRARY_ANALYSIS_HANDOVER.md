@@ -313,6 +313,29 @@ set PYTHONIOENCODING=utf-8
 .venv\Scripts\python.exe scripts\library_measure_audio.py --workers 10 --depth high
 ```
 
+#### 3.5.2 Extras module + tier rule (2026-11-09) — `app/analysis_extras.py`
+
+E1-E7 moved out of the spike into `app/analysis_extras.py` (632 lines; numpy at import, scipy / pyloudnorm lazy) so the engine's high level and the runner share one implementation. Entry point `compute_extras(y_native, sr_native, y_mono, sr, *, lufs, first_signal_ms, file_path=None, sample_rate_meta=None)` → sub-dicts `spectrum`, `clipping`, `dynamics`, `silence`, `dc`, `bass`, `lowband`, `fingerprint`, `extras_version`, `t_stage`. Never raises: a failing block yields `{"error": ...}` in its sub-dict. E1 works on `y_native` (own downmix), never on the 44.1k signal (fake edge at 22 kHz). Cost ≈ 0.9 s CPU per audio minute (5-min track ≈ 4.5 s, largest item true peak), RAM transient 2-3 × signal size. 30 tests in `tests/test_analysis_extras.py`; the runner keeps 10 in `tests/test_library_measure_audio.py`. `scripts/library_measure_audio.py` imports from the module (936 → 772 lines), defaults `--workers 10`, `--max-tasks-per-child 10`, `--progress-every 50`, writes `audio.summary.json` next to the JSONL.
+
+**Row schema changed** (`extras_version` 1): `cutoff` → `spectrum` (`cutoff_hz` → `cutoff_edge_hz` / `tier_cutoff_hz`, `pruefen`/`pruefen_reason` → `flags`, `lame_bitrate_est` → `lame_estimate_kbps`), `dc_offset` → `dc.per_channel`, `low_band_corr` → `lowband.corr`, new `fingerprint`. The 50 old rows were moved to `tmp/library-analysis/measure/audio_v0_50rows.jsonl` so a resume does not keep them.
+
+**Tier rule (decision A1), `cutoff_tier`:** `sr < 44.1k` → D · hard edge → tier from the edge (never A) · no edge but a digital-zero region below `thr_A + 400 Hz` → its start `zero_from_hz` is the edge (`digital_zero`) · no edge and `thr ≥ thr_A` → A (`full_band`) · otherwise `tier = None`, `tier_reason = "rolloff"`, `flags = ["pruefen"]`. Boundary ±300 Hz adds `"boundary"`. `cutoff_thr_hz` stays as information. Three detector changes the 50 tracks forced: sliding windows instead of aligned bands (result no longer depends on the band grid; width = steepness measure, 500 Hz ≙ 40 dB/kHz); Nyquist guard `EDGE_GUARD_HZ` (a 44.1k FLAC had an "edge" at 21.87 kHz = the ADC filter → was B, now A); lowest edge wins + `zero_from_hz` (a track whose music ends at 15.4k under a 19.96k lowpass flipped D↔B per width; an AIFF with floor -122 dB only from 18.9k was missed by the median floor). Tier from the -60 dB `thr` would be systematically wrong on bass-heavy material (one track thr 12.0k, edge 20.25k).
+
+**Edge-band test (decision A2), 50 tracks, 31 lossless / 19 lossy:**
+
+| Width | lossless with hard edge | lossless edge-or-zero | lossy without edge (zero rescue) | pruefen | Tiers |
+|---|---|---|---|---|---|
+| 300 | 23/31 | 28/31 | 2/19 (2) | 5 | A1 B39 C3 D5 None2 |
+| **500** | 25/31 | 28/31 | 1/19 (1) | 5 | A1 B39 C3 D5 None2 |
+| 1000 | 27/31 | 28/31 | 0/19 | 5 | A1 B39 C3 D5 None2 |
+| 2000 | 29/31 | 29/31 | 0/19 | 8 | A1 B38 C3 D7 None1 |
+
+Chosen **500 Hz** (`HARD_EDGE_BAND_HZ`): 300/500/1000 give identical tiers; 2000 creates a false C (natural 11 dB/kHz slope 16→18k on a 320 source), a false D and a boundary flip. 500 ≙ 40 dB/kHz: every codec lowpass in the sample ≥ 45 dB/kHz, steepest natural slope 17.8 dB/kHz; 1000 (20 dB/kHz) would sit 2 dB/kHz from it. Soft codec lowpasses (35 dB/kHz) are caught by the digital-zero rule with the same tier as 1000 would give. Lossless containers with a lossy signature now **28/31 = 90 %** (71 % with the old detector).
+
+**fpcalc (decision A3):** installed 2026-11-08 via winget (`AcoustID.Chromaprint` 1.6.2). Not on the PATH of already-open shells; `find_fpcalc` looks at `FPCALC_DIR`, `%LOCALAPPDATA%/Microsoft/WinGet/Links` and `WinGet/Packages/AcoustID.Chromaprint*/**/fpcalc.exe`, prepends PATH once and clears `is_fingerprinting_available`'s cache. `fingerprint_file` passes `allowed_roots=[file.parent]` (the default would import `app.main` in every worker). Timing on a 120-s sample: FLAC 0.20 s, AIFF 48k 0.07 s, MP3 0.16 s (warm 0.04-0.10 s); hash 2600-3200 chars.
+
+Real check at depth high: AIFF 48k 125 s → `tier B, hard_edge, cutoff_edge 20250, zero_from 20285, LAME 320`, extras 1.35 s of 19.3 s CPU. MP3 294 s → `tier D, digital_zero, zero_from 16150, thr 14621`, extras 2.75 s of 34.4 s CPU.
+
 ### 3.6 Analysis depth setting — Rekordbox level vs high level (user requirement 2026-11-08)
 
 The user's words: "Man soll einstellen können, wie intensiv analysiert werden soll beim Track-Analysieren, ob Rekordbox-Level oder High-Level."

@@ -1,5 +1,6 @@
-"""Tests for scripts/library_measure_audio.py: the Stage-E extras (E1-E7) on synthetic signals,
-the resume key / skip logic and the error-row behaviour. Heavy engine blocks are mocked."""
+"""Tests for scripts/library_measure_audio.py: resume key / skip logic, error rows, the summary
+and measure_track wiring of app.analysis_extras.compute_extras. Heavy engine blocks are mocked;
+the E1-E8 measurements themselves are covered by tests/test_analysis_extras.py."""
 
 from __future__ import annotations
 
@@ -36,141 +37,12 @@ def _sine(freq: float, seconds: float = 12.0, amp: float = 0.5) -> np.ndarray:
     return (amp * np.sin(2 * np.pi * freq * t)).astype(np.float32)
 
 
-def _cutoff(x: np.ndarray, sr: int = SR) -> dict:
-    freqs, median_db, _ = lma.power_spectrum_stats(x, sr)
-    c = lma.spectral_cutoff(freqs, median_db)
-    c.update(lma.cutoff_tier(c["cutoff_hz"], sr, c["hard_edge"]))
-    return c
-
-
-# --------------------------------------------------------------------------- E1
-
-
-def test_e1_brickwall_16k_is_hard_edge_tier_d():
-    c = _cutoff(_brickwall(_noise(), 16000))
-    assert abs(c["cutoff_hz"] - 16000) < 300
-    assert c["hard_edge"] is True
-    assert c["edge_drop_db"] >= lma.HARD_EDGE_DB
-    assert c["tier"] == "D"
-    assert c["pruefen"] is False
-
-
-def test_e1_brickwall_19500_is_tier_b_lame_256():
-    c = _cutoff(_brickwall(_noise(), 19500))
-    assert abs(c["cutoff_hz"] - 19500) < 300
-    assert c["tier"] == "B"
-    assert c["lame_bitrate_est"] == 256
-
-
-def test_e1_brickwall_20500_hard_edge_is_b_not_a():
-    c = _cutoff(_brickwall(_noise(), 20500))
-    assert c["hard_edge"] is True
-    assert c["tier"] == "B"
-    assert c["lame_bitrate_est"] == 320
-
-
-def test_e1_full_band_noise_is_tier_a_no_edge():
-    c = _cutoff(_noise())
-    assert c["hard_edge"] is False
-    assert c["cutoff_hz"] >= 20500
-    assert c["tier"] == "A"
-
-
-def test_e1_tier_thresholds_unit():
-    assert lma.cutoff_tier(20600, 44100, False)["tier"] == "A"
-    assert lma.cutoff_tier(20600, 44100, True)["tier"] == "B"
-    assert lma.cutoff_tier(20700, 48000, False)["tier"] == "B"  # 48k needs >= 21 kHz for A
-    assert lma.cutoff_tier(21000, 48000, False)["tier"] == "A"
-    assert lma.cutoff_tier(19000, 44100, True)["tier"] == "B"
-    assert lma.cutoff_tier(18000, 44100, True)["tier"] == "C"
-    assert lma.cutoff_tier(17000, 44100, True)["tier"] == "D"
-    assert lma.cutoff_tier(22000, 32000, False)["tier"] == "D"
-    assert lma.cutoff_tier(17100, 44100, True)["pruefen"] is True
-    assert lma.cutoff_tier(15000, 44100, False)["pruefen_reason"] == "rolloff"
-
-
-# --------------------------------------------------------------------------- E2
-
-
-def test_e2_clipped_square_counts_runs_sine_does_not():
-    square = np.sign(_sine(100, amp=1.0)).astype(np.float32)
-    clipped = lma.clipping_stats(square)
-    assert clipped["samples_total"] > 0
-    assert clipped["runs_total"] > 0
-    assert clipped["per_channel"][0]["max_run"] >= lma.CLIP_MIN_RUN
-    assert lma.clipping_stats(_sine(100, amp=0.5))["samples_total"] == 0
-
-
-def test_e2_short_runs_below_three_are_ignored():
-    x = np.zeros(1000, dtype=np.float32)
-    x[10:12] = 1.0  # run of 2
-    x[100:103] = -1.0  # run of 3
-    c = lma.clipping_stats(x)
-    assert c["samples_total"] == 3
-    assert c["runs_total"] == 1
-
-
-def test_e2_true_peak_of_sine_matches_amplitude():
-    assert abs(lma.true_peak_dbtp(_sine(1000, amp=0.5)) - (-6.02)) < 0.1
-
-
-# --------------------------------------------------------------------------- E3-E7
-
-
-def test_e3_dynamics_plr_and_crest():
-    d = lma.dynamics_stats(_sine(1000, amp=0.5), lufs=-14.0)
-    assert abs(d["peak_dbfs"] - (-6.02)) < 0.05
-    assert abs(d["plr"] - 7.98) < 0.1
-    assert abs(d["crest_db"] - 3.01) < 0.05
-    assert lma.dynamics_stats(_sine(1000), lufs=-100.0)["plr"] is None
-
-
-def test_e3_loudness_range_steady_tone_is_near_zero_and_short_is_none():
-    stereo = np.stack([_sine(1000), _sine(1000)])
-    lra = lma.loudness_range(stereo, SR)
-    assert lra is not None and lra < 0.5
-    assert lma.loudness_range(_sine(1000, seconds=1.0), SR) is None
-
-
-def test_e4_silence_leading_and_trailing():
-    x = np.concatenate([np.zeros(SR), _sine(440, seconds=2.0), np.zeros(2 * SR)]).astype(np.float32)
-    s = lma.silence_stats(x, SR)
-    assert abs(s["leading_ms"] - 1000) < 5
-    assert abs(s["trailing_ms"] - 2000) < 5
-    assert lma.silence_stats(np.zeros(SR, dtype=np.float32), SR)["all_silent"] is True
-
-
-def test_e5_dc_offset_per_channel():
-    stereo = np.stack([_sine(440) + 0.1, _sine(440) - 0.2]).astype(np.float32)
-    dc = lma.dc_offset(stereo)
-    assert abs(dc[0] - 0.1) < 1e-3
-    assert abs(dc[1] + 0.2) < 1e-3
-
-
-def test_e6_bass_share_of_50hz_tone():
-    freqs, _, power = lma.power_spectrum_stats(_sine(50), SR)
-    share = lma.bass_share(freqs, power)
-    assert share["share_60"] > 0.9
-    assert share["share_120"] > share["share_60"] - 1e-9
-    freqs, _, power = lma.power_spectrum_stats(_sine(5000), SR)
-    assert lma.bass_share(freqs, power)["share_120"] < 0.01
-
-
-def test_e7_low_band_correlation_same_inverted_mono():
-    bass = _sine(50)
-    assert lma.low_band_correlation(np.stack([bass, bass]), SR) > 0.99
-    assert lma.low_band_correlation(np.stack([bass, -bass]), SR) < -0.99
-    wide = np.stack([bass + _noise(amp=0.05), -bass + _noise(amp=0.05)])
-    assert lma.low_band_correlation(wide, SR) < 0.0  # bass cancels in mono
-    assert lma.low_band_correlation(bass, SR) is None
-
-
-# --------------------------------------------------------------------------- keys / plan
-
-
 def _write_wav(path: Path, data: np.ndarray, sr: int = SR) -> Path:
     sf.write(str(path), data.T if data.ndim == 2 else data, sr, subtype="PCM_16")
     return path
+
+
+# --------------------------------------------------------------------------- keys / plan
 
 
 def test_plan_tracks_splits_streams_missing_local_and_skips_done(tmp_path):
@@ -232,6 +104,65 @@ def test_track_budget():
     assert lma.track_budget_s({}) == lma.DEFAULT_BUDGET_S
 
 
+def test_cli_defaults_follow_handover_3_5_1():
+    args = lma.parse_args([])
+    assert args.workers == 10
+    assert args.max_tasks_per_child == 10
+    assert args.progress_every == 50
+    assert args.depth == "high"
+
+
+# --------------------------------------------------------------------------- summary
+
+
+def test_summary_path_and_summarize_rows(tmp_path):
+    out = tmp_path / "audio.jsonl"
+    assert lma.summary_path_for(out) == tmp_path / "audio.summary.json"
+    rows = [
+        {
+            "track_key": "1|a|1|1",
+            "status": "ok",
+            "depth": "high",
+            "t_cpu_s": 40.0,
+            "spectrum": {
+                "tier": "B",
+                "tier_reason": "hard_edge",
+                "flags": ["pruefen", "boundary"],
+                "lame_estimate_kbps": 320,
+                "cutoff_edge_hz": 20250.0,
+            },
+            "clipping": {"error": "boom"},
+            "fingerprint": {"available": True, "fpcalc_hash": "AQAD"},
+        },
+        {
+            "track_key": "2|b|1|1",
+            "status": "ok",
+            "depth": "high",
+            "t_cpu_s": 60.0,
+            "spectrum": {"tier": None, "tier_reason": "rolloff", "flags": ["pruefen"]},
+            "fingerprint": {"available": False},
+        },
+        {"track_key": "3|c|1|1", "status": "ok", "depth": "high", "cutoff": {"tier": "D"}},
+        {"track_key": "4|d|1|1", "status": "ok", "depth": "rekordbox", "t_cpu_s": 30.0},
+        {"track_key": "5|e|1|1", "status": "error", "error_type": "ValueError"},
+        {"track_key": "6|f|0|0", "status": "stream"},
+    ]
+    out.write_text("".join(json.dumps(r) + "\n" for r in rows) + "garbage\n", encoding="utf-8")
+    s = lma.summarize_rows(out)
+    assert s["total"] == 6
+    assert s["status"] == {"ok": 4, "error": 1, "stream": 1}
+    assert s["tiers"] == {"B": 1, "None": 1}
+    assert s["tier_reasons"] == {"hard_edge": 1, "rolloff": 1}
+    assert s["flags"] == {"pruefen": 2, "boundary": 1}
+    assert s["lame_estimate_kbps"] == {"320": 1}
+    assert s["fingerprint"] == {"available": 1, "unavailable": 1, "error": 0, "skipped": 0}
+    assert s["extras_block_errors"] == 1
+    assert s["legacy_rows"] == 1
+    assert s["t_cpu_s"]["median"] == 40.0 and s["t_cpu_s"]["max"] == 60.0
+    assert s["cutoff_edge_hz"]["min"] == 20250.0
+    assert lma.summarize_rows(tmp_path / "missing.jsonl") == {"total": 0}
+
+
 # --------------------------------------------------------------------------- measure_task / track
 
 
@@ -290,7 +221,7 @@ def test_measure_track_high_and_rekordbox(tmp_path, mocked_engine):
     )
     wav = _write_wav(tmp_path / "track.wav", stereo)
 
-    high = lma.measure_track(str(wav), "high")
+    high = lma.measure_track(str(wav), "high", sample_rate_meta=SR)
     assert high["depth"] == "high"
     assert high["channels"] == 2 and high["sample_rate_native"] == SR
     assert high["bpm"] == 130.0 and high["key"] == "Am" and high["beat_method"] == "mock"
@@ -299,20 +230,28 @@ def test_measure_track_high_and_rekordbox(tmp_path, mocked_engine):
     ]
     assert high["tempo_anchors"] == {"count": 2, "bpm_min": 130.0, "bpm_max": 131.0}
     assert "beats" not in high and "waveform" not in high
-    assert high["cutoff"]["tier"] == "D" and high["cutoff"]["hard_edge"] is True
-    assert high["low_band_corr"] > 0.99
+    # compute_extras sub-dicts land at the top level of the row
+    assert high["extras_version"] == 1
+    assert high["spectrum"]["tier"] == "D" and high["spectrum"]["hard_edge"] is True
+    assert high["spectrum"]["sample_rate_used"] == SR
+    assert high["lowband"]["corr"] > 0.99
     assert high["stereo"]["phase_correlation"] > 0.9
     assert high["bass"]["share_60"] > 0.5
     assert high["clipping"]["samples_total"] == 0
     assert high["dynamics"]["plr"] is not None
     assert high["silence"]["trailing_ms"] < 50
-    assert len(high["dc_offset"]) == 2
-    for stage in ("load", "beats", "key", "lufs", "spectrum", "clipping", "dynamics"):
+    assert high["silence"]["first_signal_ms"] == high["first_signal_ms"]
+    assert len(high["dc"]["per_channel"]) == 2
+    assert high["fingerprint"] is not None and "available" in high["fingerprint"]
+    for absent in ("cutoff", "dc_offset", "low_band_corr"):
+        assert absent not in high
+    for stage in ("load", "beats", "key", "lufs", "spectrum", "clipping", "dynamics", "lowband"):
         assert stage in high["t_stage"]
+    json.dumps(high)
 
     rb = lma.measure_track(str(wav), "rekordbox")
     assert rb["depth"] == "rekordbox"
-    for absent in ("lufs", "mood", "cutoff", "clipping", "dynamics", "low_band_corr"):
+    for absent in ("lufs", "mood", "spectrum", "clipping", "dynamics", "lowband", "fingerprint"):
         assert absent not in rb
     assert "spectrum" not in rb["t_stage"] and "beats" in rb["t_stage"]
 
