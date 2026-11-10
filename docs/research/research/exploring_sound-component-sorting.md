@@ -3,9 +3,9 @@ slug: sound-component-sorting
 title: Nach Klang-Bestandteilen sortieren (Bass, Hi-Hats, Bells, Melodie)
 owner: tb
 created: 2026-11-08
-last_updated: 2026-11-08
-tags: []
-related: []
+last_updated: 2026-11-10
+tags: [analysis, similarity, sorting, stems]
+related: [recommender-similar-tracks, recommender-taste-llm-audio]
 supersedes: []
 superseded_by: []
 ---
@@ -22,6 +22,8 @@ superseded_by: []
 
 - 2026-11-08 — `research/idea_` — created from template; Original Idea = user quote of 2026-11-08 (docs/LIBRARY_ANALYSIS_HANDOVER.md §9)
 - 2026-11-08 — `research/idea_` — user answered OQ 1-10 (recorded inline), added W9 similar song structure; §D of the handover still open
+- 2026-11-10 — `research/drafting_` — user: "Ja, bis zum Gate" + "nix final bauen, nur planen und testen"; Stage 1 drafted interactively (remote routines dead since 2026-06)
+- 2026-11-10 — `research/exploring_` — drafted (scout + prior-art + risk-surface + worker + verifier PASS, 0 rework rounds), ready for explore
 
 ## Original Idea (verbatim — never edit)
 
@@ -39,53 +41,64 @@ its work against this block. It is the anchor against scope-creep and misreading
 
 ## Prior Art
 
-Stage 1 Prior-Art-Agent. Adjacent shipped / explored / abandoned work. ≤120 words. Link by slug (relative path).
-
-- **Shipped:** [implemented_<slug>_<date>](../archived/implemented_<slug>_<date>.md) — what it covers, what it doesn't
-- **Active research:** [<state>_<slug>](../research/<state>_<slug>.md) — overlap, conflict?
-- **Superseded / abandoned:** [<archived>](../archived/…) — why it didn't ship; lessons
-- **External precedent:** rekordbox/serato/traktor/library-manager behavior — cite source
-
-If no prior art: **"None — greenfield."**
+- **Shipped:** none for components. Nearest: `app/analysis_extras.py` (PR #78) — whole-track bass share < 60 / < 120 Hz + low-band mono correlation, no component isolation. `scripts/library_measure_anlz.py` (PR #78) — reads + unmasks Rekordbox PSSI for 4744 tracks, script only, not in the app.
+- **Active research:** [accepted_recommender-similar-tracks](../implement/accepted_recommender-similar-tracks.md) — whole-track similarity, 4 named slices (mfcc26 / chroma12 / spectral4 / dynamics4) in `app_data/track_vectors.db` (`:434-435`), **0/12 tasks built**; backfill at 22.05 kHz (`:438`) cuts the hats band; "Out: sklearn/FAISS/PyTorch" (`:445`). → this doc **extends that store** (new slices, `VECTOR_VERSION` bump `:484`), no second store.
+- **Active research:** [inprogress_recommender-taste-llm-audio](../implement/inprogress_recommender-taste-llm-audio.md) — torch gated at M2 (`:300-307`: installer ≤ +400 MB, boot ≤ +5 s, p95 CPU ≤ 3 s), benchmark never run (`:474`). → **one** torch decision for both docs.
+- **Active research:** [inprogress_analysis-underground-mainstream-classifier](../implement/inprogress_analysis-underground-mainstream-classifier.md) — plans a sortable column (`:618`), same UI pattern. [accepted_library-quality-upgrade-finder](../implement/accepted_library-quality-upgrade-finder.md) — spectral-cutoff sidecar, no component overlap. [drafting_performance-overhaul](drafting_performance-overhaul.md) — light track list drops heavy fields (`:28`).
+- **Superseded / abandoned:** none on stems, embeddings, structure or component sorting (`docs/research/archived/` = 7 security docs + 1 superseded auth model).
+- **External precedent:** Stage 2 (RQ2 / RQ5 web agent) — Rekordbox Related Tracks, stems products, sample-similarity tools.
 
 ## Problem
 
-Stage 1 Worker. ≤60 words (soft). What / why / cost-of-not-doing.
+4765-track library sorts by whole-track metadata only (BPM, key, genre, rating). A DJ picks by ear for component traits: bass character, hat pattern, melody, build-up. No query "bass like this one" or "same structure". Cost: manual digging per set; tracks that would mix well by component stay undiscovered.
 
 ## Goals / Non-goals
 
 **Goals**
-- …
+- G1 **value columns** per track, sortable: bass depth (fundamental Hz, sub share, boom length), hi-hat amount + openness + grid pattern (on-beat / off-beat / 8th / 16th), melodic-ness (lead lines), structure numbers (intro bars, first drop, drop count, break share).
+- G2 **seed similarity** — "sort by similarity to this track" per component: bass (sound + line), hats (sound + pattern), melody (same notes, transposition-invariant), structure (W9).
+- G3 **categories / filters**: melody type (Lead; Acid line — unconfirmed, voice input heard "Unassed"; Vocal hook — user "maybe"), structure families.
+- G4 **user-definable sound classes** from example tracks (bells = first example of many).
+- G5 every feature evaluated against a user-provided example set (track IDs only); thresholds from measured distributions.
+- G6 local-only, GPU optional, fits the analysis-depth model (own level or background job); extends `track_vectors.db` named slices.
 
 **Non-goals**
-- …
+- No stem export / stem playback; stems never persisted (≈ 1 TB vs 178 GB free).
+- No cloud inference; no audio leaves the machine.
+- No writes to `master.db`, ANLZ, audio files or file tags.
+- No "next track" recommender (that is recommender-rules-baseline / taste).
+- No replacement of whole-track similar-tracks; no second vector store.
+- No model training beyond small per-class classifiers on fixed embeddings.
+- Nothing built before the approval gate (user 2026-11-10: plan + test only).
 
 ## Constraints
 
-Stage 1 Worker + Risk-Surface-Agent. External facts bounding solution. Cite source per bullet.
-
-- **External APIs / rate limits:** …
-- **Data shape (`master.db`, ANLZ, USB PDB):** … (cite `file:line` invariant if applicable)
-- **Schicht-A pinning / library version:** … (cite `requirements.txt:N` or `Cargo.toml:N`)
-- **Perf / capacity:** … (latency budget, memory ceiling)
-- **Legal / compliance:** … (license, GDPR, region)
-- **Concurrency invariants:** `_db_write_lock`, `validate_audio_path`, `SafeAnlzParser` if relevant
+- **External APIs / rate limits:** none at runtime. One-time model-weight download from official hosts only if a model option wins (Stage 2); no runtime model download exists in `app/` today (grep `huggingface|hf_hub|torch.hub` = 0 hits).
+- **Data shape (`master.db`, ANLZ, USB PDB):** PSSI XOR-masked in 54.5 % of files; pyrekordbox 0.1.7 parses masked PSSI as garbage (`scripts/library_measure_anlz.py:16`); the app only masks (`app/anlz_usb_export.py:72`), never unmasks. 20 tracks without PSSI, 3 without grid; kind → label mapping unverified against the Rekordbox UI (handover §3.4.1). Track dicts carry **no** `phrases` at runtime (`get_all_tracks` returns `self.tracks.values()` at `app/live_database.py:673` / `app/database.py:1186`; grep `phrases` = 0 hits in both files); no route returns PSSI per track. Full ANLZ pass = 216 s for 4765 tracks → not a startup task. rbox never for ANLZ files.
+- **Schicht-A pinning / library version:** `requirements.txt:38-41` numpy 1.26.4, scipy 1.11.4, numba 0.58.1, librosa 0.10.1. scikit-learn is REQUIRED in `backend.spec:56` but **unpinned** (1.9.0 installed transitively). torch / onnxruntime absent. One-file EXE (`backend.spec:175` `EXE(` takes binaries + datas, no `COLLECT`; `:186-187` `upx=False`, `runtime_tmpdir=None`): missing REQUIRED → `SystemExit` (`:80-82`); OPTIONAL list exists (`:65`, madmom / essentia).
+- **Perf / capacity:** base audio pass 0.18 s CPU per audio second = 67 CPU-h, 6.6 h @12 workers; madmom +5 GB RSS per worker (handover §3.5.1). `hpss` ≈ 20 s CPU + 1.9 GB RSS per 5-min track; `pyin` full track ≈ 75 s; band split 2.8 s (handover §9.2.1). GPU RTX 2070 SUPER 8 GB, must stay optional (taste doc `:67`). torch CUDA wheel 1.99 GB (cu130) to 2.86 GB (cu128) vs CPU wheel 111-121 MB (handover §9.2.1). Baselines: 67 CPU-h = base audio pass; the ~33 CPU-h in the user's answer 10 is the **extra** cost of the no-dependency combo (bands + hpss + chroma/mfcc) on top of it.
+- **Legal / compliance:** weight licences must allow this use (flag CC-BY-NC / research-only); example set = track IDs only, never audio in the repo.
+- **Concurrency invariants:** no `master.db` write → `_db_write_lock` not involved. Any route taking a path → `validate_audio_path` / `ALLOWED_AUDIO_ROOTS`; mutating routes behind `require_session` (`.claude/rules/coding-rules.md:14-15`). Subprocess always with `timeout=` (`:36`). Partial results never into `AnalysisCache` (handover §0). Settings read once per job in the main process (handover §3.6.1). No persistent job table exists; precedents: phrase batch `_phrase_jobs` (`app/main.py:7268-7274`), `analyze-batch` NDJSON + single-flight (`:5841`, `:5982`).
+- **Sister-plan rules:** similar-tracks `:59` feature extraction only in `track_vector_builder.py`; `:484` `VECTOR_VERSION` bump per new slice; `track_vectors.db` path is CWD-relative (`app/db_taste.py:42-44`).
+- **UI:** TrackTable sort = `t[key]` on this branch (`frontend/src/components/TrackTable.jsx:252-276`); typed `SORT_VALUES` with null-last only on `origin/feat/sortable-columns` (`8c30c89`, not merged into PR #60 / #78); `customColumns` headers not sortable (`:521-530`). Light-list merge point `app/main.py:1116-1124` — copy, never mutate the cached dict.
 
 ## Dependencies
 
-Stage 1 Risk-Surface-Agent. New libs / external services / hardware required. Each row sized for a Schicht-A audit decision.
+Candidates only — Stage 2 decides (RQ1, RQ2, RQ5, RQ6). **W9 (structure) and the baseline value features need no new dependency.**
 
 | Dep | Kind | Version | License | Schicht-A audit needed? | Why |
 |---|---|---|---|---|---|
-| <name> | py / npm / cargo / system | X.Y.Z | MIT/BSD/… | yes/no | <one-line reason> |
-
-If none: **"None — uses existing stack only."**
+| torch | py | 2.15.0 (PyPI, CPU, 120.8 MiB) / 2.14.1+cu130 (1.99 GB; cu128 build 2.86 GB) | BSD-3-Clause | yes | inference runtime for separation / embeddings / pitch — only if a model option wins |
+| torchaudio | py | 2.11.1 | BSD-2-Clause | yes | audio I/O + transforms for torch models |
+| demucs | py | 4.1.0 | MIT (code); weights: verify in Stage 2 | yes | source-separation candidate (bass / drums / other / vocals) |
+| onnxruntime | py | 1.31.1 (14.2 MiB, CPU EP) | MIT | yes | torch-free inference candidate |
+| audio-embedding model (CLAP / PANNs class) | py + weights | Stage 2 | verify in Stage 2 | yes | user-definable sound classes (G4) |
+| neural pitch tracker (CREPE / basic-pitch class) | py + weights | Stage 2 | verify in Stage 2 | yes | melody line on an isolated part (W6-W8) |
+| GPU (CUDA) | hardware | RTX 2070 SUPER 8 GB, CUDA 13.4 | — | no | optional accelerator, never required |
 
 ## Open Questions
 
-Stage 1 Worker. Numbered. Each resolvable (yes/no or X vs Y), not philosophy. Each becomes a parallel research agent in Stage 2.
-
-Fragen an den User (Handover §9.1, offen seit 2026-11-08). Antworten hier eintragen, nummeriert. Hürden + Messwerte: Handover §9.2 / §9.2.1.
+### User decisions (asked + answered 2026-11-08; German as given; hurdles + numbers: handover §9.2 / §9.2.1)
 
 1. **W1 gleiche Bässe** — ähnlicher *Klang* (Timbre), ähnliche *Linie* (Rhythmus/Noten) oder beides? Kick mitzählen oder nicht?
    → **Antwort tb 2026-11-08:** beides (Klang und Linie). Kick: nicht beantwortet, beide Varianten vorsehen.
@@ -110,19 +123,37 @@ Fragen an den User (Handover §9.1, offen seit 2026-11-08). Antworten hier eintr
 
 11. **W9 ähnlicher Aufbau (neu 2026-11-08)** — „nach ähnlichen Segmenten sortieren, also nach ähnlichen Aufbauen vom Song“: alle Songs mit gleichem Aufbau, nach verschiedenen Aufbauten sortieren, oder zu einem Seed-Track Songs mit gleichem / ähnlichem Aufbau sehen. Signal liegt schon vor: Rekordbox-PSSI-Phrasenfolge für 4744 Tracks (Stage D) + LMS-Phrasen. Offen: Ähnlichkeit auf Phrasen-Kinds, Bar-Längen oder beidem? Zählt die Reihenfolge strikt (Sequenz) oder nur die Anteile (Intro-Länge, Chorus-Anzahl)?
 
+Still open with the user: example track IDs (bells 5 + 5, hat pairs 5), the W7 category heard as "Unassed" (Acid?), W1 kick in or out, W9 sequence vs shares.
+
+### Research questions (Stage 2 — one agent group each)
+
+- **RQ1** Isolation: do W1 / W5 / W8 need model-based source separation, or do band split + HPSS suffice? Quality proxy + cost, CPU vs GPU. Bass similarity with the kick in vs out (user: plan both variants).
+- **RQ2** Runtime: torch bundled vs optional on-demand runtime vs torch-free ONNX — which fits the installer / boot limits and the pinning rules?
+- **RQ3** W9: which representation + metric for structure similarity; is Rekordbox PSSI sufficient; cost to hold it for all tracks.
+- **RQ4** Value features W2 / W4 / W6 without separation: usable, coarse, or useless? Stability + cost.
+- **RQ5** W3 user-definable sound classes: few-shot on a pretrained audio embedding — which model, licence, cost, does it work inside dense mixes?
+- **RQ6** Melody: pitch tracker + transposition-invariant similarity for W8; feasibility of W7 categories.
+- **RQ7** Storage: extend `track_vectors.db` named slices (sister plan unbuilt) — schema, key (track id vs path + mtime + size), versioning.
+- **RQ8** UI: how measured values become sortable columns, a similarity action and filters, given `feat/sortable-columns` is unmerged.
+- **RQ9** Depth: cost of the user's "Maximal" level (CPU-h, RAM, GPU) after optimisation; background job as fallback if it exceeds a stated budget. Result goes back to the user (answer 10: "erst optimieren und nochmal reden").
+- **RQ10** Evaluation: protocol + minimum example set so each wish is measured, not assumed.
+
 ## Research Plan
 
-Stage 1 Worker. ≤120 words (soft). Which aspects Stage 2 researches in parallel — one bullet per agent. Drives the autonomous explore stage; phrase each bullet so two parallel agents (codebase + web) could split it.
-
-- Agent 1 (codebase + web): …
-- Agent 2 (codebase + web): …
+- Agent 1 (codebase): prior art, runtime phrase data, sidecar pattern, extension points, UI integration, build rules → RQ3, RQ7, RQ8, RQ9.
+- Agent 2 (web): separation / drum / pitch / embedding models — licences, Windows py3.11 wheels, footprint, DJ-software precedent, packaging → RQ1, RQ2, RQ5, RQ6.
+- Agent 3 (measurement, isolated env): Demucs-class separation, embeddings, pitch on this machine, CPU vs GPU, time / RAM / VRAM → RQ1, RQ2, RQ5, RQ6.
+- Agent 4 (measurement): structure representations + metrics on the 4744 measured PSSI sequences → RQ3.
+- Agent 5 (measurement, no new dependency): W2 / W4 / W5 / W6 value features on 40 tracks with Rekordbox grids — distributions, stability, cost → RQ4.
+- Synthesis: evaluation protocol + example-set size → RQ10.
 
 ## Idea Verification
 
 Stage 1 Verifier. Dated entries, append-only. PASS / FAIL + ≤40-word reason (checked vs `## Original Idea` + `## Prior Art`).
 
-### YYYY-MM-DD — <PASS|FAIL>
-- …
+### 2026-11-10 — PASS
+- Intent: W1-W9 + every recorded answer covered, no scope creep. Prior art: 9 doc citations + 8 `file:line` refs spot-checked, overlap flagged, "extend, no second store" consistent. Tractability: RQ1-RQ10 all assigned.
+- Six minor defects fixed in the same pass: G3 Acid / Vocal hook marked unconfirmed, RQ9 no longer reopens the user's "Maximal" decision, 67 vs 33 CPU-h reconciled, RQ1 gains kick in / out, `backend.spec` line corrected, one wheel-size source.
 
 ---
 

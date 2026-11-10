@@ -14,7 +14,7 @@ If this index drifts from the file system, the file system wins — re-derive wi
 ## research/
 
 ### idea
-- [idea_sound-component-sorting.md](research/idea_sound-component-sorting.md) — Nach Klang-Bestandteilen sortieren (Bass, Hi-Hats, Bells, Melodie); 8 Wünsche in Wert / Ähnlichkeit / Kategorie, 10 Fragen an den User offen, Hürden gemessen in docs/LIBRARY_ANALYSIS_HANDOVER.md §9.2.1; Planung nur, kein Code vor dem Gate (2026-11-08)
+_(none)_
 
 ### drafting
 - [drafting_performance-overhaul.md](research/drafting_performance-overhaul.md) — Speed & efficiency overhaul; Stage-1 pre-filled from 9-agent perf investigation (48 hotspots: no list virtualization, unpaginated `/api/library/tracks`, unmemoized always-mounted views, blocking USB export+scan, event-loop waveform, 30s blocking startup); 16 OQs + 8-agent research plan queued for research-explore (2026-06-09). 3 backend quick wins shipped outside pipeline on `claude/perf-backend-quickwins` (mappings cache, import-dedup resolve memo, `/api/library/tracks?light=true`) — see Lifecycle (2026-10-11)
@@ -22,6 +22,7 @@ If this index drifts from the file system, the file system wins — re-derive wi
 - [drafting_toast-notification-ux.md](research/drafting_toast-notification-ux.md) — Toast-Notification UX — Limit, Position & Styling (dedupe/limit stacked toasts, top-right, squarer app-consistent style); Stage 1 still template. Ported from `claude/intelligent-volhard-08ac03@a74fada` (2026-10-11)
 
 ### exploring
+- [exploring_sound-component-sorting.md](research/exploring_sound-component-sorting.md) — Sort by sound components (bass, hats, melody, user-defined sound classes, song structure W9); Stage 1 PASS (10 RQs, user answered 11 questions); 5 research / measurement agents running; plan + test only until the gate (2026-11-10)
 - [exploring_db-write-lock-retrofit.md](research/exploring_db-write-lock-retrofit.md) — Close `_db_write_lock` coverage gaps; Option B (auto-wrap) committed; wave-2 verify → GAPS. Re-audit 2026-10-11: 3rd gap (`AnalysisDBWriter`) closed by callsite `db_lock` (`b018005`), batch comment per-track lock (`dc81255`); still open: mytag routes unlocked, format-swap row read outside lock, play-count resolve unlocked, circular drift guard; stays exploring_ (2026-10-11)
 - [exploring_mobile-companion-ranking-app.md](research/exploring_mobile-companion-ranking-app.md) — Mobile companion (PWA M1); wave-2 GAPS narrowed (CORS para corrected, 3/3 stale main.py refs refreshed+PASS, Phase-2 prereq now past GATE A); remaining blocker = OQ14+OQ7 user sign-off only; stays exploring_ (2026-05-29)
 - [exploring_linux-dj-workflow.md](research/exploring_linux-dj-workflow.md) — Linux end-to-end DJ workflow — SoundCloud → analysis → CDJ-3000 USB without Rekordbox; gap analysis 2026-05-13 (Win32-only USB detection, drive-letter paths, sidecar name case, no non-Windows Rekordbox path). Ported from `claude/quirky-jepsen-9bb229@a675ab9` (2026-10-11)
