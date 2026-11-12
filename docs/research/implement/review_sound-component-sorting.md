@@ -27,6 +27,7 @@ superseded_by: []
 - 2026-11-12 — `research/evaluated_` — research verified (adversarial 13 + citation PASS round 2 + research-verifier PASS round 2), recommendation written: Option A, Option B gated
 - 2026-11-12 — `implement/draftplan_` — Planner: Implementation Plan (16 steps: 12 build for Option A, 4 measure-only for B0), API / UX Surface, Telemetry
 - 2026-11-12 — `implement/draftplan_` — Threat-Modeller (21 threats), Migration-Path, Perf-Budget (probes in tmp/sc-perf) → plan revision 2 (17 steps), Test Plan (30 rows + 21 threat tests), Task Queue (14 build tasks + 4 measure-only)
+- 2026-11-12 — `implement/review_` — plan complete, handed to the Plan-Reviewer
 
 ## Original Idea (verbatim — never edit)
 
