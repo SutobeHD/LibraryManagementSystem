@@ -123,6 +123,9 @@ Candidates only — Stage 2 decides (RQ1, RQ2, RQ5, RQ6). **W9 (structure) and t
 
 11. **W9 ähnlicher Aufbau (neu 2026-11-08)** — „nach ähnlichen Segmenten sortieren, also nach ähnlichen Aufbauen vom Song“: alle Songs mit gleichem Aufbau, nach verschiedenen Aufbauten sortieren, oder zu einem Seed-Track Songs mit gleichem / ähnlichem Aufbau sehen. Signal liegt schon vor: Rekordbox-PSSI-Phrasenfolge für 4744 Tracks (Stage D) + LMS-Phrasen. Offen: Ähnlichkeit auf Phrasen-Kinds, Bar-Längen oder beidem? Zählt die Reihenfolge strikt (Sequenz) oder nur die Anteile (Intro-Länge, Chorus-Anzahl)?
 
+12. **Speicher (neu 2026-11-10)** — User: die Analyse soll „nicht alles eins zu eins speichern, was es analysiert hat“, sondern „ein paar Checkpoints“ bzw. Tags abhaken, „dann muss es nicht alles als Rohdaten speichern“. → Anforderung: keine Rohdaten (kein Audio, keine Stems, keine Spektrogramme) persistieren; gespeichert werden nur Häkchen / Kategorien, Zahlen und kompakte Fingerabdrücke. Messbasis 2026-11-10: Stems wären ≈ 1 TB (nie gespeichert); heutige Messzeilen 0,9-4 KB je Track als JSON; der bestehende App-Analyse-Cache liegt bei ≈ 1,4 MB je Track (87 MB für 63 Einträge, Waveforms + Beats). Offen: ob ausgewählte Ergebnisse zusätzlich als echte Rekordbox-My-Tags geschrieben werden sollen (wäre ein `master.db`-Write, bisher Non-goal).
+   → **Präzisierung tb 2026-11-10:** „nicht nur Filter“ — einzelne Float-Werte je Merkmal sind gewollt, „aber du musst ja nicht alles speichern“. Regel für den Plan: je Merkmal nur der **Endwert** (1 Float oder 1 Kategorie); Zwischenergebnisse (Frame-Reihen, Onset-Listen, Hüllkurven, Pitch-Kurven, Fenster-Embeddings) werden nie persistiert; ein kompakter Fingerabdruck nur dort, wo eine Abfrage ihn braucht (Ähnlichkeit), mit festem Byte-Budget je Track.
+
 Still open with the user: example track IDs (bells 5 + 5, hat pairs 5), the W7 category heard as "Unassed" (Acid?), W1 kick in or out, W9 sequence vs shares.
 
 ### Research questions (Stage 2 — one agent group each)
@@ -163,11 +166,114 @@ Stage 1 Verifier. Dated entries, append-only. PASS / FAIL + ≤40-word reason (c
 
 Stage 2 Synthesis-Agents (one per OQ). Dated subsections, append-only. ≤150 words each (soft). Never edit past entries — supersede.
 
-### YYYY-MM-DD — <label>
-- **Codebase:** … (`file:line` refs required)
-- **Web:** … (cited URLs required)
-- **Synthesis:** …
-- **Confidence:** high / medium / low
+Measurement outputs live in gitignored `tmp/` folders (named per Finding); every number below was produced on the user's library on 2026-11-10 unless marked "estimate".
+
+### 2026-11-10 — RQ3 structure similarity (W9)
+- **Codebase:** PSSI is not available at runtime — `get_all_tracks` returns `self.tracks.values()` (`app/live_database.py:673`), no `phrases` key, no route. The app only masks (`app/anlz_usb_export.py:72`); unmasking exists in `scripts/library_measure_anlz.py:57-62`. Reading phrases with bar lengths (EXT + DAT, read-only) = 284 s for 4744 tracks, 60 ms / track.
+- **Measurement (`tmp/sc-struct/`):**
+
+  | Question | Result |
+  |---|---|
+  | Exact same structure (bars) | 4636 distinct of 4744; largest group 4. Rekordbox analyses the **same audio copy** identically in only 47 % of 92 copy pairs |
+  | Label sequence only | 998 groups, largest 245 (`I U C U C O`); copies equal 68 % |
+  | Seed similarity, hybrid 0.5 · Needleman-Wunsch on runs + 0.5 · edit distance on 8-bar bins | copy found top-1 / top-10: 0.57 / 0.85; 5 ms with numba, 0.35 s pure Python |
+  | Absolute 8-bar-bin Hamming | best copy retrieval 0.77 / 0.92; 0.35 ms |
+  | Signal vs chance (top-10 neighbours) | genre match 0.295 vs 0.216; same artist 13× chance; mean ΔBPM 12.5 vs 15.3 |
+  | Mood | a silo — mid seeds get 86-93 % mid neighbours (base 16 %); 3 % of copy pairs flip mood |
+  | Excluded / flagged | 59 tracks (1.2 %: 21 without PSSI, 20 mixes, 24 very short, …) / 501 flagged (irregular phrases, no outro) |
+  | Clusters | none stable (silhouette 0.10-0.21) → rule-based families (breaks 0 / 1 / 2+ × entry before / from bar 32) |
+  | Column stability across copies | intro bars 91 %, main entry 89 %, drop after break 88 %, drop count 87 %, outro 93 % |
+  | Store size | 45-70 bytes / track binary; library < 1 MB |
+
+- **Web:** Rekordbox analyses phrases but Related Tracks criteria are BPM, Key, Matching, genre, rating, My Tag — no phrase criterion (https://cdn.rekordbox.com/files/20260807093645/rekordbox7.2.18_manual_EN.pdf). Structure comparison in MIR uses recurrence plots + compression distance (https://zenodo.org/records/1414876/files/Bello09.pdf); no source found that applies edit distance directly to label sequences → own construction.
+- **Synthesis:** W9 works with **no new dependency** and no audio decode. "Same structure" must be fuzzy; exact groups do not exist. Sequence **and** shares both matter (hybrid). Compare within one mood only. Needs a one-time PSSI read into a store and the unmask in `app/`.
+- **Confidence:** high for feasibility, cost, stability; medium for perceived quality (no user ground truth; kind → label mapping unverified against the Rekordbox UI).
+
+### 2026-11-10 — RQ7 storage
+- **Codebase:** sister schema `track_vectors(track_id INTEGER PK, mfcc_blob, chroma_blob, spectral_blob, dynamics_blob, vector_version, computed_at)` (`docs/research/implement/accepted_recommender-similar-tracks.md:447-462`), `VECTOR_VERSION` bump per new slice (`:484`), none of it built. `app/db_taste.py:42-44` already keeps a **neighbour table in the same file** `app_data/track_vectors.db` (CWD-relative path). Newest sidecar pattern: `app/artist_store/schema.py:41-43` (`SCHEMA_VERSION`, `migrate`), write + init locks (`:77-78`). `AnalysisCache` keys by path + mtime ±1 s + size + version (`app/analysis_cache.py:81-86`); track-id drift on re-import is a known risk (similar-tracks `:213`).
+- **Web:** not applicable — internal design question.
+- **Synthesis:** "extend, no second store" = a sibling table `track_components` in `track_vectors.db` (precedent: `db_taste`), not new BLOB columns on the unbuilt `track_vectors` table → no blocking on the sister plan's T-1 / T-2. Key: `track_id` + path + mtime + size + `components_version`; value columns as real columns (sortable in SQL), structure runs + component vectors as small BLOBs.
+- **Confidence:** high.
+
+### 2026-11-10 — RQ8 UI integration
+- **Codebase:** columns = `DEFAULT_COLUMNS` (`frontend/src/components/TrackTable.jsx:32-50`); sort = `t[key]` (`:252-276`); `customColumns` not sortable (`:521-530`); context menu takes `contextActions` (`:879-881`), "Analysieren…" sits at `:1001`. Typed `SORT_VALUES` with null-last only on `origin/feat/sortable-columns` (`8c30c89`, `frontend/src/utils/trackSort.js:114-156`), not in this branch. Extra per-track fields merge in `_light_track` (`app/main.py:1116-1124`). Filter-chip precedent: `frontend/src/components/RankingView.jsx:680-718` + `frontend/src/config/tagTaxonomy.js:21-33` (`COMPONENT_TAGS` already holds Melodic / Vocal / Synth → weak labels for W6 / W7 from the user's own tags).
+- **Web:** similarity search from a reference item is the pattern of sample tools — Sononym (https://www.sononym.net/). No DJ product found that sorts the library by stem properties; Rekordbox Track Suggestion offers BPM / Key / Vocal only (manual above).
+- **Synthesis:** value wishes → columns (needs `SORT_VALUES`, so `feat/sortable-columns` lands first or its 1 commit is included); similarity wishes → context action "Sort by similarity → Bass / Hats / Melody / Structure" returning ranked ids; categories + sound classes → filter chips. Component fields join the light list by lookup, never by mutating cached dicts.
+- **Confidence:** high (codebase); medium (UX — mockup decides at the gate).
+
+### 2026-11-10 — RQ4 value features without separation (W2 / W4 / W5 / W6)
+- **Codebase:** beat times + downbeat come from Rekordbox PQTZ via `app/anlz_safe.py:resolve_anlz_paths` + pyrekordbox (read-only); a per-track grid offset is needed (lag of the > 2 kHz novelty at beat ± 50 ms: lossless median +2.9 ms, MP3 −20.9 ms, down to −44.8). Whole-track bass share already exists in `app/analysis_extras.py` (E6): app `share_60` vs this measurement ρ 0.96, `share_120` ρ 0.998.
+- **Measurement (`tmp/sc-baseline/`, 40 tracks, seed 20261110, middle 120 s; retest on a second window; synthetic signals with known truth: onset F1 0.98-1.00, bass f0 43.61 vs 43.65 Hz):**
+
+  | Wish | Feature (definition) | Retest (Spearman) | Verdict |
+  |---|---|---|---|
+  | W2 | sub share E(< 60 Hz) / E(< 200 Hz) | 0.99 | usable |
+  | W2 | bass f0: lowest strong peak 30-150 Hz in the **between-kick** segments [0.45 T, 0.95 T] | same note 90 % | usable; matches the Rekordbox tonic in 28 % vs 8 % chance; octave errors not excluded |
+  | W2 | bass length `bass_between_db` = 40-120 Hz power between kicks vs on the kick | 0.98 | usable; hard vs soft genres p = 0.003. Decay time T20 saturates in 60 % of tracks → dropped |
+  | W4 | high-band percussive energy share (> 7 kHz) | 0.93 | usable as "amount by energy" |
+  | W4 | hats per beat (onset count) | 0.71 | coarse — threshold-dependent (rank ρ 0.54 between thresholds), false onsets median 21 % |
+  | W4 | 16th share / 8th off-beat share | 0.87 / 0.83 | coarse but plausible (genre contrast p = 0.007) |
+  | W4 | open-vs-closed proxy (onset decay > 120 ms) | 0.85 | **not hats-specific** — ρ −0.62 with percussive share: long decays come from sustained synth / noise |
+  | W5 | 16-step pattern, onset counts | — | useless (cosine own half 0.98, other track 0.94) |
+  | W5 | 16-step pattern, envelope flux | — | coarse (finds its own second half 50 % vs 2.5 % chance) |
+  | W6 | pitch salience / tonal share | 0.92 / 0.87 | coarse tonality measure |
+  | W6 | lead vs pad (note-change rate, harmonic ratio) | 0.93 | **fails** — note changes ≈ salience (ρ 0.93); harmonic ratio rates pads high, arpeggios low |
+
+  Kick vs bass by timing works: 97 % of tracks show kick → dip ≥ 6 dB → second low event; bass and kick share a note in only 17 %. Energy and density of hats are different things (ρ −0.32) — "amount" needs the user's definition. Cost per full track (estimate from the 120 s window): W2 + W4 + W5 = 2.5 s CPU → 3.3 CPU-h for 4633 files; with mid-band-only `hpss` for W6 11 CPU-h; peak RSS 0.8 GB per worker. Features of different wishes correlate |ρ| < 0.45 → separate dimensions.
+- **Web:** onset-pattern descriptors and their distances (Hamming / swap / edit, rotation via necklace matching) are standard (https://arxiv.org/pdf/2011.13062); open vs closed hi-hat is at best a decay heuristic even on an isolated hi-hat stem (https://arxiv.org/html/2509.24853v1).
+- **Synthesis:** without separation W2 is ready, W4 gives an energy amount + coarse grid shares, W5 and W6 need an isolated part. The 40 track IDs are the reusable evaluation set: 226233099, 171181540, 59909797, 263900410, 232522851, 173693726, 99993334, 234854714, 193773236, 84196723, 182493028, 250098442, 251227164, 208005786, 133510950, 201729773, 66017494, 35482110, 236271886, 77358634, 21821510, 77067584, 184439071, 160319163, 79654284, 54053174, 256582451, 158152506, 145488453, 147877823, 178042812, 67640377, 121889516, 125491500, 23326765, 67139382, 118061233, 133718939, 166789011, 63755724.
+- **Confidence:** high for stability + cost; medium for meaning (plausibility only — nothing was listened to, no user labels).
+
+### 2026-11-10 — RQ1 isolation by model-based source separation
+- **Codebase:** no separation code in `app/`; stems must never be persisted (non-goal, user decision 12).
+- **Measurement (`tmp/sc-bench/`, isolated env: torch 2.15.0+cu134, demucs 4.1.0, model `htdemucs`; 6 tracks 286-340 s: 2 AIFF, 2 MP3, 1 FLAC, 1 WAV, all hard techno / schranz):**
+
+  | Run | Speed (× realtime) | Per 5-min track | Memory |
+  |---|---|---|---|
+  | GPU RTX 2070 SUPER, shifts 1, overlap 0.25 | 33 | 9.1 s | 542 MB VRAM, 2.9 GB RSS |
+  | GPU, shifts 0, overlap 0.1 | 39 | 7.6 s | same |
+  | GPU, segment 4 s | 21 | 14.4 s | slower, no gain |
+  | CPU 16 threads, shifts 0 | 7.3 | 40 s wall, 631 CPU-s | 2.2 GB RSS |
+  | CPU 4 processes × 4 threads | 2.2 each → 8.8 aggregate | 34 s effective, 530 CPU-s | 2.2 GB RSS each |
+  | `htdemucs_6s` GPU | 33-42 | ≈ same | 581 MB VRAM |
+
+  **Quality on this genre:** the `bass` stem holds only 0.4-1.9 % of the mix energy in 4 of 6 tracks (16 % and 38 % in the other two) → htdemucs files the fused kick-bass rumble of hard techno under `drums`. Bass f0 on the bass stem (pYIN 4 kHz) still lands at 40-47 Hz with voiced 0.57-0.98 — on a residue. Hats from the `drums` stem vs the mix: onsets per beat differ −3 % to +29 % (5 of 6 within ±7 %) → separation barely changes hat density.
+- **Web:** Demucs code MIT, weights trained on MusDB — licence "not clear" per the maintainer; facebookresearch repo archived 2025-01-01, maintained fork adefossez v4.1.0 (https://github.com/adefossez/demucs, https://github.com/facebookresearch/demucs). An ONNX port of htdemucs exists (166-316 MB, onnxruntime only; parity is the vendor's claim — https://pypi.org/project/demucs-onnx/); Mixxx measured torch vs ONNX at SI-SDR 7.44 vs 7.43 dB (https://mixxx.org/news/2025-10-27-gsoc2025-demucs-to-onnx-dhunstack/). Hi-hat stems need a second drum separator, every candidate either non-commercial (LarsNet, CC BY-NC) or without a licence (MDX23C DrumSep) (https://github.com/polimi-ispl/larsnet, https://mvsep.com/algorithms/29).
+- **Synthesis:** separation is affordable on the GPU (≈ 10 h for the library, estimate) and slow but possible on CPU (≈ 45 h with 4 processes, estimate). It does **not** solve the hard-techno bass (W1): the kick-bass fusion defeats the 4-stem model, while the timing split on the Rekordbox grid (RQ4) already separates kick from bass in 97 % of tracks. For hats (W4 / W5) separation adds little. It is useful for **melody** (W6-W8): the `other` stem removes drums + bass before pitch tracking. Kick in vs out (W1 variants): kick = on-beat segment, bass = between-kick segment — both variants come from the timing split, no model needed.
+- **Confidence:** high for speed + memory; medium for quality (6 tracks, energy proxy, nothing listened to).
+
+### 2026-11-10 — RQ2 runtime packaging (torch vs ONNX vs none)
+- **Codebase:** one-file EXE (`backend.spec:175`), REQUIRED list `:56` with `SystemExit` on a miss `:80-82`, OPTIONAL list `:65`. Pins `requirements.txt:38` numpy **1.26.4**.
+- **Measurement:** the test env resolved **numpy 2.4.6** (pulled by demucs + transformers 5.22.2 + librosa 0.11) — incompatible with the project pin. GPU env 3.6 GB on disk, CPU-torch env 540 MB; weights htdemucs 81 MB, CLAP music 741 MB, CLAP unfused 586 MB, CREPE full 85 MB, basic-pitch 0.2 MB. torch 2.15.0+cu134 ran on the RTX 2070 SUPER (sm_75) without issue.
+- **Web:** torch CPU wheel 126.6 MB vs CUDA 1.99-2.75 GB (https://pypi.org/project/torch/#files, https://download.pytorch.org/whl/cu130/torch/); onnxruntime 14.9 MB, onnxruntime-directml 25.1 MB (any DX12 GPU, "sustained engineering") (https://pypi.org/project/onnxruntime/#files, https://onnxruntime.ai/docs/execution-providers/DirectML-ExecutionProvider.html); PyInstaller maintainers advise against one-file with torch (https://github.com/pyinstaller/pyinstaller/issues/4617); precedent for an optional runtime downloaded after install: Buzz (https://github.com/chidiwilliams/buzz).
+- **Synthesis:** torch inside the one-file EXE breaks the taste doc's gates (installer ≤ +400 MB, boot ≤ +5 s) and the numpy pin. Viable: (a) **onnxruntime** (15 MB, CPU; DirectML 25 MB for GPU) with ONNX models downloaded on first use; (b) torch as a separately installed optional runtime. Every model path stays OPTIONAL; the no-dependency tier always works.
+- **Confidence:** high.
+
+### 2026-11-10 — RQ5 user-definable sound classes (W3)
+- **Measurement:** CLAP (`laion/larger_clap_music`, `laion/clap-htsat-unfused`) embeds a 5-min track as 30 × 10 s windows in 0.7-0.8 s on GPU (1.0-1.8 GB VRAM) and 1.4-4.6 s on CPU (19-36 CPU-s), dim 512. **Zero-shot text prompts failed in the test env:** cosine audio↔text 0.00-0.01, all six prompts at p = 0.167 (uniform) on mix and `other` stem alike — most likely a checkpoint / transformers 5.22.2 loading mismatch (`logit_scale` read as 1.0), not a model verdict.
+- **Web:** LAION-CLAP code + weights CC0 / Apache-2.0 (https://github.com/LAION-AI/CLAP, https://huggingface.co/laion/larger_clap_music); audio-tower ONNX export 34-118 MB (https://huggingface.co/Xenova/clap-htsat-unfused); PANNs CNN14 (MIT code, CC-BY-4.0 weights, 527 AudioSet classes incl. bell, cowbell, hi-hat) (https://github.com/qiuqiangkong/audioset_tagging_cnn, https://research.google.com/audioset/ontology/cowbell.html); MERT is CC-BY-NC (https://huggingface.co/m-a-p/MERT-v1-95M). Few-shot in dense mixes is hard — DCASE 2021 few-shot winner F 38.4 % (https://arxiv.org/abs/2110.04474v2).
+- **Synthesis:** user classes = **few-shot from the user's example tracks** (prototype / logistic regression on window embeddings), not text prompts. Embeddings are cheap; the open risk is accuracy inside dense techno mixes. Must be measured on the user's bell / non-bell examples before it is promised.
+- **Confidence:** high for cost + licence; low for accuracy (no working zero-shot, no examples yet).
+
+### 2026-11-10 — RQ6 melody (W6 / W7 / W8)
+- **Measurement (30 s window of the `other` stem, 6 tracks):** torchcrepe 0.0.24 with Viterbi decoding returned **0 voiced frames** on every track (decoder issue); weighted-argmax decoding gave voiced 0.18-0.80, f0 250-370 Hz; GPU 0.4 s (tiny) / 1.8 s (full), CPU 1.0 s / 10.7-13.0 s. **basic-pitch ONNX** (onnxruntime only, no TensorFlow) ran in 0.17-0.32 s wall / 4.6 CPU-s per 30 s, 16-369 notes per window, median MIDI 56-79. pYIN at 4 kHz on the bass stem 1.6-2.0 s per 30 s.
+- **Web:** basic-pitch Apache-2.0, polyphonic note output, "works best on one instrument" (https://pypi.org/project/basic-pitch/); its `pip` install pulls TensorFlow on Windows py3.11 — the 0.2 MB `nmp.onnx` runs standalone (https://huggingface.co/daserge/basic-pitch-onnx). Transposition-invariant comparison: optimal transposition index on chroma, interval / contour sequences, local alignment (https://essentia.upf.edu/tutorial_similarity_cover.html). No source on 2-8-bar techno riffs → own construction.
+- **Synthesis:** melody = `other` stem → basic-pitch notes → beat-synchronous loop of 1-2 bars → interval sequence on the 16th grid → edit distance minimised over rotation (W8, transposition-invariant by construction). W6 "how melodic" = note activity of the lead register on the `other` stem. W7 categories (Lead / Acid / Vocal hook) need labels → the user's own tags `Melodic` / `Vocal` / `Acid` in `frontend/src/config/tagTaxonomy.js:12-33` are a weak-label source. Requires separation (RQ1) → model tier.
+- **Confidence:** medium for the pipeline; low for category accuracy.
+
+### 2026-11-10 — RQ9 cost of the "Maximal" level
+- **Measurement synthesis (estimates, 4633 files / 393 h):** no-dependency tier (W2 + W4 + W5 + W9) ≈ 3.3 CPU-h audio + 5 min PSSI read. Model tier: separation GPU ≈ 10 h or CPU ≈ 45 h; + basic-pitch on the `other` stem ≈ 3 h CPU (30 s windows ×4 per track); + CLAP windows ≈ 1 h GPU / 4-6 h CPU. Per-process RSS with features 3.8-5.6 GB → at most 8 parallel CPU workers in 62 GB.
+- **Synthesis:** "Maximal" is not a per-track analysis click (separation alone 8-40 s per track) — it is a **background job** over the library, resumable, with GPU used when present. The no-dependency features fit the existing "High" level (≈ +2.5 s per track). Per the user's answer 10 the numbers go back to the user before "Maximal" is fixed.
+- **Confidence:** medium (GPU and CPU numbers measured on 6 tracks, extrapolated).
+
+### 2026-11-10 — RQ10 evaluation protocol
+- **Synthesis:** three sets. (1) Stability set = the 40 tracks of RQ4 (two windows per track; retest Spearman ≥ 0.85 as acceptance). (2) Copy set = the 92 same-audio copy pairs of RQ3 — similarity metrics must retrieve the copy in top-10 (≥ 0.80 for W9). (3) User set, still to be supplied: per wish 10-20 track IDs (bells 5 + 5, hat pairs 5, "same melody" pairs 5, lead vs pad 5 + 5) → precision@10 per similarity slice, AUC per class. User tags `Melodic` / `Vocal` / `Acid` as an additional weak set. IDs only, never audio, in the repo.
+- **Confidence:** high (protocol); the user set is the blocker for every model-tier promise.
+
+### 2026-11-10 — storage budget (user decision 12)
+- **Measurement:** current JSON measurement rows 0.9-4 KB per track (`tmp/library-analysis/measure/`); structure runs 45-70 B; the existing app analysis cache ≈ 1.4 MB per track (87 MB for 63 entries, waveforms + beats).
+- **Synthesis:** per track store only end values (float / category) + small fingerprints where a similarity query needs them: structure ≈ 64 B, bass / hats / melody fingerprints ≤ 256 B each, one CLAP vector 512 × float16 = 1 KB. Budget **≤ 2 KB per track → ≤ 10 MB for the library**. Never: stems, frame series, onset lists, envelopes, pitch curves, per-window embeddings.
+- **Confidence:** high.
 
 ## Adversarial Findings
 
