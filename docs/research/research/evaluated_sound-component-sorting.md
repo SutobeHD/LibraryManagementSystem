@@ -3,7 +3,7 @@ slug: sound-component-sorting
 title: Nach Klang-Bestandteilen sortieren (Bass, Hi-Hats, Bells, Melodie)
 owner: tb
 created: 2026-11-08
-last_updated: 2026-11-10
+last_updated: 2026-11-12
 tags: [analysis, similarity, sorting, stems]
 related: [recommender-similar-tracks, recommender-taste-llm-audio]
 supersedes: []
@@ -24,6 +24,7 @@ superseded_by: []
 - 2026-11-08 — `research/idea_` — user answered OQ 1-10 (recorded inline), added W9 similar song structure; §D of the handover still open
 - 2026-11-10 — `research/drafting_` — user: "Ja, bis zum Gate" + "nix final bauen, nur planen und testen"; Stage 1 drafted interactively (remote routines dead since 2026-06)
 - 2026-11-10 — `research/exploring_` — drafted (scout + prior-art + risk-surface + worker + verifier PASS, 0 rework rounds), ready for explore
+- 2026-11-12 — `research/evaluated_` — research verified (adversarial 13 + citation PASS round 2 + research-verifier PASS round 2), recommendation written: Option A, Option B gated
 
 ## Original Idea (verbatim — never edit)
 
@@ -389,29 +390,46 @@ Stage 2 wave-2 verifier over whole research body. ≤120 words. PASS → `evalua
 - Adversarial concerns addressed: A1-A13 resolved or carried forward; A13 lacks the W9 hybrid script.
 - Closure: gaps 3-5 by the "verifier gap closure" entry; gaps 1-2 + the W9 hybrid script by a new no-dependency measurement (W1 / W5 fingerprints, own-half retrieval) — running.
 
+### 2026-11-12 (round 2) — PASS
+- Coverage of Open Questions: RQ1-RQ10, W1-W9 and decision 12 each have a Finding; W1 sound + line (kick in / out) and W5 timbre now measured, both added to the RQ10 user set.
+- Internal consistency: gap-closure entry supersedes RQ10 acceptance, RQ1 f0, RQ7 confidence; spot-checked numbers match `eval_tables.txt`, `eval_sim.txt`, `final_combos.txt`.
+- Citation quality: round 2 PASS; new entries add no new URL; t9 rerun reproduces all 23 lines.
+- Adversarial concerns addressed: A8, A13 resolved; A4, A5 narrowed (split-half rule, leak test); rest carried forward with stated residuals (selection bias, held-out pending, A3 rumble vs bassline).
+- Non-blocking notes, applied in Options: no-dependency audio cost = 3.3 + 3.6 ≈ 7 CPU-h (≈ +5.3 s per track at High); leak AUC range is 0.51-0.65 (PC1, decay alone 0.65), conclusion unchanged (LOO AUC 0.14-0.55, genre alone ≈ 0.70); the brickwall range includes one MP3 at 16.8 kHz and one m4a at 17.1 kHz; the 50-track rerun reused 40 tracks and tested parts → not held-out; ≈ 65 variants compared (W1 ≈ 45 + W5 ≈ 20); `tonal_share_mid` is "tonality", never "how melodic" (decision 6).
+
 ## Options Considered
 
-Stage 2 Synthesis-Agent (phase 2 PASS). Per option: sketch ≤5 bullets, pros, cons, S/M/L/XL, risk, prior-art match.
+### Option A — component values + similarity without a new dependency
+- Sketch: (1) read Rekordbox PSSI once (unmask moved into `app/`) → structure runs + 7 structure columns + W9 hybrid similarity within one mood; (2) audio extras at the existing **High** depth: W2 columns (sub share, bass between kicks, bass note), W4 columns (hats energy 5-12 kHz, 16th share, off-beat open share — "coarse" marked; `tonal_share_mid` only as "tonality", never "how melodic"), W1 bass fingerprint (sound + line, kick in / out, ≈ 270 B), W5 high-band timbre fingerprint (≈ 94 B); (3) sibling table `track_components` in `track_vectors.db` (platformdirs path), key incl. ANLZ mtime; (4) UI: sortable columns, context action "Nach Ähnlichkeit sortieren → Bass / Hats / Aufbau", structure-family filter.
+- Pros: covers W1, W2, W4, W5, W9 with numbers measured on the user's library; no dependency, no download; ≈ 7 CPU-h audio + 5 min PSSI for the whole library (+ ≈ 5.3 s per track at High); ≤ 0.5 KB per track (rule 12).
+- Cons: bassline vs kick rumble between kicks unproven (A3, 2026-11-12); several hat scalars only coarse or dropped (A4, 2026-11-12); W9 has no perceptual ground truth and needs ANLZ mtime in the key (A6 / A7, 2026-11-12); W5 is mostly high-band timbre, not the hat alone (W1 / W5 entry 2026-11-12); retrieval numbers carry selection bias. W3, W6, W7, W8 not covered.
+- Effort: L
+- Risk: low-medium
+- Prior-art match: [accepted_recommender-similar-tracks](../implement/accepted_recommender-similar-tracks.md) (extends its store), analysis-depth (PR #78, High level)
 
-### Option A — <name>
-- Sketch:
-- Pros:
-- Cons:
-- Effort:
-- Risk:
-- Prior-art match: <slug or "novel">
+### Option B — Option A + optional model tier on onnxruntime ("Maximal" background job)
+- Sketch: optional runtime onnxruntime (15 MB CPU / 25 MB DirectML) + models downloaded on first use: 4-stem separation (htdemucs ONNX, or Open-Unmix `umxhq` where the licence must be clean) → `other` stem → basic-pitch ONNX notes → W6 melodic-ness, W8 melody-line fingerprint (interval sequence, minimum over transpositions), W7 melody type from the user's labels; CLAP audio tower ONNX → pooled embedding + few-shot classes from the user's examples (W3). Runs as a resumable library job, GPU used when present.
+- Pros: adds W3, W6, W7, W8; torch-free, outside the one-file EXE, GPU optional on any DirectX 12 device; also an answer to the taste doc's torch gate.
+- Cons: ONNX / DirectML path, numpy 1.26 fit and weight hosts unmeasured (A9, 2026-11-12); htdemucs weight licence unclear (A9); CLAP zero-shot negative and few-shot untested, labels thin (A1 / A12, 2026-11-12); new classes need recomputed embeddings vs the 2 KB budget (A10, 2026-11-12); CPU-only ≈ 736-777 CPU-h (A8, 2026-11-12).
+- Effort: XL
+- Risk: high
+- Prior-art match: [inprogress_recommender-taste-llm-audio](../implement/inprogress_recommender-taste-llm-audio.md) (M2 torch gate)
 
-### Option B — <name>
-- Sketch:
-- Pros:
-- Cons:
-- Effort:
-- Risk:
-- Prior-art match: <slug or "novel">
+### Option C — Option A + separately installed torch runtime
+- Sketch: the measured torch-CUDA stack (demucs 4.1.0, transformers CLAP, basic-pitch ONNX) in its own environment, called as a subprocess worker.
+- Pros: the only model path measured on this GPU (≈ 13-15 h for the library).
+- Cons: 1.99-2.16 GB CUDA wheel, numpy 2.4 → a second Python environment beside the sidecar (A9, 2026-11-12); PyInstaller advises against one-file torch; same model-quality gaps as B (A1 / A12).
+- Effort: XL
+- Risk: high
+- Prior-art match: [inprogress_recommender-taste-llm-audio](../implement/inprogress_recommender-taste-llm-audio.md) (its Option B)
 
 ## Recommendation
 
-Stage 2 Synthesis-Agent (phase 2 PASS). ≤120 words. Which option + what blocks commit + which OQ each Finding answers.
+**Option A** is the build scope. It answers W1, W2, W4, W5, W9 with evidence from the user's library and no dependency. **Option B** follows as a gated phase: its first tasks only measure — ONNX vs torch parity + numpy 1.26 fit + DirectML speed on 10 tracks, a weight-licence check, few-shot accuracy on the user's examples — and nothing in B is built before those pass. Option C only if the ONNX probe fails.
+
+Blocks commit for A: `feat/sortable-columns` merged (RQ8); held-out set (fingerprint-confirmed copies + user pairs, RQ10); PSSI kind → label check on 3 tracks (RQ3); store on a platformdirs path (RQ7).
+
+OQ map: RQ1 separation not needed for W1 / W5, needed for W6-W8; RQ2 ONNX optional runtime; RQ3 hybrid within mood; RQ4 + gap closure = column list; RQ5 → B; RQ6 → B; RQ7 sibling table; RQ8 columns + similarity action; RQ9 "Maximal" = B job; RQ10 split-half + held-out + user pairs.
 
 ---
 
