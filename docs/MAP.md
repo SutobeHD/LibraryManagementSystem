@@ -421,6 +421,10 @@
 | `scripts/dev/sound_component_research/models/debug_clap2.py` | *(no module docstring)* |
 | `scripts/dev/sound_component_research/models/debug_clap3.py` | *(no module docstring)* |
 | `scripts/dev/sound_component_research/models/debug_crepe.py` | *(no module docstring)* |
+| `scripts/dev/sound_component_research/similarity/eval_sim.py` | Own-half retrieval of W1 / W5 fingerprint variants built from run_sim.py output. |
+| `scripts/dev/sound_component_research/similarity/run_sim.py` | Raw per-half descriptors for the W1 (bass sound + line) and W5 (hat sound) similarity fingerprints. |
+| `scripts/dev/sound_component_research/similarity/select_extra.py` | Seeded extra set of 10 lossy (mp3 / m4a) tracks with Rekordbox PQTZ grids, same pool rules as |
+| `scripts/dev/sound_component_research/similarity/w1_w5_combos.py` | Final W1 / W5 combinations on top of eval_sim.py (re-runs it silently). |
 | `scripts/dev/sound_component_research/structure/common.py` | W9 structure-similarity prototype: load phrases, build the three representations. |
 | `scripts/dev/sound_component_research/structure/extract_phrases.py` | Read-only: per-phrase PSSI entries for every track -> tmp/sc-struct/phrases.jsonl. |
 | `scripts/dev/sound_component_research/structure/t0_quality.py` | *(no module docstring)* |
@@ -432,6 +436,7 @@
 | `scripts/dev/sound_component_research/structure/t6_binned.py` | Metric (i'): edit distance on the 8-bar (or 4-bar) binned label string = shift-tolerant Hamming. |
 | `scripts/dev/sound_component_research/structure/t7_cluster.py` | Task 7: k-medoids / agglomerative on metric (iii) and (ii)/(i-b); do nameable families emerge? |
 | `scripts/dev/sound_component_research/structure/t8_rules.py` | Rule-based families + alternative drop definition + final column table. |
+| `scripts/dev/sound_component_research/structure/t9_hybrid.py` | Task 9: hybrid structure distance = 0.5 RLE-NW (t3_metrics) + 0.5 binned 8-bar edit distance |
 | `scripts/feature_map.py` | Feature registry plus a live overlay of which branch or worktree touches which feature. |
 | `scripts/library_analysis.py` | Whole-library analysis: which track fields are filled, how the Genre field is used, and how |
 | `scripts/library_measure_anlz.py` | Stage D of docs/LIBRARY_ANALYSIS_HANDOVER.md: read Rekordbox's own ANLZ analysis files. |

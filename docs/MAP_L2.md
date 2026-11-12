@@ -5766,6 +5766,88 @@ Shared helpers for the sc-bench measurement spike.
 
 *(no module docstring)*
 
+### `scripts/dev/sound_component_research/similarity/eval_sim.py`
+
+Own-half retrieval of W1 / W5 fingerprint variants built from run_sim.py output.
+
+- `arr()`
+- `bands()`
+- `snd_log32()`
+- `snd_lin24()`
+- `snd_pow32()`
+- `snd_dct12()`
+- `snd_scalar()`
+- `snd_dct_scalar()`
+- `snd_hrel()`
+- `snd_hrel_sc()`
+- `snd_both_dct()`
+- `rhy_e16()`
+- `rhy_e12()`
+- `rhy_flux16()`
+- `pit_H()`
+- `pit_C()`
+- `pit_C_abs()`
+- `pit_hist12()`
+- `pit_mode16()`
+- `hat_bands()`
+- `hat_post24()`
+- `hat_post12()`
+- `hat_nb24()`
+- `hat_pre24()`
+- `hat_diff24()`
+- `hat_decay()`
+- `hat_post24_decay()`
+- `hat_hi()`
+- `hat_7_20()`
+- `hat_flux16()`
+- `d_eucz()`
+- `d_cosc()`
+- `d_cos()`
+- `d_rot4()` — min over the 4 beat rotations of the 16-step axis (downbeat-free).
+- `d_oti()` — transposition-invariant: min over 12 pitch rotations of the 16x12 matrix (cosine).
+- `d_mode()`
+- `norm_med()`
+- `halves()`
+- `ranks_from_D()`
+- `summ()`
+- `dist_of()`
+- `report()`
+- `report_D()`
+- `genre_split()`
+- `shifted()`
+- `cutoff_hz()`
+- `loo_auc()`
+- `brickwall()`
+
+### `scripts/dev/sound_component_research/similarity/run_sim.py`
+
+Raw per-half descriptors for the W1 (bass sound + line) and W5 (hat sound) similarity fingerprints.
+
+- `rl()`
+- `Clock`
+- `  Clock.run()`
+- `full_beats()`
+- `seg_stack()`
+- `spectra_l()`
+- `seg_descriptors()` — Per-segment timbre scalars of the 30-250 Hz band + harmonic profile (h1..h6, dB re max).
+- `acf_f0_strength()`
+- `bass_sound()`
+- `bass_line()` — 16 grid steps per bar (downbeat-anchored from the Rekordbox beat number).
+- `hat_sound()`
+- `cutoff_psd()`
+- `analyse_half()`
+- `main()`
+
+### `scripts/dev/sound_component_research/similarity/select_extra.py`
+
+Seeded extra set of 10 lossy (mp3 / m4a) tracks with Rekordbox PQTZ grids, same pool rules as
+
+- `norm_genre()`
+
+### `scripts/dev/sound_component_research/similarity/w1_w5_combos.py`
+
+Final W1 / W5 combinations on top of eval_sim.py (re-runs it silently).
+
 ### `scripts/dev/sound_component_research/structure/common.py`
 
 W9 structure-similarity prototype: load phrases, build the three representations.
@@ -5856,6 +5938,17 @@ Rule-based families + alternative drop definition + final column table.
 
 - `post_break_drop()` — Start bar of the first Chorus run that comes after a Down run (Up in between allowed).
 - `family()`
+
+### `scripts/dev/sound_component_research/structure/t9_hybrid.py`
+
+Task 9: hybrid structure distance = 0.5 RLE-NW (t3_metrics) + 0.5 binned 8-bar edit distance
+
+- `nw_one()`
+- `nw_all()`
+- `binned()`
+- `ed_one()`
+- `ed_all()`
+- `score()`
 
 ### `scripts/feature_map.py`
 

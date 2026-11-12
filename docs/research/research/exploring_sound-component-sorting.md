@@ -313,6 +313,31 @@ Measurement outputs live in gitignored `tmp/` folders (named per Finding); every
 - **RQ1 (gap 5):** pYIN on the bass stem gave f0 40-47 Hz on **4 of 6** tracks; the other two gave 89.9 Hz and 186.1 Hz (voiced 0.16) — consistent with A2.
 - **RQ7 (gap 5):** confidence high → **medium** (A11: CWD-relative store path, no shared migration owner with the sister plan).
 
+### 2026-11-12 — W1 / W5 similarity fingerprints without separation (closes verifier gaps 1-2)
+- **Codebase:** reuses the RQ4 pipeline (Rekordbox grid + per-track offset, between-kick segments [0.45 T, 0.95 T], 5-12 kHz onsets). Scripts: `scripts/dev/sound_component_research/similarity/` (`run_sim.py`, `eval_sim.py`, `w1_w5_combos.py`, `select_extra.py`); W9 hybrid combiner `scripts/dev/sound_component_research/structure/t9_hybrid.py` reproduces all 23 lines of the earlier output (0.57 / 0.85) → A13 closed.
+- **Measurement (`tmp/sc-similarity/`, 40 tracks + 10 extra MP3 / M4A, own-half retrieval: halves of 60 s, 79 candidates, chance top-1 1.3 % / top-10 12.7 %; window B as robustness):**
+
+  | Fingerprint | Definition | Bytes | top-1 / top-10 (A) | (B) |
+  |---|---|---|---|---|
+  | W1 sound, kick out | log spectrum on the **f0-relative** axis (h · f0, h 0.5-6, step 1/8) of between-kick segments, < 250 Hz | 90 | 0.80 / 0.93 | 0.82 / 0.93 |
+  | W1 sound, kick in | same on on-beat segments, h 0.5-4 | 58 | 0.65 / 0.82 | 0.85 / 0.93 |
+  | W1 line | 16-step low-band flux + 12-step chroma of between-kick steps, minimum over 12 transpositions (OTI) | 176 | 0.82 / 0.90 | 0.95 / 1.00 |
+  | **W1 combined, kick out** | 0.5 sound + 0.5 line, distances median-normalised | 266 | **0.88 / 0.95** | 0.95 / 1.00 |
+  | W1 combined, kick in | same with kick-in sound | 234 | 0.85 / 0.93 | 0.95 / 1.00 |
+  | W5 hat sound + decay | mean log power of 46 ms frames after each 5-12 kHz onset, 24 bands + decay profile | 62 | 0.88 / 0.93 | 0.95 / 0.97 |
+  | W5 combined | hat sound + `flux16` pattern | 94 | 0.85 / 0.88 | 0.93 / 0.95 |
+
+  - **Absolute spectra measure notes, not timbre:** shifting A2 by +2 semitones drops a 32-band log spectrum from 0.95 / 0.95 to 0.07 / 0.50 → only the f0-relative spectrum is a sound fingerprint, and it is transposition-invariant.
+  - **Genre (A3):** W1 combined is not worse for House / Trance (0.91 / 0.91 window A, 0.91 / 1.00 B, n = 11) than for hard styles (0.78 / 0.94, 0.94 / 1.00, n = 18); the sound part alone drops to 0.64 for House / Trance in window B — hint only at n = 11. Retrieval measures repeatability, not whether "between the kicks" catches a bassline or kick rumble (A3 stays open).
+  - **W5 control:** frames **before** each onset (mix background only) already reach 0.62 / 0.80 → the hat fingerprint is largely the track's 5-12 kHz timbre, not the hat alone. The pattern part adds nothing.
+  - **Quality leak (A5):** 22 lossy / 28 lossless; 5-12 kHz fingerprint vs lossy AUC 0.51-0.59, vs measured cutoff ρ 0.00-0.06 → **no measurable leak** in 5-12 kHz (7-20 kHz control ρ −0.36). Only 3 files with cutoff ≤ 17 kHz → the lowest tier is barely tested. Side finding: a 20.1-20.4 kHz brickwall in 10 / 12 MP3, 3 / 10 AAC and **3 / 25 AIFF**.
+  - **Scalars, split-half (A | B):** bass harmonic share 0.88 | 0.88 (only one ≥ 0.85 in both); centroid / f0 0.85 | 0.75; flatness 0.83 | 0.90; hat T10 0.85 | 0.84; open share 0.86 | 0.78; hats per beat (5-12 kHz) 0.55 | 0.45.
+  - **Cost:** 1.09 CPU-s per 120 s window (W1 sound 0.23 + line 0.28 + W5 0.41 + shared grid offset 0.19) → 2.8 CPU-s per full track, ≈ 3.6 CPU-h for the library (estimate, decode excluded). float16 / uint8 storage changes nothing.
+  - **Selection bias:** ≈ 45 variants compared on the same 40 tracks, best chosen afterwards → numbers are optimistic; a 50-track rerun (chance 1 / 99) gave W1 sound 0.84 / 0.92, line 0.78 / 0.88, hat 0.84 / 0.92. Must be re-confirmed on a held-out set + the user's "same bass" / "same hats" pairs.
+- **Web:** transposition handling by minimising over the 12 chroma rotations = optimal transposition index (https://essentia.upf.edu/reference/std_ChromaCrossSimilarity.html); f0-relative spectral axis = own construction.
+- **Synthesis:** **W1 "same bass" (sound + line, kick in and out) works without separation** at ≈ 270 bytes per track. W5 "same hats" works as a **high-band timbre + decay** similarity; calling it "hat sound" overstates it. Add to the RQ10 user set: 5 "same bass" pairs and 5 "same hats" pairs.
+- **Confidence:** medium-high for W1 (repeatability, transposition invariance, genre-robust); medium for W5 (mix-background share); both pending held-out confirmation.
+
 ## Adversarial Findings
 
 Stage 2 Adversarial-Agent (phase 2). Devil's-advocate — what could go wrong, what assumptions are weak, what dependencies betray us. ≤120 words. Append-only.
