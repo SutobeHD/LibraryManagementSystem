@@ -25,6 +25,7 @@ superseded_by: []
 - 2026-11-10 — `research/drafting_` — user: "Ja, bis zum Gate" + "nix final bauen, nur planen und testen"; Stage 1 drafted interactively (remote routines dead since 2026-06)
 - 2026-11-10 — `research/exploring_` — drafted (scout + prior-art + risk-surface + worker + verifier PASS, 0 rework rounds), ready for explore
 - 2026-11-12 — `research/evaluated_` — research verified (adversarial 13 + citation PASS round 2 + research-verifier PASS round 2), recommendation written: Option A, Option B gated
+- 2026-11-12 — `implement/draftplan_` — Planner: Implementation Plan (16 steps: 12 build for Option A, 4 measure-only for B0), API / UX Surface, Telemetry
 
 ## Original Idea (verbatim — never edit)
 
@@ -437,25 +438,57 @@ OQ map: RQ1 separation not needed for W1 / W5, needed for W6-W8; RQ2 ONNX option
 
 ## Implementation Plan
 
-Stage 3 Planner-Agent. Concrete enough that someone else executes without re-deriving.
-
 ### Scope
-- **In:** …
-- **Out:** …
+- **In (build, Option A):** W1 bass similarity (sound + line, kick out / in), W2 bass-depth columns, W4 hat columns (coarse-marked), W5 high-band hat-timbre similarity, W9 structure columns + families + similarity; one store; two resumable background scans; a read API; three UI surfaces; an evaluation harness whose acceptance gates the UI.
+- **In (measure only, Option B phase B0):** ONNX parity + numpy 1.26 fit + DirectML speed; weight licence / host table; few-shot + melody probe on the user's examples; a follow-up plan for the model tier back to the gate.
+- **Out:** any model-tier code in `app/`; writes to `master.db`, ANLZ, audio files or tags (Rekordbox MyTag export stays an open user question, decision 12); stems or raw series on disk (decision 12); changes to the light track list (A11); W3 / W6 / W7 / W8 in the UI; replacing `recommender-similar-tracks`.
 
 ### Step-by-step
-1. …
+1. **Store + path.** `app/track_store_paths.py`: `track_vectors_db_path()` = platformdirs user-data dir (pattern `app/auth_db.py:36-52`); first call copies a legacy CWD `app_data/track_vectors.db` once (never deletes). Switch `app/db_taste.py:40-46` to it. `app/component_store.py`: table `track_components` in that file — `SCHEMA_VERSION` + `migrate()` (pattern `app/artist_store/schema.py:43`, `:290`), write lock, WAL. Row key: `track_id` + audio path + audio mtime + size + ANLZ mtime + `components_version`. Columns = end values only (floats / ints / short strings); fingerprints as small BLOBs (≤ 0.5 KB per row, decision 12).
+2. **PSSI in the app.** `app/anlz_phrases.py`: read EXT (+ DAT grid) `"rb"` via `app/anlz_safe.py:137` `resolve_anlz_paths` + pyrekordbox; unmask = inverse of `mask_pssi` (`app/anlz_usb_export.py:72`); tolerant tag parse; returns mood + phrases (kind, start beat, bars). Port of `scripts/library_measure_anlz.py:90-126` + `scripts/dev/sound_component_research/structure/extract_phrases.py`.
+3. **Structure features.** `app/structure_features.py`: mood-specific label alphabet, run-length runs, 7 columns (intro bars, main entry bar, drop-after-break bar, drop count, break share — high mood only, outro bars, total bars), rule family (breaks 0 / 1 / 2+ × entry before / from bar 32, short, verse type), exclusion flags (no PSSI, mix > 60 phrases or > 15 min, < 48 bars or < 90 s, PSSI end vs grid > 64 beats), hybrid distance 0.5 · Needleman-Wunsch on runs + 0.5 · edit distance on 8-bar bins, numba-jitted (`requirements.txt:40`), same mood only. Port of `structure/t3_metrics.py`, `t6_binned.py`, `t8_rules.py`, `t9_hybrid.py`.
+4. **Structure scan job.** `app/component_jobs.py` + routes: read PSSI for every track with an ANLZ path, compute step-3 values, upsert the store; resumable (skip rows whose ANLZ mtime is unchanged); single-flight; thread pool (I/O-bound, pure Python parse).
+5. **Audio component features.** `app/component_features.py`: beat grid from Rekordbox PQTZ (read-only; engine beats as fallback) + per-track grid offset; analyse the **middle 120 s** exactly as measured (whole-track aggregation only after step-8 evidence). W2: `sub60_of_200`, `sub60_of_total`, `bass_between_db`, bass note (mean-spectrum f0). W4 (coarse-marked): hats energy 5-12 kHz, 16th share, off-beat open share. W1: f0-relative sound fingerprint kick out (90 B) + kick in (58 B), line fingerprint (176 B). W5: hat timbre + decay (62 B) + `flux16`. Port of `baseline/features.py` + `similarity/run_sim.py`. No new dependency.
+6. **Wire-up.** (a) High depth: after extras (`app/analysis_engine.py:2617`, branch `:2470`) call step 5 and upsert the store — never into `AnalysisCache`. (b) Library audio scan job: ProcessPool ≤ 8 workers, `max_tasks_per_child`, per-track deadline, resumable by row key (runner pattern of `scripts/library_measure_audio.py`), own single-flight (no `master.db` write, so not `_claim_analysis_db_run` `app/main.py:5849`).
+7. **Read API.** Values for many ids; similarity for one seed per kind (`bass`, `bass_kick`, `hats`, `structure`); excluded tracks returned with a reason; limits on ids / results.
+8. **Evaluation harness = acceptance gate.** `scripts/eval_components.py`: split-half stability (≥ 0.85 column, 0.80-0.85 coarse, else hidden), own-half retrieval, **held-out** copy set confirmed by Chromaprint (`app/analysis_extras.py` `fingerprint_file`, fpcalc installed), user pairs from `docs/research/data/sound-component-eval.toml` (IDs only). UI tasks (9-11) merge only after a passing report is committed under `docs/research/data/`.
+9. **UI columns** (needs `feat/sortable-columns` merged): component columns in the column picker, hidden by default; values fetched from the values endpoint and joined by id in the frontend (not via the light list); `SORT_VALUES` entries, null last; coarse columns carry a marker.
+10. **UI similarity.** Context entry "Nach Ähnlichkeit sortieren → Bass (ohne Kick) / Bass (mit Kick) / Hats / Aufbau" via `contextActions` (`frontend/src/components/TrackTable.jsx:879-881`); the table switches to "ähnlich zu <Track>" order with a dismissible chip and a distance column.
+11. **UI structure.** Structure string as tooltip / column; family filter chips.
+12. **Docs.** FILE_MAP, backend / frontend index, CHANGELOG, feature registry, handover.
+13. **B0-1 ONNX probe** (isolated env pinned to numpy 1.26.4): htdemucs ONNX, basic-pitch ONNX, CLAP audio tower ONNX — parity vs the torch runs (stem energy / SI-SDR, notes, embeddings), CPU + DirectML speed on 10 tracks. Results appended to this doc; no `app/` code.
+14. **B0-2 licence + host table** for every candidate weight (official host vs third party, commercial use).
+15. **B0-3 few-shot + melody probe** on the user's examples (bells 5 + 5, lead vs pad 5 + 5, melody pairs 5, W7 labels) — blocked until the user supplies IDs.
+16. **B0-4** write the model-tier plan as a follow-up doc and bring it to the approval gate.
 
 ### Files touched
-Path + role (read / edit / new):
-- `<path>` — <role> — <why>
+- `app/track_store_paths.py` — new — one resolved path for `track_vectors.db`
+- `app/db_taste.py` — edit — use the shared path (`:40-46`)
+- `app/component_store.py` — new — `track_components` table, schema, migrate, upsert / read
+- `app/anlz_phrases.py` — new — read-only PSSI reader with unmask
+- `app/structure_features.py` — new — runs, columns, families, hybrid distance
+- `app/component_features.py` — new — W1 / W2 / W4 / W5 from audio + grid
+- `app/component_jobs.py` — new — structure scan + audio scan jobs
+- `app/analysis_engine.py` — edit — High-depth hook after extras (`:2617`)
+- `app/main.py` — edit — 6 routes + request models (via `route-architect`)
+- `scripts/eval_components.py` — new — acceptance harness
+- `docs/research/data/sound-component-eval.toml` — new — user pairs + held-out IDs (IDs only)
+- `frontend/src/api/api.js` — edit — component helpers
+- `frontend/src/components/TrackTable.jsx` — edit — columns, context entries, similarity mode
+- `frontend/src/utils/trackSort.js` — edit (after `feat/sortable-columns` lands) — `SORT_VALUES` entries
+- `frontend/src/components/componentSimilarity.js` — new — similarity mode state + chip
+- `frontend/src/config/constants.js` — edit — limits, column ids
+- `tests/test_component_store.py`, `tests/test_anlz_phrases.py`, `tests/test_structure_features.py`, `tests/test_component_features.py`, `tests/test_component_jobs.py`, `tests/test_component_routes.py` — new
+- `docs/FILE_MAP.md`, `docs/backend-index.md`, `docs/frontend-index.md`, `CHANGELOG.md`, `docs/features/analysis.toml` — edit
 
 ### Testing
-High-level (see `## Test Plan` for concrete pytest/cargo cases):
-- …
+- Unit tests on synthetic PSSI bytes, synthetic signals with known bass f0 / hat grid, and synthetic structure sequences; store migration tests; route tests with the real auth dependency; acceptance via the step-8 harness on the user's library (read-only). Concrete rows in `## Test Plan`.
 
 ### Risks & rollback
-- …
+- Risk: bassline vs kick rumble (A3) and selection bias → step 8 gates the UI; failing features stay hidden.
+- Risk: `feat/sortable-columns` not merged → step 9 waits; steps 1-8, 10, 11 do not depend on it.
+- Risk: PSSI kind → label mapping wrong → structure strings mislabelled; check 3 tracks against the Rekordbox UI before step 11.
+- Rollback: everything is additive — drop the routes / UI entries and delete `track_components` (or the whole file copy); `master.db`, ANLZ and audio are never written.
 
 ## Threat Model
 
@@ -507,31 +540,32 @@ Stage 3 Perf-Budget-Agent. Numbers, not "fast". If feature has no perceptible ru
 
 ## API / UX Surface
 
-Stage 3 Planner-Agent. What is added / changed at every layer the user / frontend touches.
-
 ### Backend (FastAPI)
-- New routes: `<METHOD> <path>` — auth: `require_session`? rate-limited? lock?
-- Changed routes: `<METHOD> <path>` — what changed in request/response shape
+- New routes (all via `route-architect`; ids are track ids, never paths):
+  - `POST /api/components/structure/scan` — auth `require_session`; body `{ force?: bool }` → `{ job_id }`; 409 while a structure scan runs.
+  - `GET /api/components/structure/scan/{job_id}` → `{ state, done, total, errors, eta_s }`.
+  - `POST /api/components/audio/scan` — auth `require_session`; body `{ track_ids?: [str] (≤ 5000), force?: bool, workers?: 1-8 }` → `{ job_id }`; 409 while an audio scan runs.
+  - `GET /api/components/audio/scan/{job_id}` → same status shape.
+  - `GET /api/components/values?ids=<csv, ≤ 5000>` → `{ tracks: { <id>: { bass_note, sub_share_200, sub_share_total, bass_between_db, hats_energy_db, hats_16th_share, hats_open_offbeat_share, intro_bars, main_entry_bar, drop_after_break_bar, drop_count, break_share, outro_bars, total_bars, structure, family, mood, coarse: [..], flags: [..] } } }`.
+  - `GET /api/components/similar?track_id=&kind=bass|bass_kick|hats|structure&limit=<≤ 500>` → `{ seed, kind, results: [{ id, distance }], excluded_reason? }`.
+- Changed routes: none (the light track list stays as it is).
 
 ### Frontend (React)
-- New components / hooks / IPC calls (axios + invoke):
-- Changed components: …
+- New: `frontend/src/components/componentSimilarity.js` (similarity mode state + "ähnlich zu <Track>" chip); api helpers `getComponentValues(ids)`, `getSimilar(trackId, kind, limit)`, `startComponentScan(kind, opts)`, `getComponentScan(kind, jobId)` in `frontend/src/api/api.js`.
+- Changed: `TrackTable.jsx` — component columns in the column picker (hidden by default, coarse marker), context entry "Nach Ähnlichkeit sortieren → Bass (ohne Kick) / Bass (mit Kick) / Hats / Aufbau", distance column in similarity mode, structure tooltip, family filter chips; `trackSort.js` `SORT_VALUES` entries (after `feat/sortable-columns`); Settings → Analysis: two "Scan" buttons with progress (structure, audio).
 
 ### Tauri (Rust commands)
-- New `#[tauri::command]`s: …
-- Changed signatures: …
+- None.
 
 ### CLI / sidecar logs
-- New stdout markers (e.g. `LMS_TOKEN=`-style): …
+- No new stdout markers; log lines only (see Telemetry).
 
 ## Telemetry
 
-Stage 3 Planner-Agent. How we know it works after ship. ≤80 words. Otherwise: **"N/A — no runtime behavior to observe."**
-
-- Log markers (`logger.info("op=… …")`): …
-- Counters / timing: …
-- Health-endpoint surface: …
-- User-visible status (toast, statusline, dashboard tile): …
+- Log markers: `op=components_structure_scan done=N total=M skipped=S errors=E elapsed_s=…`, `op=components_audio_scan done=N total=M errors=E timeouts=T elapsed_s=… workers=W`, `op=components_similar kind=K n=N elapsed_ms=…`, `op=components_values n=N elapsed_ms=…`. Never paths at INFO, never tokens.
+- Counters / timing: per-job done / errors / timeouts / ETA in the job status; per-track CPU seconds in the audio job log at DEBUG.
+- Health-endpoint surface: none.
+- User-visible status: progress bar + finish toast for both scans in Settings → Analysis; "nicht analysiert" placeholder in empty component cells; excluded-reason tooltip in similarity mode.
 
 ## Test Plan
 

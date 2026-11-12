@@ -29,7 +29,6 @@ _(none)_
 - [exploring_waveform-overhaul.md](research/exploring_waveform-overhaul.md) — Waveform Overhaul: more display types + multi-band (3→6+) rendering + fixed color palettes, always presets; inspired by deadmau5 DJ software. Idea-verified 2026-05-20; legacy `ideagate_` → `exploring_`, Findings empty. Ported from `claude/keen-galileo-61576d@d124ef4` (2026-10-11)
 - [exploring_soundcloud-collection-sync.md](research/exploring_soundcloud-collection-sync.md) — SoundCloud Collection Sync: likes + playlists mirrored into Rekordbox, incremental download, SC genre/`tag_list` routed into the user's Genres smart-list tree; follow-up carved out of `accepted_library-artist-hub` (`collection_kind`). Stage 1 interactive + Idea-Verifier PASS; wave-1 codebase surface banked (half-built `SoundCloudSyncEngine` to absorb, likes capped at 500 on a deprecated endpoint, `tag_list` dropped, live mode already parses RB smart-list rules); 17 OQs (3 empirical, owner machine), 5-agent plan → ready for `research-explore` (2026-09-16)
 ### evaluated
-- [evaluated_sound-component-sorting.md](research/evaluated_sound-component-sorting.md) — Sort by sound components; explore done (11 findings, 13 adversarial, citation + research-verifier PASS round 2); Recommendation = Option A (no-dependency W1 / W2 / W4 / W5 / W9, measured on the user's library) + gated Option B (ONNX model tier for W3 / W6-W8, measure-only first) (2026-11-12)
 - [evaluated_library-format-converter.md](research/evaluated_library-format-converter.md) — Library-wide format converter; wave 2 closed all 3 blockers (proof script `fdb461c`, AAC priming empirical A/B sample-identical, path-write via direct rbox `update_content`), 6 adversarial concerns addressed/carried-forward, citation MIXED non-load-bearing, V-PASS round 2, 3 options (A/B/C) + Recommendation = Option A (full engine, sister-doc unblocks) with 4 commit-blockers for draftplan_. **Code shipped in `2fc2720`, `4dbe461`, `408452b` (on `main`; MP3 320k-CBR fix `2572f8a` on PR #58); awaiting owner sign-off -> archived/implemented_** (2026-10-11)
 - [evaluated_soundcloud-persistent-login.md](research/evaluated_soundcloud-persistent-login.md) — Persistent SoundCloud login; Recommendation = Option A (backend-owned silent refresh), built as artist-hub T-19 (`app/soundcloud_auth.py`). **Code shipped in `cb414fa`, `52771e9` (PR #58, not yet on `main`); awaiting owner sign-off -> archived/implemented_** (2026-10-11)
 - [evaluated_metadata-genre-normalization.md](research/evaluated_metadata-genre-normalization.md) — Unify genre spelling/case variants; today genre = free string, exact+case-sensitive dedup, no normalisation. Recommendation = Option B: canonical vocab + runtime fuzzy (`rapidfuzz`, needs Schicht-A approval) + growing alias map (no pre-stored variants). Phased M0 detect-only → M1 merge+undo → M2 write-back + opt-in Discogs-CC0 seed. Ported from `claude/genre-normalization-research-v8nsgu@7b463c3` (2026-10-11)
@@ -42,7 +41,7 @@ _(none)_
 ## implement/
 
 ### draftplan
-_(none)_
+- [draftplan_sound-component-sorting.md](implement/draftplan_sound-component-sorting.md) — Sort by sound components; Stage 3 in progress: 16-step plan (Option A build: bass / hats / structure values + similarity, no new dependency; B0 measure-only model probes), 6 new routes, 3 UI surfaces (2026-11-12)
 
 ### review
 _(none)_
