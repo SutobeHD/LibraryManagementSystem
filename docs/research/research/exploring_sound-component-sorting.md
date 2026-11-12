@@ -296,6 +296,23 @@ Measurement outputs live in gitignored `tmp/` folders (named per Finding); every
   - RQ3 note: the app's **own** phrase analysis exists in analysis results (`app/main.py:1113` drops a `phrases` field from light lists); only Rekordbox PSSI is missing at runtime.
 - **Confidence after corrections:** W9 high (feasible, cheap) / medium (perceived quality); W2 medium-high; W4 medium (energy) / low (counts, open-closed); W5 low; W6-W8 medium pipeline / low categories; W3 low.
 
+### 2026-11-12 — citation round 2 fix (supersedes two clauses of the 2026-11-12 corrections entry)
+- RQ2: onnxruntime-directml 1.24.4 = 25.1 MB (https://pypi.org/project/onnxruntime-directml/#files); it **requires a DirectX 12 capable device** (https://onnxruntime.ai/docs/execution-providers/DirectML-ExecutionProvider.html) — the PyPI page states no device requirement.
+- RQ9 / storage: CLAP on CPU = 6-47 CPU-h for the library (36.41 CPU-s × 4633 / 3600 = 46.9), not 6-46.
+
+### 2026-11-12 — verifier gap closure: acceptance, total cost, leftovers (supersedes RQ10 acceptance, RQ1 bass-stem f0 range, RQ7 confidence)
+- **RQ10 acceptance (gap 3):** stability is judged on **non-overlapping split halves only** (Spearman A1 vs A2 ≥ 0.85 = column; 0.80-0.85 = "coarse" with a visible marker; < 0.80 = not shipped as a scalar). From `tmp/sc-baseline/eval_tables.txt`:
+
+  | Verdict | Features (split-half ρ) |
+  |---|---|
+  | column | `sub60_of_200` 0.92, `sub60_of_total` 0.89, `bass_between_db` 0.95, bass f0 **mean-spectrum** variant 0.89 (same note ± 0.5 st 88 %), `perc_frac_7k` 0.88, 16th share 0.87, off-beat open share 0.85, `tonal_share_mid` 0.91 |
+  | coarse | hats energy 5-12 kHz 0.83 (chosen band, A5), between-kick f0 0.81 (→ use the mean-spectrum f0 instead), bass dip 0.83, sustain 0.82, open share 0.80 |
+  | dropped as scalar | hats per beat 0.69, off-beat share 0.47, triplet share 0.72, off-beat flux 0.68, hat decay 0.78, re-rise 0.75, tonality 0.62 |
+  | stable but implausible | `hpr_mid` 0.88 — rates pads above arpeggios (RQ4) → not shipped |
+- **"Maximal" total (gap 4, for the user's answer 10; estimates from measured per-track figures):** no-dependency tier 3.3 CPU-h (W2 + W4 + W5) or 11 CPU-h with mid-band `hpss`, + 5 min PSSI read for W9. **GPU path** (measured on torch-CUDA only, A9): separation 9.1 s × 4633 ≈ 11.7 h at shifts 1 (9.8 h at shifts 0) + basic-pitch 23.8 CPU-h (runs on CPU workers alongside) + CLAP ≈ 1 h GPU → ≈ 13-15 h wall. **CPU-only path:** separation ≈ 706 CPU-h + basic-pitch 23.8 + CLAP 6-47 ≈ **736-777 CPU-h**, ≈ 50 h wall at the measured 8.8× realtime aggregate.
+- **RQ1 (gap 5):** pYIN on the bass stem gave f0 40-47 Hz on **4 of 6** tracks; the other two gave 89.9 Hz and 186.1 Hz (voiced 0.16) — consistent with A2.
+- **RQ7 (gap 5):** confidence high → **medium** (A11: CWD-relative store path, no shared migration owner with the sister plan).
+
 ## Adversarial Findings
 
 Stage 2 Adversarial-Agent (phase 2). Devil's-advocate — what could go wrong, what assumptions are weak, what dependencies betray us. ≤120 words. Append-only.
@@ -328,6 +345,10 @@ Stage 2 Citation-Verifier (phase 2). Checks every `file:line` ref + URL in `## F
 - Unreachable: none. Numbers: 6 / 6 spot-checked match.
 - All 11 defects restated with corrected refs in the 2026-11-12 corrections entry (the 2026-11-10 entries stay as written, per append-only).
 
+### 2026-11-12 (round 2) — PASS after one fix
+- PASS: every `file:line` ref, URL and corrected number in the 2026-11-12 corrections entry (wheel HEADs 1,990,594,787 B / 2,162,017,469 B; basic-pitch 23.84 CPU-h; CPU separation 528.44 CPU-s for 294.2 s at 52.2-74.4 % load; CLAP unfused `logit_scale` 18.7, "acid bassline" top on 6 / 6 mixes).
+- FAIL → fixed: DirectML device requirement cited to the wrong page; replaced by the verifier's own checked source in the "citation round 2 fix" entry. Rounding 6-46 → 6-47 CPU-h fixed there too.
+
 ---
 
 > ↓ Stage 2 phase 2 (autonomous; no user gate) — `research-explore` deepens findings, runs Adversarial + Citation verifiers, then the Research-Verifier gates the whole body before Options-Synthesis advances the doc to `evaluated_`.
@@ -336,11 +357,12 @@ Stage 2 Citation-Verifier (phase 2). Checks every `file:line` ref + URL in `## F
 
 Stage 2 wave-2 verifier over whole research body. ≤120 words. PASS → `evaluated_`; gaps → more Findings.
 
-### YYYY-MM-DD — <PASS|GAPS>
-- Coverage of Open Questions: …
-- Internal consistency: …
-- Citation quality (cross-ref `## Citation Quality`): …
-- Adversarial concerns addressed: …
+### 2026-11-12 — GAPS
+- Coverage of Open Questions: RQ1-RQ10 each answered; W2-W9 + decision 12 covered. W1 "same bass" (sound + line) has no similarity fingerprint or retrieval test; W5 hat sound unmeasured.
+- Internal consistency: corrections cleanly supersede RQ9 "3 h", RQ5 "loading mismatch", "97 %", "90 %". Unsuperseded: RQ1 bass-stem f0 range; RQ10 acceptance not restated as split-half; no corrected "Maximal" total.
+- Citation quality: round 2 PASS.
+- Adversarial concerns addressed: A1-A13 resolved or carried forward; A13 lacks the W9 hybrid script.
+- Closure: gaps 3-5 by the "verifier gap closure" entry; gaps 1-2 + the W9 hybrid script by a new no-dependency measurement (W1 / W5 fingerprints, own-half retrieval) — running.
 
 ## Options Considered
 
