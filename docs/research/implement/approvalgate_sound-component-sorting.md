@@ -32,6 +32,7 @@ superseded_by: []
 - 2026-11-12 — `implement/review_` — all 12 reasons applied (plan revision 3), back to the Plan-Reviewer
 - 2026-11-12 — `implement/rework_` — Plan-Reviewer round 2 REWORK (7 reasons: stale text, unmeasured on-beat claim, P27 + window row, cancel UI, single-track analysis during scans, telemetry, timing tests in CI)
 - 2026-11-12 — `implement/review_` — all 7 reasons applied, back to the Plan-Reviewer (rework round 2 of max 3)
+- 2026-11-12 — `implement/approvalgate_` — plan reviewed (P + T + M + B + X + V, 2 rework rounds) + mockup / summary ready, awaiting approval
 
 ## Original Idea (verbatim — never edit)
 
@@ -474,7 +475,7 @@ Revision 3 (2026-11-12): review rounds 1 + 2 applied (see `## Review`). Revision
 4. **Structure features.** `app/structure_features.py` (imported lazily so a numba problem cannot block boot): mood-specific labels, run-length runs, 7 columns (intro bars, main entry bar, drop-after-break bar, drop count, break share — high mood only, outro bars, total bars), rule family, exclusions applied **before** any distance (no PSSI, > 60 phrases or > 15 min, < 48 bars or < 90 s, PSSI end vs grid > 64 beats) + run / bin length caps (TM10); hybrid distance 0.5 · NW(runs) + 0.5 · edit(8-bar bins), serial `@njit`, `cache=False`, same mood only; warm compile in a daemon thread after the store loads. `STRUCTURE_VERSION` constant. Port of `structure/t3_metrics.py`, `t6_binned.py`, `t8_rules.py`, `t9_hybrid.py`.
 5. **Structure scan job.** `app/component_jobs.py`: refuses before the library is loaded; resume predicate = `structure_version` current and EXT mtime unchanged (± 1 s); mtime changed but `pssi_sha1` equal → update mtime only; `no_pssi` / `excluded` status rows; thread pool of 8 (lean read is I/O-bound); single-flight per kind (409); job registry keeps the last 10 jobs, `errors` ≤ 200 as `{id, code}` from a fixed enum — no paths, no titles (TM16, precedent `_PHRASE_ERROR_CAP` `app/main.py:7276`); guarded orphan prune (abort if the library holds < 50 % of the row count).
 6. **Audio component features.** `app/audio_paths.py` (FastAPI-free): `ALLOWED_AUDIO_EXTENSIONS` moved from `app/main.py:221`, `check_audio_path()` — resolve, regular file, extension allowlist, reject `\\host`, `\\?\UNC`, `\\.\`, size cap → skip codes `remote_path` / `bad_path` / `oversize` (TM8). `app/component_features.py`: beat grid from Rekordbox PQTZ (step 3 reader; engine beats only when no PQTZ) + per-track grid offset; decode the **middle 120 s** and store `window_start_s` (a PSSI-chosen window — main entry after the intro — is evaluated in step 9 before any switch) (m4a / aac via an app-owned ffmpeg `subprocess.run(..., timeout=30)`, never audioread — orphaned grandchild, TM11); W2 `sub60_of_200`, `sub60_of_total` (reuses `bass_share()` from `app/analysis_extras.py:290-297`; UI label "Sub-Anteil (Ausschnitt)" so it is not confused with the whole-track value of the High depth), `bass_between_db`, bass note (mean-spectrum f0); W4 (coarse-marked) hats energy 5-12 kHz, 16th share, off-beat open share; W1 f0-relative sound fingerprints (kick out / in) + shared line fingerprint; W5 hat timbre + decay. `AUDIO_COMPONENTS_VERSION` constant. Golden-value tests per version on synthetic signals — with no raw data kept, a silent helper change must fail CI. Port of `baseline/features.py` + `similarity/run_sim.py`. No new dependency.
-7. **Audio scan job.** Workers `min(8, cores − 2, free RAM / 1 GB)`, request field `ge=1, le=8` (TM2); `max_tasks_per_child ≥ 100` (a worker start costs 3.1 s); deadline 60 s per track (90 s on removable drives); tasks sorted by path; resume by part key + `grid_sig` + version; re-home a row on track-id drift (same `path_sha256` + size + mtime); poison track → `audio_status=error` after 2 attempts (TM11); workers compute and return values, **only the parent writes** and workers never open the store (TM13); a new process-wide **heavy-job slot** in `app/component_jobs.py` (separate from `_analysis_db_run_lock`, `app/main.py:5846`) acquired by the audio scan and `analyze-batch` — each answers 409 while the other holds it, so two process pools never run at full width together (Perf; `analyze-batch` changes, see API / UX); single-track `analyze-full` ("Analysieren…") stays available during a scan — one extra process for ≈ 35-50 s (gate decision 7); **throughput throttle** — after the first 20 tracks, a removable / rotating source drive or < 60 MB/s drops the pool to 2 workers; **cancel** — stop scheduling, kill in-flight tasks via `_kill_pool`, keep committed rows; kill / recycle via the runner pattern of `scripts/library_measure_audio.py` (`_kill_pool`).
+7. **Audio scan job.** Workers `min(8, cores − 2, free RAM / 1 GB)`, request field `ge=1, le=8` (TM2); `max_tasks_per_child ≥ 100` (a worker start costs 3.1 s); deadline 60 s per track (90 s on removable drives); tasks sorted by path; resume by part key + `grid_sig` + version; re-home a row on track-id drift (same `path_sha256` + size + mtime); poison track → `audio_status=error` after 2 attempts (TM11); workers compute and return values, **only the parent writes** and workers never open the store (TM13); a new process-wide **heavy-job slot** in `app/component_jobs.py` (separate from `_analysis_db_run_lock`, `app/main.py:5846`) acquired by the audio scan and `analyze-batch` — each answers 409 while the other holds it, so two process pools never run at full width together (Perf; `analyze-batch` changes, see API / UX); single-track `analyze-full` ("Analysieren…") stays available during a scan — one extra process for ≈ 35-50 s (base pass 0.18 CPU-s per audio second, handover §3.5.1) (gate decision 7); `analyze-batch` takes both locks without waiting and releases the first if the second is busy; **throughput throttle** — after the first 20 tracks, a removable / rotating source drive or < 60 MB/s drops the pool to 2 workers; **cancel** — stop scheduling, kill in-flight tasks via `_kill_pool`, keep committed rows; kill / recycle via the runner pattern of `scripts/library_measure_audio.py` (`_kill_pool`).
 8. **Status + read API** (via `route-architect`). `POST /api/components/structure/scan/{job_id}/cancel` and `POST /api/components/audio/scan/{job_id}/cancel` (`require_session`); `GET /api/components/status` (coverage + stale / foreign / error counts — survives restarts); `GET /api/components/values` = the **whole store columnar** `{generation, ids, cols, coarse, status}` with optional `?since=<generation>`, behind `require_session`, serialised with `json.dumps` into a `Response` (15 ms vs 130 ms through `jsonable_encoder`) — no id lists in URLs (Vite proxy 431 above ≈ 1650 ids, h11 drops > 64 KiB heads; TM3 / Perf); `GET /api/components/similar` behind `require_session`, sync `def`, `kind: Literal["bass","bass_kick","hats","structure"]` mapped to a hardcoded column map (TM4), `limit` 1-500, `track_id` `^\d{1,12}$`; in-process similarity matrices cached by `generation`; reasons `not_scanned` / `stale` / `foreign` / `excluded:<code>` instead of silent nulls.
 9. **Evaluation harness = acceptance gate.** `scripts/eval_components.py`: store opened `mode=ro`; split-half stability (≥ 0.85 column, 0.80-0.85 coarse, else hidden); own-half retrieval; **held-out** copy set confirmed by Chromaprint (`app/analysis_extras.py` `fingerprint_file`, timeout 30 s); user pairs from `docs/research/data/sound-component-eval.toml` (ints only, TM20); report `docs/research/data/sound-component-eval-report.json` with a key allowlist — ids, numbers, verdicts only, no titles, paths or fingerprint hashes. **Pass table** (UI tasks merge only after a committed report shows these):
 
@@ -721,7 +722,7 @@ Threat tests TM1-TM21 are listed in `## Threat Model` (column "Test covers") and
 | P39 | py | `tests/test_component_features.py::test_track_shorter_than_window` | 70 s track → whole track analysed, `window_start_s = 0`, flag `short` | Step 6 |
 | P40 | py | `tests/test_component_jobs.py::test_default_workers_formula_and_throttle` | `min(8, cores − 2, free RAM / 1 GB)`; slow source → 2 workers | Step 7 |
 | P41 | py | `tests/test_component_jobs.py::test_cancel_stops_job_keeps_committed_rows` | cancel mid-scan → state cancelled, committed rows intact, in-flight killed | Step 7, Step 8 |
-| P42 | py | `tests/test_component_routes.py::test_analyze_batch_409_while_audio_scan_runs` + `::test_audio_scan_409_while_analyze_batch_runs` | heavy-job slot both ways | Step 7, TM2 |
+| P42 | py | `tests/test_component_routes.py::test_analyze_batch_409_while_audio_scan_runs` + `::test_audio_scan_409_while_analyze_batch_runs` + `::test_analyze_full_allowed_while_audio_scan_runs` + `::test_analyze_batch_releases_db_lock_when_slot_busy` | heavy-job slot both ways; single-track analysis stays free (gate decision 7); `analyze-batch` releases `_analysis_db_run_lock` before answering 409 when the slot is taken | Step 7, TM2 |
 | P43 | py | `tests/test_component_routes.py::test_similar_matrix_cache_invalidated_on_generation` | upsert batch → next `similar` reflects the new row | Step 8 |
 | P44 | py | `tests/test_component_routes.py::test_structure_scan_409_before_library_loaded` | 409 until the library is loaded | Step 5 |
 | P45 | py | `tests/test_component_features.py::test_sub60_total_matches_extras_bass_share` | reused helper gives the same value as `analysis_extras.bass_share` | Step 6, reason 10a |
@@ -749,7 +750,7 @@ Each line: `(size · Step · Tests)` then **DoD** + **dep**. Phase A builds; pha
 - [ ] **T6b** W2 + W4 scalars (reusing `bass_share`) — (S · Step 6 · P14, P15, P45) — DoD: golden tests green. dep: T6a.
 - [ ] **T6c** W1 + W5 fingerprints + `AUDIO_COMPONENTS_VERSION` guard — (M · Step 6 · P16-P18) — DoD: golden tests green; per-track CPU p95 ≤ 3 s on 20 local tracks logged (P32 part 1). dep: T6b.
 - [ ] **T7a** Audio scan runner: pool, defaults + throttle, deadline, `_kill_pool`, poison, parent-only writes, cancel — (M · Step 7 · P40, P41, TM11, TM13) — DoD: runner tests green. dep: T2, T6c.
-- [ ] **T7b** Resume + re-home + heavy-job slot + audio scan / cancel routes + analyse-route 409s — (M · Steps 7, 8 · P19, P42, TM2) — DoD: tests green; 50-track real run within budget, then full library (P32 part 2). dep: T7a.
+- [ ] **T7b** Resume + re-home + heavy-job slot + audio scan / cancel routes + `analyze-batch` 409 — (M · Steps 7, 8 · P19, P42, TM2) — DoD: tests green; 50-track real run within budget, then full library (P32 part 2). dep: T7a.
 - [ ] **T8** Values + similar routes (columnar `json.dumps`, `since`, `Literal` kinds, matrix cache by generation) — (M · Step 8 · P21-P24, P36, P43, TM3-TM6, TM17) — DoD: route + perf tests green. dep: T5, T7b.
 - [ ] **T9** Evaluation harness + eval TOML + committed acceptance report — (M · Step 9 · P26, P27, TM19, TM20) — DoD: `docs/research/data/sound-component-eval-report.json` committed; pass table decides what T10-T12 show. dep: T8 + **user inputs** (pairs, PSSI 3-track check) or gate decision 6.
 - [ ] **T10** UI component columns via `SORT_VALUES` Map lookup — (M · Step 10 · P28, P34) — DoD: js tests + `e2e-tester` green. dep: T9, `feat/sortable-columns` merged.
@@ -822,30 +823,39 @@ Each line: `(size · Step · Tests)` then **DoD** + **dep**. Phase A builds; pha
 6. Telemetry → `state=` on both scan markers, throttle + slot-busy markers.
 7. Timing tests in CI → `LMS_PERF=1` gate, timing moved to `tests/perf/`, `trackSort.test.js` = edit, explicit `.js` imports for the new js test.
 
+### 2026-11-12 — round 3 — PASS
+- [x] Plan addresses all goals
+- [x] Plan matches `## Original Idea` — no scope-creep
+- [x] Open questions answered or deferred
+- [x] Prior Art referenced — no duplicated past work
+- [x] Threat Model present + each threat has a test (or N/A justified)
+- [x] Migration Path present + rollback documented (or N/A justified)
+- [x] Performance Budget set + worst-case scenario documented (or N/A justified)
+- [x] API / UX Surface enumerated for every layer touched
+- [x] Telemetry defined for shipped behavior (or N/A justified)
+- [x] Test Plan covers every Threat + every Step + every Perf row
+- [x] Task Queue items are small + independently committable + reference Steps + Tests
+- [x] Dependencies audited — new libs have Schicht-A entries
+- [x] Risk mitigations defined
+- [x] Rollback path clear
+- [x] Affected docs identified (`architecture.md`, `FILE_MAP.md`, indexes, `CHANGELOG.md`)
+
+Contradiction sweep against revision 3: none left (`analyze-full` free everywhere, on-beat "never measured", no `@pytest.mark.slow`, no "gate decision vi", no "pause", values shape uses `status`, no `VECTOR_VERSION` bump claim; superseded numbers are labelled under `## Recommendation`). Non-blocking notes for Stage 4, applied in the same pass: guard test for gate decision 7 (P42), T7b title "`analyze-batch` 409", lock-release order when `analyze-batch` holds `_analysis_db_run_lock` but loses the heavy-job slot, source for "≈ 35-50 s".
+
 ## Approval Summary
 
-Stage 3 Mockup+Summary-Agent (after Plan-Reviewer PASS). **Plain user-facing English — NOT Caveman.** This block is what the user reads to decide yes/no. ≤200 words. No `file:line` jargon — describe effects, not internals.
-
-- **What it does:** 1–2 sentences, plain language. What the feature gives the user.
-- **What you'll notice:** bullet list of user-visible effects (new button, faster scan, new export option, …).
-- **Scope:** N files touched · N tasks · effort S/M/L · risk low/med/high.
-- **Rollback:** one line — how it's undone if you dislike it after merge.
+- **What it does:** You can sort and search your library by the parts of a track, not only by BPM, key and genre: how deep and heavy the bass is, which tracks have a similar bass (its sound and its line, with or without the kick), how much hi-hat energy and 16th-note hats a track has, which tracks share a similar high-end and hat character, and how a song is built (intro length, where the main part starts, number of drops and breaks), including "show me tracks built like this one".
+- **What you'll notice:** new optional columns in the track table; right-click → "Nach Ähnlichkeit sortieren" with Bass, Bass mit Kick, Hats and Aufbau; a scan panel in Settings → Analysis (structure about 1 minute, audio about 20-25 minutes, both cancellable). Nothing changes in Rekordbox, your music files or USB exports, and no new library is installed.
+- **Not in this plan:** melody (how melodic, melody type, similar melodies) and your own sound classes such as bells. They need an AI model; this plan only tests that route and comes back with a separate plan.
+- **Please decide:** seven gate decisions with defaults (in the plan). Hi-hat pattern and off-beat sorting were dropped after measurement; on-beat hats were not measured yet.
+- **Scope:** about 12 new files and 10 edits · 16 build tasks + 4 test-only tasks · effort L · risk low-medium.
+- **Rollback:** remove the columns, menu entry and scan panel and drop one database table.
 - **Mockup:** see `## Mockup` below.
 
 ## Mockup
 
-Stage 3 Mockup+Summary-Agent. Adaptive to feature type — decide from `## API / UX Surface`:
-
-- **UI feature** (has frontend components): write a self-contained static wireframe to `docs/research/mockups/<slug>.html` (inline CSS, no build step, no external assets — open in a browser locally). Fill the **UI** block below. Leave the **Backend** block empty/removed.
-- **Backend / DSP / USB / DB feature** (no visible UI): fill the **Backend** block with a concrete example — sample API request/response, CLI/log output, or before→after data (metadata tags, USB tree, DB rows). Show the shape the user will actually see. Leave the **UI** block empty/removed.
-
 ### UI — mockup file
-- `docs/research/mockups/<slug>.html` — <one-line layout + key-interaction description>
-
-### Backend — concrete example
-```text
-<sample response / CLI output / before→after — the user-visible shape>
-```
+- [`docs/research/mockups/sound-component-sorting.html`](../mockups/sound-component-sorting.html) — five screens: track table with the new columns ("nicht analysiert", "grob" markers, structure bar); right-click "Nach Ähnlichkeit sortieren"; similarity mode with seed chip, distance column, reason tooltip; Settings scan panel with progress / cancel; structure tooltip + family chips; plus a box listing what this plan leaves out.
 
 ---
 

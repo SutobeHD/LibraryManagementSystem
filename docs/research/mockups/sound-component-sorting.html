@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Sound-component sorting — wireframe</title>
+<style>
+  /* Palette copied from docs/research/mockups/library-artist-hub.html (Melodex, dark) */
+  :root {
+    --mx-deepest:#0D0F14; --mx-shell:#13161D; --mx-panel:#1A1E27; --mx-surface:#1E2230; --mx-card:#222736;
+    --mx-hover:#272C3A; --mx-selected:#2A3045; --mx-input:#181B24;
+    --line-subtle:#2A2F3E; --line-default:#353C50;
+    --ink-primary:#F0F2F7; --ink-secondary:#9BA3B8; --ink-muted:#5C6478; --ink-placeholder:#3E4558; --ink-inverse:#0D0F14;
+    --amber:#E8A42A; --amber-dim:#7A5215; --amber-bg:rgba(232,164,42,.08);
+    --ok:#3DD68C; --bad:#E85C4A; --info:#4A9EE8;
+    --c-intro:#4A9EE8; --c-up:#8A7BE8; --c-down:#5C6478; --c-chorus:#E8A42A; --c-outro:#3E8E9E; --c-verse:#3DD68C; --c-bridge:#C26BB0;
+    --font-ui:'DM Sans',Inter,system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+    --font-mono:'JetBrains Mono','Fira Mono',ui-monospace,Consolas,monospace;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--mx-deepest); color:var(--ink-primary); font-family:var(--font-ui); font-size:14px; line-height:1.45; }
+  .frame { max-width:1320px; margin:0 auto; padding:26px 22px 56px; }
+  .pagehead { border-bottom:1px solid var(--line-subtle); padding-bottom:16px; margin-bottom:26px; }
+  .pagehead h1 { margin:0; font-size:22px; font-weight:700; }
+  .pagehead .sub { margin-top:5px; font-size:12.5px; color:var(--ink-muted); max-width:110ch; }
+  .pagehead .sub b { color:var(--amber); font-weight:600; }
+  .screen { margin-bottom:40px; }
+  .screenhead { display:flex; align-items:baseline; gap:10px; margin-bottom:4px; }
+  .screenhead .num { font-family:var(--font-mono); font-size:11px; font-weight:600; color:var(--amber); border:1px solid var(--amber-dim);
+    background:var(--amber-bg); border-radius:2px; padding:1px 6px; position:relative; top:-2px; }
+  .screenhead h2 { margin:0; font-size:16px; font-weight:600; }
+  .caption { font-size:12.5px; color:var(--ink-muted); margin:0 0 12px; max-width:100ch; }
+  .app { background:var(--mx-deepest); border:1px solid var(--line-subtle); border-radius:10px; overflow:hidden; box-shadow:0 8px 32px rgba(0,0,0,.55); }
+  .titlebar { height:34px; display:flex; align-items:center; gap:10px; padding:0 12px; background:var(--mx-shell); border-bottom:1px solid var(--line-subtle); }
+  .titlebar .name { font-size:11.5px; color:var(--ink-secondary); font-weight:600; }
+  .wstabs { display:flex; gap:2px; padding:0 8px; background:var(--mx-shell); border-bottom:1px solid var(--line-subtle); }
+  .ws { padding:7px 11px; font-size:12px; color:var(--ink-muted); border-bottom:2px solid transparent; }
+  .ws.active { color:var(--ink-primary); border-bottom-color:var(--amber); font-weight:600; }
+  .viewport { padding:14px; background:var(--mx-deepest); position:relative; }
+  .toolbar { display:flex; align-items:center; gap:8px; margin-bottom:10px; flex-wrap:wrap; }
+  .search { display:flex; align-items:center; gap:8px; background:rgba(0,0,0,.2); border:1px solid var(--line-subtle); border-radius:999px;
+    padding:5px 12px; color:var(--ink-placeholder); font-size:12px; min-width:200px; }
+  .btn { font-size:12px; border-radius:4px; padding:6px 11px; display:inline-flex; align-items:center; gap:6px; white-space:nowrap; border:1px solid transparent; }
+  .btn-primary { background:var(--amber); color:var(--ink-inverse); font-weight:600; }
+  .btn-secondary { background:var(--mx-card); color:var(--ink-primary); border-color:var(--line-subtle); }
+  .btn-ghost { background:transparent; color:var(--ink-secondary); border-color:rgba(255,255,255,.06); }
+  .btn-sm { font-size:11px; padding:4px 9px; }
+  .chip { display:inline-flex; align-items:center; gap:5px; font-size:11px; color:var(--ink-secondary); background:var(--mx-card);
+    border:1px solid var(--line-subtle); border-radius:3px; padding:2px 8px; white-space:nowrap; }
+  .chip.amber { color:var(--amber); background:var(--amber-bg); border-color:var(--amber-dim); }
+  .chip .x { color:var(--ink-muted); margin-left:4px; }
+  .spacer { flex:1; }
+  table.tt { width:100%; border-collapse:collapse; font-size:12px; }
+  table.tt th { text-align:left; font-size:10px; letter-spacing:.06em; text-transform:uppercase; color:var(--ink-muted); font-weight:600;
+    padding:6px 8px; border-bottom:1px solid var(--line-default); background:var(--mx-panel); white-space:nowrap; }
+  table.tt th.new { color:var(--amber); }
+  table.tt th .sort { color:var(--amber); margin-left:3px; }
+  table.tt td { padding:6px 8px; border-bottom:1px solid var(--line-subtle); white-space:nowrap; color:var(--ink-secondary); }
+  table.tt td.t { color:var(--ink-primary); }
+  table.tt td.num { font-family:var(--font-mono); font-size:11.5px; text-align:right; }
+  table.tt tr.seed td { background:rgba(232,164,42,.06); }
+  table.tt tr.sel td { background:var(--mx-selected); }
+  .na { color:var(--ink-placeholder); font-style:italic; }
+  .coarse { color:var(--ink-muted); font-size:9px; border:1px solid var(--line-default); border-radius:2px; padding:0 3px; margin-left:4px; vertical-align:1px; }
+  .bar { display:inline-block; height:6px; border-radius:3px; background:var(--amber); vertical-align:middle; margin-right:6px; opacity:.85; }
+  .struct { display:inline-flex; height:12px; width:150px; border-radius:2px; overflow:hidden; vertical-align:middle; border:1px solid rgba(255,255,255,.05); }
+  .struct span { display:block; height:100%; }
+  .I{background:var(--c-intro)} .U{background:var(--c-up)} .D{background:var(--c-down)} .C{background:var(--c-chorus)}
+  .O{background:var(--c-outro)} .V{background:var(--c-verse)} .B{background:var(--c-bridge)}
+  .menu { position:absolute; background:var(--mx-surface); border:1px solid var(--line-default); border-radius:6px; box-shadow:0 10px 28px rgba(0,0,0,.6);
+    padding:4px 0; font-size:12px; min-width:230px; z-index:3; }
+  .menu .it { padding:6px 14px; color:var(--ink-secondary); display:flex; align-items:center; gap:8px; }
+  .menu .it.hl { background:var(--mx-hover); color:var(--amber); }
+  .menu .sep { height:1px; background:var(--line-subtle); margin:4px 0; }
+  .menu .sub { color:var(--ink-muted); margin-left:auto; }
+  .tip { position:absolute; background:var(--mx-card); border:1px solid var(--line-default); border-radius:6px; padding:10px 12px; font-size:11.5px;
+    color:var(--ink-secondary); box-shadow:0 8px 24px rgba(0,0,0,.55); z-index:3; max-width:360px; }
+  .tip b { color:var(--ink-primary); }
+  .tip code { font-family:var(--font-mono); font-size:11px; color:var(--amber); }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  .panel { background:var(--mx-panel); border:1px solid var(--line-subtle); border-radius:8px; }
+  .panelhead { display:flex; align-items:center; gap:10px; padding:11px 14px; border-bottom:1px solid var(--line-subtle); }
+  .panelhead h3 { margin:0; font-size:13px; font-weight:600; }
+  .panelbody { padding:12px 14px; font-size:12px; color:var(--ink-secondary); }
+  .progress { height:6px; background:var(--mx-input); border-radius:3px; overflow:hidden; margin:8px 0 6px; }
+  .progress > div { height:100%; background:var(--amber); }
+  .kv { display:grid; grid-template-columns:auto 1fr; gap:3px 14px; font-size:11.5px; margin-top:8px; }
+  .kv .k { color:var(--ink-muted); }
+  .kv .v { color:var(--ink-primary); font-family:var(--font-mono); font-size:11px; }
+  .note { font-size:11.5px; color:var(--ink-muted); border-left:2px solid var(--line-default); padding:4px 10px; margin-top:10px; }
+  .note b { color:var(--ink-secondary); }
+  .legend { display:flex; gap:12px; flex-wrap:wrap; font-size:11px; color:var(--ink-muted); margin-top:8px; }
+  .legend i { display:inline-block; width:10px; height:10px; border-radius:2px; margin-right:4px; vertical-align:-1px; }
+  .outbox { border:1px dashed var(--line-default); border-radius:8px; padding:12px 14px; font-size:12px; color:var(--ink-secondary); }
+  .outbox h3 { margin:0 0 6px; font-size:13px; color:var(--ink-primary); }
+  .outbox ul { margin:4px 0 0; padding-left:18px; }
+</style>
+</head>
+<body>
+<div class="frame">
+
+  <div class="pagehead">
+    <h1>Sort by sound components — wireframe</h1>
+    <div class="sub">Planned UI for <b>Option A</b> of <code>docs/research/implement/review_sound-component-sorting.md</code>: bass, hats and song-structure values plus "sort by similarity", all without a new dependency. Track names are placeholders. Numbers in cells are illustrative; the ranges and costs in the notes are measured on the real library.</div>
+  </div>
+
+  <!-- ===================================================== 1 -->
+  <div class="screen">
+    <div class="screenhead"><span class="num">1</span><h2>Collection with component columns switched on</h2></div>
+    <p class="caption">New columns live in the existing column picker and are hidden by default. They load only when one of them is visible. Cells show <i>nicht analysiert</i> before a scan; columns that passed only the "coarse" stability bar carry a marker. Sorting puts empty cells last.</p>
+    <div class="app">
+      <div class="titlebar"><span class="name">Music Library Manager</span></div>
+      <div class="wstabs"><span class="ws active">Library</span><span class="ws">Audio Import</span><span class="ws">Ranking</span><span class="ws">Editor</span><span class="ws">USB</span><span class="ws">SoundCloud</span><span class="ws">Utilities</span></div>
+      <div class="viewport">
+        <div class="toolbar">
+          <div class="search">Search 4 765 tracks…</div>
+          <span class="chip">Aufbau-Familie: alle ▾</span>
+          <span class="spacer"></span>
+          <span class="btn btn-ghost btn-sm">Spalten ▾</span>
+        </div>
+        <table class="tt">
+          <tr><th>Title</th><th>Artist</th><th>BPM</th><th>Key</th>
+            <th class="new">Bass-Note</th><th class="new">Sub-Anteil<br/><span style="text-transform:none;letter-spacing:0">(Ausschnitt)</span></th>
+            <th class="new">Bass zw. Kicks<span class="sort">▼</span></th><th class="new">Hats-Energie</th><th class="new">16tel-Hats</th>
+            <th class="new">Intro</th><th class="new">Einstieg</th><th class="new">Drops</th><th class="new">Aufbau</th></tr>
+          <tr><td class="t">Steel Corridor</td><td>Artist A</td><td class="num">155</td><td>8A</td><td>F1</td>
+            <td class="num"><span class="bar" style="width:34px"></span>0.68</td><td class="num">+2.8 dB</td><td class="num">−15.1 dB<span class="coarse">grob</span></td><td class="num">0.41<span class="coarse">grob</span></td>
+            <td class="num">8</td><td class="num">16</td><td class="num">4</td>
+            <td><span class="struct"><span class="I" style="width:6%"></span><span class="U" style="width:5%"></span><span class="C" style="width:16%"></span><span class="U" style="width:5%"></span><span class="C" style="width:16%"></span><span class="D" style="width:10%"></span><span class="U" style="width:10%"></span><span class="C" style="width:26%"></span><span class="O" style="width:6%"></span></span></td></tr>
+          <tr class="sel"><td class="t">Night Shift Pressure</td><td>Artist B</td><td class="num">150</td><td>5A</td><td>E1</td>
+            <td class="num"><span class="bar" style="width:29px"></span>0.58</td><td class="num">+1.4 dB</td><td class="num">−17.2 dB<span class="coarse">grob</span></td><td class="num">0.36<span class="coarse">grob</span></td>
+            <td class="num">16</td><td class="num">24</td><td class="num">3</td>
+            <td><span class="struct"><span class="I" style="width:9%"></span><span class="U" style="width:5%"></span><span class="C" style="width:18%"></span><span class="D" style="width:9%"></span><span class="U" style="width:14%"></span><span class="C" style="width:37%"></span><span class="O" style="width:8%"></span></span></td></tr>
+          <tr><td class="t">Groove Theory</td><td>Artist C</td><td class="num">128</td><td>11B</td><td>G1</td>
+            <td class="num"><span class="bar" style="width:16px"></span>0.31</td><td class="num">−2.7 dB</td><td class="num">−18.0 dB<span class="coarse">grob</span></td><td class="num">0.44<span class="coarse">grob</span></td>
+            <td class="num">16</td><td class="num">32</td><td class="num">2</td>
+            <td><span class="struct"><span class="I" style="width:12%"></span><span class="C" style="width:34%"></span><span class="U" style="width:8%"></span><span class="C" style="width:38%"></span><span class="O" style="width:8%"></span></span></td></tr>
+          <tr><td class="t">Lights Over Water</td><td>Artist D</td><td class="num">138</td><td>4B</td><td>D#1</td>
+            <td class="num"><span class="bar" style="width:12px"></span>0.24</td><td class="num">−4.9 dB</td><td class="num">−21.3 dB<span class="coarse">grob</span></td><td class="num">0.12<span class="coarse">grob</span></td>
+            <td class="num">32</td><td class="num">48</td><td class="num">3</td>
+            <td><span class="struct"><span class="I" style="width:16%"></span><span class="U" style="width:8%"></span><span class="C" style="width:16%"></span><span class="D" style="width:16%"></span><span class="U" style="width:8%"></span><span class="C" style="width:28%"></span><span class="O" style="width:8%"></span></span></td></tr>
+          <tr><td class="t">Unknown Edit</td><td>Artist E</td><td class="num">145</td><td>2A</td><td class="na">nicht analysiert</td>
+            <td class="na">—</td><td class="na">—</td><td class="na">—</td><td class="na">—</td>
+            <td class="num">8</td><td class="num">8</td><td class="num">5</td>
+            <td><span class="struct"><span class="I" style="width:5%"></span><span class="C" style="width:20%"></span><span class="U" style="width:6%"></span><span class="C" style="width:20%"></span><span class="U" style="width:6%"></span><span class="C" style="width:20%"></span><span class="U" style="width:6%"></span><span class="C" style="width:12%"></span><span class="O" style="width:5%"></span></span></td></tr>
+        </table>
+        <div class="legend"><span><i class="I"></i>Intro</span><span><i class="U"></i>Up / Build</span><span><i class="D"></i>Down / Break</span><span><i class="C"></i>Chorus / Main</span><span><i class="O"></i>Outro</span><span><i class="V"></i>Verse</span><span><i class="B"></i>Bridge</span></div>
+        <div class="note"><b>Measured column set:</b> sub share, bass between kicks and bass note are stable (split-half 0.89-0.95). Hats energy and 16th share are marked <b>grob</b> (0.83 / 0.87 and threshold-sensitive). Intro, entry and drop count come from Rekordbox's own phrase analysis and stay 87-93 % equal across copies of the same audio. Tracks Rekordbox has no phrases for (21 of 4765) show "—" in the structure columns.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================================================== 2 -->
+  <div class="screen">
+    <div class="screenhead"><span class="num">2</span><h2>Right-click → "Nach Ähnlichkeit sortieren"</h2></div>
+    <p class="caption">One entry with four kinds. Bass compares the bass sound on a pitch-relative scale (a transposed copy still matches) plus the bass line; "mit Kick" includes the kick. Hats compare the high-end timbre and decay. Aufbau compares the phrase build-up within the same Rekordbox mood.</p>
+    <div class="app">
+      <div class="titlebar"><span class="name">Music Library Manager</span></div>
+      <div class="viewport" style="min-height:250px">
+        <table class="tt" style="width:62%">
+          <tr><th>Title</th><th>Artist</th><th>BPM</th><th>Key</th></tr>
+          <tr><td class="t">Steel Corridor</td><td>Artist A</td><td class="num">155</td><td>8A</td></tr>
+          <tr class="sel"><td class="t">Night Shift Pressure</td><td>Artist B</td><td class="num">150</td><td>5A</td></tr>
+          <tr><td class="t">Groove Theory</td><td>Artist C</td><td class="num">128</td><td>11B</td></tr>
+          <tr><td class="t">Lights Over Water</td><td>Artist D</td><td class="num">138</td><td>4B</td></tr>
+        </table>
+        <div class="menu" style="left:250px;top:58px">
+          <div class="it">Play</div>
+          <div class="it">Zur Playlist hinzufügen <span class="sub">▸</span></div>
+          <div class="it">Metadaten (BPM/Key)</div>
+          <div class="it">Analysieren…</div>
+          <div class="sep"></div>
+          <div class="it hl">Nach Ähnlichkeit sortieren <span class="sub">▸</span></div>
+          <div class="it">Artist zuordnen…</div>
+        </div>
+        <div class="menu" style="left:484px;top:150px;min-width:200px">
+          <div class="it hl">Bass (ohne Kick)</div>
+          <div class="it">Bass (mit Kick)</div>
+          <div class="it">Hats</div>
+          <div class="it">Aufbau</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================================================== 3 -->
+  <div class="screen">
+    <div class="screenhead"><span class="num">3</span><h2>Similarity mode</h2></div>
+    <p class="caption">The table re-orders by distance to the seed track; a chip shows the seed and kind and clears the mode. Tracks that cannot be compared stay at the bottom with a reason tooltip instead of a silent gap.</p>
+    <div class="app">
+      <div class="titlebar"><span class="name">Music Library Manager</span></div>
+      <div class="viewport" style="min-height:300px;padding-bottom:118px">
+        <div class="toolbar">
+          <span class="chip amber">ähnlich zu: Night Shift Pressure · Bass (ohne Kick) <span class="x">✕</span></span>
+          <span class="spacer"></span>
+          <span class="btn btn-ghost btn-sm">Bass (mit Kick)</span><span class="btn btn-ghost btn-sm">Hats</span><span class="btn btn-ghost btn-sm">Aufbau</span>
+        </div>
+        <table class="tt">
+          <tr><th>#</th><th>Title</th><th>Artist</th><th>BPM</th><th>Key</th><th class="new">Distanz<span class="sort">▲</span></th><th class="new">Bass-Note</th></tr>
+          <tr class="seed"><td class="num">—</td><td class="t">Night Shift Pressure</td><td>Artist B</td><td class="num">150</td><td>5A</td><td class="num">seed</td><td>E1</td></tr>
+          <tr><td class="num">1</td><td class="t">Iron Lung Theory</td><td>Artist F</td><td class="num">152</td><td>5A</td><td class="num">0.11</td><td>E1</td></tr>
+          <tr><td class="num">2</td><td class="t">Concrete Bloom (Remix)</td><td>Artist G</td><td class="num">148</td><td>7A</td><td class="num">0.14</td><td>F#1</td></tr>
+          <tr><td class="num">3</td><td class="t">Steel Corridor</td><td>Artist A</td><td class="num">155</td><td>8A</td><td class="num">0.19</td><td>F1</td></tr>
+          <tr><td class="num">4</td><td class="t">Pressure Valve</td><td>Artist H</td><td class="num">145</td><td>5A</td><td class="num">0.22</td><td>E1</td></tr>
+          <tr><td class="num">…</td><td class="t na">4 600 more</td><td></td><td></td><td></td><td></td><td></td></tr>
+          <tr><td class="num">—</td><td class="t">Unknown Edit</td><td>Artist E</td><td class="num">145</td><td>2A</td><td class="na">nicht analysiert ⓘ</td><td class="na">—</td></tr>
+        </table>
+        <div class="tip" style="right:24px;bottom:16px">
+          <b>Nicht vergleichbar</b><br/>Dieser Track wurde noch nicht gescannt. Einstellungen → Analyse → <b>Audio-Scan</b> starten.<br/>
+          <span style="color:var(--ink-muted)">Weitere Gründe: <code>veraltet</code> (nach einem Update neu scannen), <code>excluded:mix</code> (Mix &gt; 15 min, nur bei Aufbau).</span>
+        </div>
+      </div>
+    </div>
+    <div class="note" style="margin-top:10px"><b>Measured:</b> bass sound + line finds the same track again in 88 % of cases at rank 1 and 95 % within the top 10, also for House and Trance; hats 85-88 % / 88-93 %. These numbers will be re-checked on fresh tracks and, if you supply them, on your own "same bass" / "same hats" pairs before this view ships (unconfirmed results carry an "unbestätigt" marker).</div>
+  </div>
+
+  <!-- ===================================================== 4 -->
+  <div class="screen">
+    <div class="screenhead"><span class="num">4</span><h2>Settings → Analysis: two scans</h2></div>
+    <p class="caption">Nothing runs on its own. The structure scan reads Rekordbox's phrase data only (no audio decode); the audio scan analyses the middle two minutes of every track in the background. Both can be cancelled and resume where they stopped; values appear while they run.</p>
+    <div class="app">
+      <div class="titlebar"><span class="name">Music Library Manager — Einstellungen</span></div>
+      <div class="viewport">
+        <div class="grid2">
+          <div class="panel">
+            <div class="panelhead"><h3>Aufbau-Scan</h3><span class="spacer"></span><span class="btn btn-secondary btn-sm">Neu scannen</span></div>
+            <div class="panelbody">
+              Liest die Phrasen-Analyse von Rekordbox (nur lesen).
+              <div class="progress"><div style="width:100%"></div></div>
+              <div class="kv"><span class="k">Gescannt</span><span class="v">4 744 / 4 765</span>
+                <span class="k">Ohne Phrasen</span><span class="v">21</span>
+                <span class="k">Ausgeschlossen</span><span class="v">38 (Mixe, sehr kurz)</span>
+                <span class="k">Dauer</span><span class="v">≈ 1 min</span></div>
+            </div>
+          </div>
+          <div class="panel">
+            <div class="panelhead"><h3>Audio-Scan</h3><span class="spacer"></span><span class="btn btn-ghost btn-sm">Abbrechen</span></div>
+            <div class="panelbody">
+              Bass, Hats und Ähnlichkeits-Fingerabdrücke. Läuft nicht gleichzeitig mit einer Batch-Analyse; einzelne Tracks lassen sich weiter analysieren.
+              <div class="progress"><div style="width:42%"></div></div>
+              <div class="kv"><span class="k">Fortschritt</span><span class="v">1 946 / 4 633</span>
+                <span class="k">Restzeit</span><span class="v">≈ 14 min (8 Worker)</span>
+                <span class="k">Übersprungen</span><span class="v">3 (Netzwerkpfad) · 1 (Datei fehlt)</span>
+                <span class="k">Veraltet</span><span class="v">0</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="note"><b>Storage:</b> only end values and small fingerprints are kept, about 1 KB per track (≈ 5 MB for the library). No audio, no stems, no raw curves are stored — after a definition change the affected values show "veraltet" and the audio scan recomputes them.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================================================== 5 -->
+  <div class="screen">
+    <div class="screenhead"><span class="num">5</span><h2>Structure tooltip + family filter</h2></div>
+    <p class="caption">Hovering the structure bar shows the phrase sequence in bars. Families are simple rules (number of breaks × when the main part starts), not a learned clustering — the measurement found no stable natural clusters.</p>
+    <div class="app">
+      <div class="titlebar"><span class="name">Music Library Manager</span></div>
+      <div class="viewport" style="min-height:190px">
+        <div class="toolbar">
+          <span class="chip">Alle</span><span class="chip amber">2+ Breaks · Einstieg ab Takt 32</span><span class="chip">1 Break · früher Einstieg</span>
+          <span class="chip">Kein Break</span><span class="chip">Langes Intro + Outro</span><span class="chip">Verse-Typ</span><span class="chip">Kurz</span>
+        </div>
+        <span class="struct" style="width:420px;height:16px;margin-top:6px"><span class="I" style="width:4%"></span><span class="U" style="width:4%"></span><span class="C" style="width:12%"></span><span class="U" style="width:4%"></span><span class="C" style="width:12%"></span><span class="D" style="width:8%"></span><span class="U" style="width:16%"></span><span class="C" style="width:34%"></span><span class="O" style="width:4%"></span></span>
+        <div class="tip" style="left:30px;top:84px">
+          <b>Night Shift Pressure</b> · Rekordbox-Stimmung <b>high</b><br/>
+          <code>I8 U8 C24 U8 C24 D16 U32 C64 O8</code><br/>
+          Intro 8 Takte · Einstieg Takt 16 · Drop nach Break Takt 120 · 3 Drops · Break-Anteil 8 %
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================================================== out of scope -->
+  <div class="screen">
+    <div class="screenhead"><span class="num">—</span><h2>Not part of this plan</h2></div>
+    <div class="outbox">
+      <h3>Measured first, built later (needs an AI model)</h3>
+      <ul>
+        <li>How melodic a track is, melody type (lead / acid / vocal hook) and similar melodies.</li>
+        <li>Your own sound classes from example tracks (bells and anything else you can name).</li>
+      </ul>
+      This plan only tests that path: a model runtime without the 2 GB GPU package, the model licences, and accuracy on your example tracks. A separate plan with its own approval follows.
+      <h3 style="margin-top:12px">Dropped after measurement — please confirm</h3>
+      <ul>
+        <li>Hi-hat <b>pattern</b> similarity: added nothing over the hat sound.</li>
+        <li>Sorting by off-beat hats: not stable between two halves of the same track. On-beat hats were not measured yet.</li>
+      </ul>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>
