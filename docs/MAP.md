@@ -400,6 +400,38 @@
 | `scripts/dev/rescan_unreadable.py` | Re-scan only the rows marked unreadable in an audio_report.json. |
 | `scripts/dev/safe_format_swap.py` | safe_format_swap.py -- defensive m4a -> AIFF swap for ONE Rekordbox playlist. |
 | `scripts/dev/scan_audio_quality.py` | Scan an audio library with ffprobe, aggregate codec/bitrate/sample-rate. |
+| `scripts/dev/sound_component_research/baseline/bench_hpss.py` | Cost of hpss variants on the middle 120 s (CPU s, process_time) + effect on hpr_mid_db. |
+| `scripts/dev/sound_component_research/baseline/evaluate.py` | Plausibility evaluation of the baseline features (no ground truth). |
+| `scripts/dev/sound_component_research/baseline/explore.py` | *(no module docstring)* |
+| `scripts/dev/sound_component_research/baseline/features.py` | No-new-dependency baseline features for sound components (W2 bass, W4/W5 hats, W6 melody). |
+| `scripts/dev/sound_component_research/baseline/patch2.py` | One-off patch of features.py after the label-free picker tuning (tune_hats.py). |
+| `scripts/dev/sound_component_research/baseline/posthoc.py` | Post-hoc checks on the stored results (no audio access). |
+| `scripts/dev/sound_component_research/baseline/run.py` | Run the baseline features on the sample. |
+| `scripts/dev/sound_component_research/baseline/select_sample.py` | Seeded stratified sample of 40 local tracks + Rekordbox PQTZ beat grids. |
+| `scripts/dev/sound_component_research/baseline/synth_test.py` | Synthetic sanity check for the pickers / classifiers / decay estimators (known truth). |
+| `scripts/dev/sound_component_research/baseline/tune_hats.py` | Label-free tuning of the high-band onset picker. |
+| `scripts/dev/sound_component_research/baseline/w8_compare.py` | W2b cross-check against the app's own whole-track numbers (audio_w8.jsonl, bass.share_60/120). |
+| `scripts/dev/sound_component_research/models/bench_basicpitch.py` | basic-pitch (ONNX backend, CPU) on the `other` stem 30 s window. |
+| `scripts/dev/sound_component_research/models/bench_clap.py` | LAION-CLAP via transformers: embedding throughput + zero-shot sanity (mix vs `other` stem). |
+| `scripts/dev/sound_component_research/models/bench_demucs.py` | Demucs separation timing. |
+| `scripts/dev/sound_component_research/models/bench_features.py` | Per-stem cheap features after in-memory separation (GPU, default config). |
+| `scripts/dev/sound_component_research/models/bench_pitch.py` | torchcrepe (tiny/full) on the `other` stem, 30 s window, GPU vs CPU. |
+| `scripts/dev/sound_component_research/models/common.py` | Shared helpers for the sc-bench measurement spike. |
+| `scripts/dev/sound_component_research/models/debug_clap.py` | *(no module docstring)* |
+| `scripts/dev/sound_component_research/models/debug_clap2.py` | *(no module docstring)* |
+| `scripts/dev/sound_component_research/models/debug_clap3.py` | *(no module docstring)* |
+| `scripts/dev/sound_component_research/models/debug_crepe.py` | *(no module docstring)* |
+| `scripts/dev/sound_component_research/structure/common.py` | W9 structure-similarity prototype: load phrases, build the three representations. |
+| `scripts/dev/sound_component_research/structure/extract_phrases.py` | Read-only: per-phrase PSSI entries for every track -> tmp/sc-struct/phrases.jsonl. |
+| `scripts/dev/sound_component_research/structure/t0_quality.py` | *(no module docstring)* |
+| `scripts/dev/sound_component_research/structure/t2_groups.py` | Task 2 (exact-structure groups), task 6 (sortable-column distributions), extra task-5 counts. |
+| `scripts/dev/sound_component_research/structure/t2b_coarse.py` | Coarser exact-group keys + stability of keys/columns across same-audio copies. |
+| `scripts/dev/sound_component_research/structure/t3_metrics.py` | Task 3: the three metric families, compute cost seed-vs-all and all-pairs. |
+| `scripts/dev/sound_component_research/structure/t4_sanity.py` | Task 4: nearest neighbours for 6 seeds + BPM/genre signal test. |
+| `scripts/dev/sound_component_research/structure/t5_nwtune.py` | NW parameter sensitivity, scored on (a) retrieval of same-audio copies with differing analysis, |
+| `scripts/dev/sound_component_research/structure/t6_binned.py` | Metric (i'): edit distance on the 8-bar (or 4-bar) binned label string = shift-tolerant Hamming. |
+| `scripts/dev/sound_component_research/structure/t7_cluster.py` | Task 7: k-medoids / agglomerative on metric (iii) and (ii)/(i-b); do nameable families emerge? |
+| `scripts/dev/sound_component_research/structure/t8_rules.py` | Rule-based families + alternative drop definition + final column table. |
 | `scripts/feature_map.py` | Feature registry plus a live overlay of which branch or worktree touches which feature. |
 | `scripts/library_analysis.py` | Whole-library analysis: which track fields are filled, how the Genre field is used, and how |
 | `scripts/library_measure_anlz.py` | Stage D of docs/LIBRARY_ANALYSIS_HANDOVER.md: read Rekordbox's own ANLZ analysis files. |

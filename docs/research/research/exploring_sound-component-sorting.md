@@ -275,14 +275,46 @@ Measurement outputs live in gitignored `tmp/` folders (named per Finding); every
 - **Synthesis:** per track store only end values (float / category) + small fingerprints where a similarity query needs them: structure ≈ 64 B, bass / hats / melody fingerprints ≤ 256 B each, one CLAP vector 512 × float16 = 1 KB. Budget **≤ 2 KB per track → ≤ 10 MB for the library**. Never: stems, frame series, onset lists, envelopes, pitch curves, per-window embeddings.
 - **Confidence:** high.
 
+### 2026-11-12 — corrections (supersedes the named parts of the 2026-11-10 entries after Adversarial A1-A13 + Citation Quality 2026-11-12)
+- **RQ5 (A1):** the zero-shot run is a **negative result, not a loading bug.** `clap-htsat-unfused` loaded correctly (`logit_scale` 18.7); "acid bassline" won 53-100 % of windows on all 6 mixes, "hi-hat" scored p ≤ 0.034 although 1.7-3.2 hats per beat were measured; on the `other` stem "pad" / "cowbell" won. Only `larger_clap_music` (`logit_scale` read as 1.0) stays inconclusive. Few-shot was never run → W3 / G4 are **unproven** until the user's example set exists.
+- **RQ9 (A8) units:** basic-pitch 4.63 CPU-s per 30 s window × 4 windows × 4633 files = **23.8 CPU-h** (not 3 h). CPU separation 528 CPU-s per 294 s track → **≈ 706 CPU-h** for the library (≈ 10× the base pass); the "45 h" is **wall-clock** at 8.8× realtime aggregate, measured once with 4 processes on one track at 52-74 % system load. The GPU "10 h" uses shifts 0 while quality was probed at shifts 1. CLAP on CPU 4.6-36 CPU-s per track depending on threads → 6-46 CPU-h.
+- **RQ2 (A9):** every GPU number comes from torch-CUDA, which fails the installer gate; the onnxruntime / DirectML path was **not measured**. All model runs used numpy 2.4.6 → fit with the `numpy==1.26.4` pin (`requirements.txt:38`) is **unproven**. Some ONNX weights live on third-party hosts.
+- **RQ4 (A4, A5):** on non-overlapping split halves stability is lower than the overlapping retest: off-beat share 0.47, high-band percussive share 0.81, hats per beat 0.69 — below the 0.85 acceptance of RQ10. The "same note 90 %" is the mean-spectrum f0; the between-kick f0 scores 82 % / 72 %. 33 genre tests uncorrected → p-values indicative only. **The > 7 kHz share partly ranks file quality:** the library has 1380 lossy files (738 m4a, 642 mp3) and 3057 tracks carry a `BadFormat` MyTag. Mitigation for the plan: hats band **5-12 kHz** (ρ 0.96 to > 7 kHz, below every tier-B/C cutoff ≥ 16 kHz) + quality tier as covariate.
+- **RQ1 (A2, A3):** the kick-bass fusion verdict rests on 6 hard-techno tracks and an energy proxy; 2 of 6 bass stems held 16 % / 38 %. The timing split is weaker outside hard styles: bass re-rise between kicks median Trance 0.69, House 0.63 vs Hard Techno / Raw 0.96-0.99 (n 5-9), and it cannot tell kick rumble from a bassline either. "97 %" holds for the hard-style majority of the sample, not per genre.
+- **RQ3 (A6, A7):** copy ground truth was same title ± 3 s ± 1 BPM, not audio identity, and the metrics were tuned on those pairs → acceptance must use a **held-out, fingerprint-confirmed** copy set (fpcalc installed 2026-11-08). PSSI writer attribution is heuristic (LMS can write PSSI too). Re-analysis changes the ANLZ, not the audio → the store key must include the **ANLZ file mtime**, not only audio path + mtime + size. Break-share stability ± 3 points only 0.74.
+- **Storage (A10):** rule 12 bans window embeddings → every new user class means recomputing embeddings (CLAP on the mix: ≈ 1 h GPU, 6-46 CPU-h); a single mean-pooled vector dilutes sparse sounds like a bell hit. Keeping top-8 window vectors (8 × 512 × fp16 = 8 KB) would break the 2 KB budget → **user decision**.
+- **RQ7 / RQ8 (A11):** the sibling table lives in a CWD-relative file (`app/db_taste.py:42-44`) → path must move to platformdirs before use (precedent `app/artist_store/schema.py:43` `SCHEMA_VERSION`, `:290` `migrate`). Extra light-list fields clash with `drafting_performance-overhaul.md:28` → serve component values through their own lookup endpoint, not the light list.
+- **RQ6 (A12):** weak labels are thin — `Vocal` ≈ 8 tracks, `Melodic` ≈ 100, positives only; "Acid" is a Techno sub-genre tag (`frontend/src/config/tagTaxonomy.js:12`). basic-pitch output 0.5-12.3 notes / s; no melody pair tested. G3 categories are **conditional**.
+- **Evidence (A13):** the measurement scripts are preserved in `scripts/dev/sound_component_research/{structure,baseline,models}/` (pip freezes of both test envs included); outputs stay in gitignored `tmp/`.
+- **Citation fixes:**
+  - RQ3: unmask code is `scripts/library_measure_anlz.py:90-126` (`unmask_pssi`, `unmask_anlz_bytes`); Rekordbox Related Tracks lists "[BPM], [Key], [Matching], same genre, [Ratings], My Tag, etc." — no phrase criterion **named** (manual p. 32, https://cdn.rekordbox.com/files/20260807093645/rekordbox7.2.18_manual_EN.pdf).
+  - RQ8: `frontend/src/components/RankingView.jsx:680-718` is a chip row that toggles tags into Comment (`toggleTag` `:256`), **not** a filter. Rekordbox Track Suggestion ranks by Collection / Streaming Radar, Era, Mood, Association; BPM / Key / Vocal are only Radar conditions — nothing per stem (manual pp. 35-36, same URL).
+  - RQ4: swap and edit distance on 16th-grid onset matrices are used for EDM drum patterns (https://arxiv.org/pdf/2011.13062, after Toussaint 2006); Hamming + rotation handling = own construction.
+  - RQ2: torch CPU wheel 126.7 MB (2.15.0 cp311 win_amd64, https://pypi.org/project/torch/#files) vs CUDA 1.99-2.16 GB (HTTP Content-Length 2026-11-12: https://download.pytorch.org/whl/cu130/torch-2.14.1%2Bcu130-cp311-cp311-win_amd64.whl, https://download.pytorch.org/whl/cu134/torch-2.15.0%2Bcu134-cp311-cp311-win_amd64.whl); onnxruntime-directml 1.24.4 = 25.1 MB (https://pypi.org/project/onnxruntime-directml/#files), runs on any DirectX 12 capable device.
+  - RQ5: PANNs weights CC BY 4.0 per https://zenodo.org/records/3987831 (the GitHub repo states only the MIT code licence). DCASE 2021 few-shot winner F 38.4 % is **bioacoustic** (animal calls), no music-mix figure found (https://arxiv.org/abs/2110.04474v2).
+  - RQ6: optimal transposition index on chroma (`oti`, https://essentia.upf.edu/reference/std_ChromaCrossSimilarity.html) + local sub-sequence alignment (https://essentia.upf.edu/tutorial_similarity_cover.html); interval / contour sequences = own construction.
+  - RQ3 note: the app's **own** phrase analysis exists in analysis results (`app/main.py:1113` drops a `phrases` field from light lists); only Rekordbox PSSI is missing at runtime.
+- **Confidence after corrections:** W9 high (feasible, cheap) / medium (perceived quality); W2 medium-high; W4 medium (energy) / low (counts, open-closed); W5 low; W6-W8 medium pipeline / low categories; W3 low.
+
 ## Adversarial Findings
 
 Stage 2 Adversarial-Agent (phase 2). Devil's-advocate — what could go wrong, what assumptions are weak, what dependencies betray us. ≤120 words. Append-only.
 
-### YYYY-MM-DD
-- **Weak assumption:** …
-- **Failure mode:** …
-- **Counter-example:** …
+### 2026-11-12
+- **A1 Counter-example (RQ5):** `clap-htsat-unfused` loaded correctly (`logit_scale` 18.7), yet "acid bassline" won most windows on all 6 mixes; "hi-hat" p ≤ 0.034 despite 1.7-3.2 hats per beat. Negative model result, not only a loading bug. Few-shot never run.
+- **A2 Weak assumption (RQ1):** kick-bass fusion verdict = 6 hard-techno tracks + energy proxy; 2 of 6 bass stems held 16 % / 38 %. Bass f0 40-47 Hz only 4 of 6. Equal > 6 kHz onset counts do not prove hat isolation; W5 never measured on the drums stem.
+- **A3 Failure mode (RQ4 / RQ1):** timing split weakens outside hard styles (re-rise Trance 0.69, House 0.63 vs Hard Techno / Raw 0.96-0.99, n 5-9) and cannot tell kick rumble from a bassline — the flaw blamed on htdemucs.
+- **A4 Weak assumption (RQ4):** retest windows overlap (median 41 s); split-half: off-beat 0.47, percussive share 0.81, hats / beat 0.69, all below RQ10's 0.85. "90 %" is the mean-spectrum f0; between-kick f0 0.82 / 0.72, octave ignored. 33 uncorrected genre tests.
+- **A5 Failure mode (RQ4 W4):** > 7 kHz share follows the lossy cutoff: 1380 MP3 / M4A, 3057 tracks tagged `BadFormat`; sample was 25 / 40 AIFF. "Hat amount" partly ranks file quality.
+- **A6 Counter-example (RQ3):** copy ground truth = same title ± 3 s ± 1 BPM, not audio identity; metrics tuned on the pairs RQ10 reuses for acceptance → circular. Metrics overlap little (top-10 0.14-0.17). A raw seed gets phonk 132 and house 127 BPM neighbours.
+- **A7 Failure mode (RQ3 / RQ7):** PSSI writer proven Rekordbox for only part of the library; LMS also writes PSSI. Re-analysis changes ANLZ, not audio → a path + mtime + size key goes stale. Break share ± 3 points only 0.74.
+- **A8 Counter-example (RQ9):** units mixed — basic-pitch ≈ 24 CPU-h not 3 h; CLAP 24-46 CPU-h; CPU separation ≈ 680-706 CPU-h (≈ 10× base pass). "45 h" from one track at 52-74 % load; GPU "10 h" at shifts 0, quality probed at shifts 1.
+- **A9 Failure mode (RQ2):** GPU numbers from torch-CUDA (fails the + 400 MB gate); onnxruntime / DirectML never measured; numpy 2.4.6 in the test env vs the 1.26.4 pin; ONNX weights on third-party hosts; htdemucs weights licence unclear.
+- **A10 Failure mode (storage / RQ5):** rule 12 bans window embeddings → every new class (G4) or redefinition reruns the model tier; one mean-pooled CLAP vector dilutes sparse sounds; window vectors (≈ 30 KB / track) break the 2 KB budget.
+- **A11 Weak assumption (RQ7 / RQ8):** sibling table = second store in a CWD-relative file with no shared migration owner; UI needs the unmerged `SORT_VALUES`; extra light-list fields clash with `drafting_performance-overhaul.md:28`.
+- **A12 Weak assumption (RQ6 / RQ5):** G3 / G4 stay Goals with low accuracy and no user IDs; weak labels thin (Vocal ≈ 8, Melodic ≈ 100, positives only); "Acid" is a Techno sub-genre tag; no melody pair tested.
+- **A13 Failure mode (all vs "nix final bauen"):** scripts + outputs only in gitignored `tmp/` → the "test" half not reproducible after cleanup; "unmask in `app/`" and "fits High" must stay plan text.
+- **Carried forward as acknowledged risks:** A1, A10, A12 (classes / categories unproven until the user set exists; storage vs reruns = user decision); A2, A3, A5 (genre + file-quality generalisation); A4 (split-half only); A6, A7 (no perceptual ground truth; ANLZ mtime in the key); A9 (ONNX path, numpy pin, weight host, licence before any model task); A11 (store path, UI coupling). **Resolved:** A8 (units corrected), A13 (scripts preserved in `scripts/dev/sound_component_research/`).
 
 If none survive scrutiny: **"No surviving objections — proceed with caution flags above."**
 
@@ -290,9 +322,11 @@ If none survive scrutiny: **"No surviving objections — proceed with caution fl
 
 Stage 2 Citation-Verifier (phase 2). Checks every `file:line` ref + URL in `## Findings` exists + says what the Finding claims. PASS / FAIL list. ≤80 words.
 
-### YYYY-MM-DD — <PASS|FAIL>
-- PASS: Findings 1, 2, 4 — citations verified
-- FAIL: Finding 3 — `app/main.py:123` no such symbol, replace or remove
+### 2026-11-12 — FAIL
+- PASS: RQ1, RQ9, RQ10, storage budget — all refs, URLs and numbers hold.
+- FAIL: RQ3 (unmask line range; Rekordbox manual list is open-ended), RQ7 (`migrate` at `:290`, not `:41-43`), RQ8 (RankingView chips toggle Comment tags, not filters; Track Suggestion criteria misnamed), RQ4 (arXiv 2011.13062 uses swap + edit only), RQ2 (wheel sizes 126.7 MB / 1.99-2.16 GB; DirectML size source), RQ5 (PANNs weight licence source; DCASE figure is bioacoustic), RQ6 (essentia tutorial has no OTI / intervals).
+- Unreachable: none. Numbers: 6 / 6 spot-checked match.
+- All 11 defects restated with corrected refs in the 2026-11-12 corrections entry (the 2026-11-10 entries stay as written, per append-only).
 
 ---
 

@@ -5603,6 +5603,260 @@ Scan an audio library with ffprobe, aggregate codec/bitrate/sample-rate.
 - `classify()` — Bucket per club-readiness tier.
 - `main()`
 
+### `scripts/dev/sound_component_research/baseline/bench_hpss.py`
+
+Cost of hpss variants on the middle 120 s (CPU s, process_time) + effect on hpr_mid_db.
+
+### `scripts/dev/sound_component_research/baseline/evaluate.py`
+
+Plausibility evaluation of the baseline features (no ground truth).
+
+- `flat()`
+- `col()`
+- `spear()`
+- `camelot()`
+- `key_stats()`
+- `cosmat()`
+- `pattern_stats()`
+
+### `scripts/dev/sound_component_research/baseline/explore.py`
+
+*(no module docstring)*
+
+- `folder()`
+
+### `scripts/dev/sound_component_research/baseline/features.py`
+
+No-new-dependency baseline features for sound components (W2 bass, W4/W5 hats, W6 melody).
+
+- `db()`
+- `note_of()`
+- `window_grid()` — grid = [[beat_in_bar, bpm, time_ms], ...] -> beat times relative to the window start.
+- `beat_phase()` — beat index i and phase in [0,1) for times t (array) on beat times bt.
+- `env_power()` — Power envelope: boxcar 2*dec samples, decimate by dec, Hann of smooth_ms.
+- `novelty()` — Rise of log-compressed energy over the minimum of the previous lookback window.
+- `pick_onsets()` — Per-band tuned picker.
+- `estimate_lag()` — Global grid offset: lag (s) maximising the > 2 kHz energy novelty at beat + lag.
+- `spectrum_shares()` — W2b + plain band shares from one Welch PSD (1.35 Hz bins).
+- `bass_block()` — W2.
+- `hat_onsets()` — Returns (fine 5 ms envelope for decays, 10 ms pick envelope, onset idx, peak idx).
+- `flux_profile()` — Threshold-free variant: positive rise of the log-compressed envelope, by grid position.
+- `hat_features()` — W4 scalars + W5 16-step histogram for one band envelope and its onsets.
+- `hpss_block()`
+- `hpss_shares()`
+- `melody_block()` — W6 descriptors, all on the 300 Hz - 5 kHz band of one STFT (4096 / 1024).
+
+### `scripts/dev/sound_component_research/baseline/patch2.py`
+
+One-off patch of features.py after the label-free picker tuning (tune_hats.py).
+
+- `rep()`
+
+### `scripts/dev/sound_component_research/baseline/posthoc.py`
+
+Post-hoc checks on the stored results (no audio access).
+
+- `g()`
+- `sp()`
+- `contrast()`
+- `rate_voiced()`
+- `nm()`
+- `cm()`
+
+### `scripts/dev/sound_component_research/baseline/run.py`
+
+Run the baseline features on the sample.
+
+- `rss_mb()`
+- `Clock`
+- `  Clock.run()`
+- `file_duration()`
+- `load()`
+- `hats_all()`
+- `analyse()`
+- `main()`
+
+### `scripts/dev/sound_component_research/baseline/select_sample.py`
+
+Seeded stratified sample of 40 local tracks + Rekordbox PQTZ beat grids.
+
+- `norm_genre()`
+
+### `scripts/dev/sound_component_research/baseline/synth_test.py`
+
+Synthetic sanity check for the pickers / classifiers / decay estimators (known truth).
+
+- `burst()` — Band noise burst whose POWER envelope falls 20 dB in t20_ms.
+- `add()`
+- `make()`
+- `run()`
+
+### `scripts/dev/sound_component_research/baseline/tune_hats.py`
+
+Label-free tuning of the high-band onset picker.
+
+- `env_smooth()` — Power envelope at FS_ENV with a Hann smoother of total length ms.
+- `shares()`
+
+### `scripts/dev/sound_component_research/baseline/w8_compare.py`
+
+W2b cross-check against the app's own whole-track numbers (audio_w8.jsonl, bass.share_60/120).
+
+### `scripts/dev/sound_component_research/models/bench_basicpitch.py`
+
+basic-pitch (ONNX backend, CPU) on the `other` stem 30 s window.
+
+### `scripts/dev/sound_component_research/models/bench_clap.py`
+
+LAION-CLAP via transformers: embedding throughput + zero-shot sanity (mix vs `other` stem).
+
+- `windows()`
+- `embed()`
+
+### `scripts/dev/sound_component_research/models/bench_demucs.py`
+
+Demucs separation timing.
+
+### `scripts/dev/sound_component_research/models/bench_features.py`
+
+Per-stem cheap features after in-memory separation (GPU, default config).
+
+- `timed()`
+- `sub_share()`
+- `pyin_f0()`
+- `hats_density()`
+- `harmonic_ratio()`
+
+### `scripts/dev/sound_component_research/models/bench_pitch.py`
+
+torchcrepe (tiny/full) on the `other` stem, 30 s window, GPU vs CPU.
+
+- `run()`
+
+### `scripts/dev/sound_component_research/models/common.py`
+
+Shared helpers for the sc-bench measurement spike.
+
+- `load_tracks()`
+- `label()`
+- `load_audio()` — -> float32 (2, n) at sr.
+- `PeakRSS` — Samples process RSS in a thread; .peak in MB.
+- `  PeakRSS.mb()`
+- `Timer`
+- `sys_load()` — System-wide CPU % (other benchmarks may run concurrently).
+- `get_demucs()` — Load via the demucs package's legacy remote repo = dl.fbaipublicfiles.com (sha256-checked).
+- `separate()` — wav_np float32 (2,n) @44.1k -> dict stem -> np float32 (2,n).
+- `emit()`
+
+### `scripts/dev/sound_component_research/models/debug_clap.py`
+
+*(no module docstring)*
+
+### `scripts/dev/sound_component_research/models/debug_clap2.py`
+
+*(no module docstring)*
+
+### `scripts/dev/sound_component_research/models/debug_clap3.py`
+
+*(no module docstring)*
+
+- `cos()`
+
+### `scripts/dev/sound_component_research/models/debug_crepe.py`
+
+*(no module docstring)*
+
+### `scripts/dev/sound_component_research/structure/common.py`
+
+W9 structure-similarity prototype: load phrases, build the three representations.
+
+- `sub_matrix()` — Substitution cost per bar: 0 same label, else 0.3 + 0.7 * loudness gap (0..1).
+- `fmt()`
+- `load()`
+- `build()`
+- `quant()` — Bars -> nearest multiple of q; runs rounding to 0 (< q/2) are dropped, neighbours merged.
+- `summary()`
+- `profile()` — nbins equal slices of the track (in beats); returns (nbins, 7) label-share matrix.
+- `abs_profile()` — Majority label per absolute 8-bar bin; 7 = past the end.
+- `feat_matrix()`
+
+### `scripts/dev/sound_component_research/structure/extract_phrases.py`
+
+Read-only: per-phrase PSSI entries for every track -> tmp/sc-struct/phrases.jsonl.
+
+### `scripts/dev/sound_component_research/structure/t0_quality.py`
+
+*(no module docstring)*
+
+- `mult()`
+
+### `scripts/dev/sound_component_research/structure/t2_groups.py`
+
+Task 2 (exact-structure groups), task 6 (sortable-column distributions), extra task-5 counts.
+
+- `dupkey()`
+
+### `scripts/dev/sound_component_research/structure/t2b_coarse.py`
+
+Coarser exact-group keys + stability of keys/columns across same-audio copies.
+
+- `lenclass()`
+
+### `scripts/dev/sound_component_research/structure/t3_metrics.py`
+
+Task 3: the three metric families, compute cost seed-vs-all and all-pairs.
+
+- `nw_py()` — Reference pure-Python weighted NW on (label, bars) runs.
+- `nw_one()`
+- `nw_seed()`
+- `nw_all()`
+- `ms()`
+- `unit()`
+- `timed()`
+
+### `scripts/dev/sound_component_research/structure/t4_sanity.py`
+
+Task 4: nearest neighbours for 6 seeds + BPM/genre signal test.
+
+- `find()`
+- `line()`
+
+### `scripts/dev/sound_component_research/structure/t5_nwtune.py`
+
+NW parameter sensitivity, scored on (a) retrieval of same-audio copies with differing analysis,
+
+- `arrays()`
+- `nw_one()`
+- `nw_all()`
+- `score()`
+
+### `scripts/dev/sound_component_research/structure/t6_binned.py`
+
+Metric (i'): edit distance on the 8-bar (or 4-bar) binned label string = shift-tolerant Hamming.
+
+- `binned()`
+- `arrays()`
+- `ed_one()`
+- `ed_seed()`
+- `ed_all()`
+- `ed_py()`
+- `score()`
+
+### `scripts/dev/sound_component_research/structure/t7_cluster.py`
+
+Task 7: k-medoids / agglomerative on metric (iii) and (ii)/(i-b); do nameable families emerge?
+
+- `kmedoids()`
+- `best_kmedoids()`
+- `describe()`
+
+### `scripts/dev/sound_component_research/structure/t8_rules.py`
+
+Rule-based families + alternative drop definition + final column table.
+
+- `post_break_drop()` — Start bar of the first Chorus run that comes after a Down run (Up in between allowed).
+- `family()`
+
 ### `scripts/feature_map.py`
 
 Feature registry plus a live overlay of which branch or worktree touches which feature.
