@@ -3,7 +3,7 @@ slug: sound-component-sorting
 title: Nach Klang-Bestandteilen sortieren (Bass, Hi-Hats, Bells, Melodie)
 owner: tb
 created: 2026-11-08
-last_updated: 2026-11-12
+last_updated: 2026-11-13
 tags: [analysis, similarity, sorting, stems]
 related: [recommender-similar-tracks, recommender-taste-llm-audio]
 supersedes: []
@@ -33,6 +33,7 @@ superseded_by: []
 - 2026-11-12 — `implement/rework_` — Plan-Reviewer round 2 REWORK (7 reasons: stale text, unmeasured on-beat claim, P27 + window row, cancel UI, single-track analysis during scans, telemetry, timing tests in CI)
 - 2026-11-12 — `implement/review_` — all 7 reasons applied, back to the Plan-Reviewer (rework round 2 of max 3)
 - 2026-11-12 — `implement/approvalgate_` — plan reviewed (P + T + M + B + X + V, 2 rework rounds) + mockup / summary ready, awaiting approval
+- 2026-11-13 — `implement/rework_` — user at the gate: "Überarbeite den Plan" (no specific reason given). Rework agenda chosen by the agent, stated to the user: (1) re-measure what cost user wishes — hat pattern, on-beat / off-beat shares — with section-aware analysis and an interleaved stability split; (2) held-out confirmation of W1 / W5 on fresh tracks now, not after approval; (3) run the measure-only probes now: ONNX runtime with numpy 1.26 + licence table; (4) melody via original / remix pairs and a few-shot proxy on the user's own tags
 
 ## Original Idea (verbatim — never edit)
 
