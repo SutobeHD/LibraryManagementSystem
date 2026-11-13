@@ -421,6 +421,11 @@
 | `scripts/dev/sound_component_research/models/debug_clap2.py` | *(no module docstring)* |
 | `scripts/dev/sound_component_research/models/debug_clap3.py` | *(no module docstring)* |
 | `scripts/dev/sound_component_research/models/debug_crepe.py` | *(no module docstring)* |
+| `scripts/dev/sound_component_research/sections/bench_decode.py` | Decode cost through an ffmpeg subprocess (what the app would use for m4a): whole track vs one |
+| `scripts/dev/sound_component_research/sections/eval_sections.py` | Evaluation of extract.py output: three stabilities per scalar, hat grid shares, hat pattern |
+| `scripts/dev/sound_component_research/sections/extract.py` | Section-aware window measurement for the sound-component rework (hats grid position, pattern |
+| `scripts/dev/sound_component_research/sections/select_fresh.py` | Seeded stratified held-out sample: 60 local tracks with Rekordbox PQTZ grid + PSSI phrases, |
+| `scripts/dev/sound_component_research/sections/synth_kicktail.py` | Synthetic check of the kick-tail measures in extract.bass_block_m (known truth). |
 | `scripts/dev/sound_component_research/similarity/eval_sim.py` | Own-half retrieval of W1 / W5 fingerprint variants built from run_sim.py output. |
 | `scripts/dev/sound_component_research/similarity/run_sim.py` | Raw per-half descriptors for the W1 (bass sound + line) and W5 (hat sound) similarity fingerprints. |
 | `scripts/dev/sound_component_research/similarity/select_extra.py` | Seeded extra set of 10 lossy (mp3 / m4a) tracks with Rekordbox PQTZ grids, same pool rules as |

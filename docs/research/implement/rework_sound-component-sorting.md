@@ -350,6 +350,42 @@ Measurement outputs live in gitignored `tmp/` folders (named per Finding); every
 - **Synthesis:** **W1 "same bass" (sound + line, kick in and out) works without separation** at ≈ 270 bytes per track. W5 "same hats" works as a **high-band timbre + decay** similarity; calling it "hat sound" overstates it. Add to the RQ10 user set: 5 "same bass" pairs and 5 "same hats" pairs.
 - **Confidence:** medium-high for W1 (repeatability, transposition invariance, genre-robust); medium for W5 (mix-background share); both pending held-out confirmation.
 
+### 2026-11-13 — rework A: section-aware window, hat grid shares, hat pattern, held-out W1 / W5 (supersedes the W4 / W5 verdicts of the "verifier gap closure" table and the "middle 120 s" window)
+- **Codebase:** scripts `scripts/dev/sound_component_research/sections/` (`select_fresh.py`, `extract.py`, `eval_sections.py`, `synth_kicktail.py`, `bench_decode.py`); frozen W1 / W5 definitions from `similarity/run_sim.py` re-run unchanged. Side findings for the port: `bass_block` raises `IndexError` on 3 / 60 tracks (`_acf_f0` without a guard on a 60 s half); the grid lag differs between the middle window and a main block on 3 / 60 tracks (8.6 / 24.8 / 66.7 ms).
+- **Measurement (`tmp/sc-rework-a/`, 60 **fresh** tracks, seed 20261113, none of the 50 selection tracks; 21 lossy):**
+  - **Window M** = up to 64 bars from Rekordbox PSSI Chorus phrases (high mood kind 5, mid / low kind 9), 8-bar blocks taken round-robin over ≥ 2 main phrases (median 103 s audio; fallback to the loudest non-intro / non-outro phrases on 1 / 60).
+  - **Three stability splits** (Spearman): (i) interleaved bars inside M by Thue-Morse parity (odd / even flips 2-bar patterns) = measurement noise only, an upper bound; (ii) early vs late half of M and S1 / S2 = first vs last 16 main bars (median 141 s apart) = variation through the track; (iii) the old two consecutive 60 s halves of the middle 120 s.
+
+  | Feature (5-12 kHz) | (i) | (ii) early / late | S1 / S2 | (iii) middle-120 halves | Verdict |
+  |---|---|---|---|---|---|
+  | 16th share | 0.99 | 0.92 | 0.82 | 0.88 | **column** |
+  | off-beat (8th) share | 0.97 | 0.84 | 0.76 | 0.62 | **coarse column, on window M** (energy variant 0.93) |
+  | on-beat share | 0.96 | 0.74 | 0.49 | 0.64 | **drop** — 55 % of on-beat energy sits on beats 2 + 4 (clap) plus the kick click; saturated in 65 % of tracks |
+  | off-beat open share (T20 > 120 ms) | 0.98 | 0.82 | 0.78 | 0.83 | coarse — still not hat-specific (ρ −0.53 with percussive share; HPSS does not fix it) |
+  | hats energy share | 1.00 | 0.87 | 0.71 | 0.91 | column |
+  | hats per beat | 0.97 | 0.80 | 0.55 | 0.53 | coarse (density; saturation makes on / off count shares ≈ 1 / density) |
+  | `sub60_of_200` / `bass_between_db` / bass note | 1.00 | 0.98 / 0.98 / 0.94 | 0.99 / 0.94 / 0.88 | 0.96 / 0.93 / 0.97 | column (window choice irrelevant: same note 98 %) |
+
+  The earlier "off-beat 0.47" was **section change, not noise**: bootstrap 95 % CI (i) [0.92, 0.99] vs (iii) [0.45, 0.82]. Genre check: 16th share House / Trance 0.15 vs rest 0.34 (p 0.022, uncorrected).
+  - **Retrieval, top-1 / top-10 (chance 0.008 / 0.084):**
+
+  | Fingerprint | frozen code, middle-120 halves (held-out) | window M early / late | S1 / S2 |
+  |---|---|---|---|
+  | W1 combined, kick out | **0.88 / 0.97** | 1.00 / 1.00 | 0.95 / 1.00 |
+  | W1 combined, kick in | 0.82 / 0.93 | 0.95 / 1.00 | 0.90 / 0.98 |
+  | W5 timbre + decay | **0.83 / 0.95** | 0.97 / 0.98 | 0.85 / 0.92 |
+  | control: frames before onsets | 0.68 / 0.82 | 0.78 / 0.85 | 0.53 / 0.64 |
+  | hat pattern `flux16` alone | 0.43 / 0.85 | 0.68 / 0.88 | 0.51 / 0.75 |
+
+  **Held-out confirmation:** W1 and W5 pass the plan's bar on fresh tracks. **The bar itself is too weak** — the control passes it too (0.82); only the cross-section split S1 / S2 separates W5 (0.85 / 0.92) from the control (0.53 / 0.64). The interleaved split saturates everything and is useless as an acceptance test. W1 by genre: House / Trance 0.76 / 0.88, hard styles 0.96 / 1.00; lossy 0.90 / 0.95.
+  - **Hat pattern** separates tracks (d′ 1.36, AUC 0.97 early / late) but less than timbre (d′ 2.59), and is **independent** of timbre (pair-distance ρ +0.03 to +0.13) → a separate "same pattern" ordering, not an add-on to timbre. Coarse: 91 % of the 16-step profile is the 1-beat repetition; 32 steps add nothing. Pattern variants were tried on the fresh set → not held-out.
+  - **Window risk was understated:** the middle 120 s overlaps Down phrases > 25 % in 7.9 % of the library, but lies > 25 % outside Chorus phrases in **74 %** (> 50 % in 30 %).
+  - **Kick tail vs bassline (A3):** 54 / 60 tracks have their own low-band event between kicks (≥ 6 dB re-rise after the dip in ≥ 50 % of beats; synthetic check: pure tail 0.00, rumble 0.79, bass notes 1.00); 2 / 60 are kick tail only. Rumble vs a one-note bass stays indistinguishable (13 % overall, Hard Techno 36 %). W1 does not just compare kicks: a track's own kick spectrum is its nearest kick-out neighbour in 3 % (chance 1.7 %).
+  - **Cost on window M:** 0.99 CPU-s per track for lag + W2 + W1 + W4 grid + W5 (1.36 under 12 parallel processes); decode 0.2-0.4 s when one span or the whole track is decoded → **1.7-1.8 CPU-h** for 4633 files (estimate).
+- **Web:** none new.
+- **Synthesis:** analyse **main sections chosen from Rekordbox phrases**, not an arbitrary window. With that: off-beat share returns (coarse), 16th share is solid, on-beat stays out — now for a measured reason; hat pattern returns as its **own** similarity kind; W1 / W5 are confirmed on fresh tracks. Acceptance must use the cross-section split plus a control fingerprint. Fresh-track ids (reusable held-out set): 146945739, 10850880, 144679260, 206394916, 102989034, 76033269, 132912787, 159236034, 139373667, 121777280, 50062292, 122610912, 147542863, 242148098, 113553813, 152928519, 33067422, 104496341, 50328590, 59772524, 81647367, 61986485, 188003906, 252784818, 97457529, 249336698, 181143909, 111835855, 91487286, 42317032, 260758967, 229533752, 156399413, 177148477, 92090756, 76786144, 84942724, 127064202, 213065562, 246280891, 79220680, 96622913, 229127414, 188727416, 6567014, 207697921, 185845796, 245679953, 108326391, 92653158, 61394649, 53662195, 35789474, 70484757, 118693129, 173902299, 88975820, 202712084, 11894335, 118853167.
+- **Confidence:** high for stability + held-out retrieval (fresh tracks, frozen code); medium for the pattern axis (variants chosen on this set) and open / closed (not hat-specific).
+
 ## Adversarial Findings
 
 Stage 2 Adversarial-Agent (phase 2). Devil's-advocate — what could go wrong, what assumptions are weak, what dependencies betray us. ≤120 words. Append-only.

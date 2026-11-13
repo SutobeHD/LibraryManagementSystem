@@ -5766,6 +5766,83 @@ Shared helpers for the sc-bench measurement spike.
 
 *(no module docstring)*
 
+### `scripts/dev/sound_component_research/sections/bench_decode.py`
+
+Decode cost through an ffmpeg subprocess (what the app would use for m4a): whole track vs one
+
+- `decode()` — Returns (wall seconds, decoded seconds).
+
+### `scripts/dev/sound_component_research/sections/eval_sections.py`
+
+Evaluation of extract.py output: three stabilities per scalar, hat grid shares, hat pattern
+
+- `sub()`
+- `spear()`
+- `boot()`
+- `st_of()`
+- `g_w2()`
+- `g_hat()`
+- `g_en()`
+- `l_bass()`
+- `l_hat()`
+- `col()`
+- `lcol()`
+- `have()`
+- `halves_of()`
+- `dmat()`
+- `stats_D()`
+- `fmt()`
+- `frozen()` — The frozen W1 / W5 distance matrices for one split protocol.
+- `n_pc()` — Pitch classes carrying >= 15 % of the voiced between-kick 16th segments.
+- `rep1()` — Share of the 16-step low-band flux pattern explained by its one-beat repetition.
+
+### `scripts/dev/sound_component_research/sections/extract.py`
+
+Section-aware window measurement for the sound-component rework (hats grid position, pattern
+
+- `Clock`
+- `  Clock.run()`
+- `fl()`
+- `popcount_parity()`
+- `grid_bars()`
+- `phrase_list()`
+- `spread_order()`
+- `select_m()`
+- `Win` — One analysis signal with its beat grid.
+- `  Win.mask()`
+- `build_window()` — Concatenate the given bars (ids into bar_i0, sorted) into one signal + synthetic beat grid.
+- `bass_pre()`
+- `hat_channel()`
+- `hat_raw()` — 5-12 kHz band exactly as F.hat_onsets + the per-onset 46 ms frames of RS.hat_sound.
+- `hpss_fine()` — Percussive part of the 5-12 kHz band at 5.8 ms resolution -> envelope on the FS_ENV axis.
+- `hpss_band()` — Baseline STFT / kernel (4096 / 1024, 31) on the 5-12 kHz rows only; per-frame energies.
+- `prepare()`
+- `spans_of()`
+- `frames_in()` — Frames whose centre lies inside one of the spans.
+- `bass_block_m()` — F.bass_block on the beat intervals idx (same definitions).
+- `hat_subset()` — F.hat_features + F.flux_profile + RS.hat_sound restricted to the beat intervals bm, plus the
+- `energy_subset()`
+- `subset()`
+- `legacy_scalars()` — Baseline functions unchanged on one contiguous piece (run.analyse without the melody block).
+- `analyse_track()`
+- `clean()`
+- `warmup()`
+- `selftest()` — Masked re-implementations must reproduce the frozen functions when every beat is selected.
+- `main()`
+
+### `scripts/dev/sound_component_research/sections/select_fresh.py`
+
+Seeded stratified held-out sample: 60 local tracks with Rekordbox PQTZ grid + PSSI phrases,
+
+- `norm_genre()`
+- `main()`
+
+### `scripts/dev/sound_component_research/sections/synth_kicktail.py`
+
+Synthetic check of the kick-tail measures in extract.bass_block_m (known truth).
+
+- `make()`
+
 ### `scripts/dev/sound_component_research/similarity/eval_sim.py`
 
 Own-half retrieval of W1 / W5 fingerprint variants built from run_sim.py output.
