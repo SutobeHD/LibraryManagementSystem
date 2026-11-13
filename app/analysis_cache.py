@@ -9,8 +9,12 @@ by default (slow on large files); set USE_CONTENT_HASH=True to verify
 content integrity for paranoid setups.
 
 Cache layout:
-    <cache_dir>/index.json           -- map file_path → {mtime, size, cache_id, version}
+    <cache_dir>/index.json           -- map file_path → {mtime, size, cache_id, version, depth}
     <cache_dir>/<cache_id>.json.gz   -- per-file analysis result (gzipped)
+
+Depth: every entry records the analysis depth that produced it ("rekordbox" <
+"high"). A lookup asks for a minimum depth and only a deeper-or-equal entry
+counts as a hit; a shallower result never overwrites a still-valid deeper one.
 """
 
 from __future__ import annotations
@@ -31,9 +35,28 @@ logger = logging.getLogger(__name__)
 
 
 # Bump when output schema changes — invalidates all stale cache entries.
-ANALYSIS_VERSION = 3
+# 4: depth-aware entries (rekordbox / high); mood, genre_hint, stereo nullable; extras added.
+ANALYSIS_VERSION = 4
 
 USE_CONTENT_HASH = False  # opt-in: also compare a quick xxhash/md5 sample
+
+ANALYSIS_DEPTHS: tuple[str, ...] = ("rekordbox", "high")
+DEFAULT_DEPTH = "rekordbox"
+DEPTH_RANK: dict[str, int] = {"rekordbox": 0, "high": 1}
+
+
+def validate_depth(depth: str) -> str:
+    """Return ``depth`` unchanged or raise ``ValueError`` for anything outside ANALYSIS_DEPTHS."""
+    if not isinstance(depth, str) or depth not in DEPTH_RANK:
+        raise ValueError(f"unknown analysis depth {depth!r}; expected one of {ANALYSIS_DEPTHS}")
+    return depth
+
+
+def _depth_rank(value: Any) -> int | None:
+    """Rank of a depth read from disk (index entry / payload); None for anything unknown."""
+    if not isinstance(value, str):
+        return None
+    return DEPTH_RANK.get(value)
 
 
 class AnalysisCache:
@@ -53,8 +76,19 @@ class AnalysisCache:
         self._index = self._load_index()
 
     # ------------------------------------------------------------------
-    def get(self, file_path: str) -> dict[str, Any] | None:
-        """Return cached result if file is unchanged, else None."""
+    @staticmethod
+    def _entry_matches(entry: dict[str, Any], st: os.stat_result) -> bool:
+        """Version + size + mtime (±1 s, FS rounding) still describe the file on disk."""
+        if entry.get("version") != ANALYSIS_VERSION:
+            return False
+        if entry.get("size") != st.st_size:
+            return False
+        return abs(float(entry.get("mtime", 0)) - st.st_mtime) <= 1.0
+
+    def get(self, file_path: str, min_depth: str = DEFAULT_DEPTH) -> dict[str, Any] | None:
+        """Return the cached result if the file is unchanged and the entry is at least
+        ``min_depth`` deep, else None. Entries without a known depth never hit."""
+        min_rank = DEPTH_RANK[validate_depth(min_depth)]
         try:
             abs_path = os.path.abspath(file_path)
         except Exception:
@@ -64,7 +98,8 @@ class AnalysisCache:
         if not entry:
             return None
 
-        if entry.get("version") != ANALYSIS_VERSION:
+        entry_rank = _depth_rank(entry.get("depth"))
+        if entry_rank is None or entry_rank < min_rank:
             return None
 
         try:
@@ -72,10 +107,7 @@ class AnalysisCache:
         except OSError:
             return None
 
-        if entry.get("size") != st.st_size:
-            return None
-        # mtime: tolerate FS rounding by comparing within 1 second
-        if abs(float(entry.get("mtime", 0)) - st.st_mtime) > 1.0:
+        if not self._entry_matches(entry, st):
             return None
 
         if USE_CONTENT_HASH:
@@ -93,15 +125,26 @@ class AnalysisCache:
         try:
             with gzip.open(cache_file, "rt", encoding="utf-8") as f:
                 result = json.load(f)
-            logger.debug(f"Cache HIT: {abs_path}")
-            return result
         except Exception as e:
             logger.warning(f"Cache read failed for {abs_path}: {e}")
             return None
+        # The payload is the authority: another process may have rewritten the
+        # shared <cache_id>.json.gz at a shallower depth behind this index.
+        payload_rank = _depth_rank(result.get("depth")) if isinstance(result, dict) else None
+        if payload_rank is None or payload_rank < min_rank:
+            logger.debug(f"Cache MISS (payload depth below {min_depth}): {abs_path}")
+            return None
+        logger.debug(f"Cache HIT: {abs_path}")
+        return result
 
     # ------------------------------------------------------------------
     def put(self, file_path: str, result: dict[str, Any]) -> None:
-        """Store analysis result, replacing any prior cached entry."""
+        """Store an analysis result for its ``result["depth"]`` (missing → "rekordbox").
+
+        Replaces a prior entry unless that entry is still valid for the file on
+        disk and deeper than the new result: a rekordbox run never downgrades a
+        cached high result.
+        """
         try:
             abs_path = os.path.abspath(file_path)
             st = os.stat(abs_path)
@@ -109,26 +152,47 @@ class AnalysisCache:
             logger.warning(f"Cannot stat for cache: {e}")
             return
 
-        cache_id = hashlib.md5(abs_path.encode("utf-8")).hexdigest() + ".json.gz"
-        cache_file = self.cache_dir / cache_id
-
-        try:
-            with gzip.open(cache_file, "wt", encoding="utf-8") as f:
-                json.dump(result, f, default=_json_default)
-        except Exception as e:
-            logger.warning(f"Cache write failed: {e}")
+        depth = result.get("depth") or DEFAULT_DEPTH
+        if _depth_rank(depth) is None:
+            logger.warning("op=cache_put path=%s err=unknown_depth depth=%r", abs_path, depth)
             return
 
+        cache_id = hashlib.md5(abs_path.encode("utf-8")).hexdigest() + ".json.gz"
+        cache_file = self.cache_dir / cache_id
+        payload = dict(result)
+        payload["depth"] = depth
         entry: dict[str, Any] = {
             "mtime": st.st_mtime,
             "size": st.st_size,
             "cache_id": cache_id,
             "version": ANALYSIS_VERSION,
+            "depth": depth,
         }
         if USE_CONTENT_HASH:
             entry["hash"] = _quick_content_hash(abs_path)
 
+        # Guard + gz write + index update under one lock: the guard's answer must
+        # still hold when the file is replaced (same cache_id for every depth).
         with self._lock:
+            existing = self._index.get(abs_path)
+            if (
+                existing is not None
+                and self._entry_matches(existing, st)
+                and (_depth_rank(existing.get("depth")) or -1) > DEPTH_RANK[depth]
+            ):
+                logger.debug(
+                    "Cache PUT skipped (%s entry deeper than %s): %s",
+                    existing.get("depth"),
+                    depth,
+                    abs_path,
+                )
+                return
+            try:
+                with gzip.open(cache_file, "wt", encoding="utf-8") as f:
+                    json.dump(payload, f, default=_json_default)
+            except Exception as e:
+                logger.warning(f"Cache write failed: {e}")
+                return
             self._index[abs_path] = entry
             self._save_index()
         logger.debug(f"Cache PUT: {abs_path}")

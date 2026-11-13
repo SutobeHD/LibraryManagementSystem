@@ -463,6 +463,7 @@ class SetReq(BaseModel):
     locale: _Literal["de", "en"] | None = None
     sc_sync_folder_id: _PathStr | None = None
     sc_download_format: _Literal["auto", "aiff"] | None = None
+    analysis_depth: _Literal["rekordbox", "high"] | None = None
     # Consent surface for the SC OAuth flow: in-app webview window (default)
     # or the OS browser. Consumed by the Tauri command, not the backend.
     sc_auth_mode: _Literal["gui", "browser"] | None = None
@@ -590,20 +591,26 @@ class TrackPlReq(BaseModel):
 
 class AudioImportReq(BaseModel):
     file_path: str
-    mode: str = "speed"  # "speed" or "accuracy"
+    depth: _Literal["rekordbox", "high"] | None = None
 
 
 class AudioStatusReq(BaseModel):
     task_id: str
 
 
+class AnalyzeTrackReq(BaseModel):
+    depth: _Literal["rekordbox", "high"] | None = None
+
+
 class AnalyzeFullReq(BaseModel):
     force: bool = False  # Re-analyze even if already analyzed
+    depth: _Literal["rekordbox", "high"] | None = None
 
 
 class AnalyzeBatchReq(BaseModel):
     track_ids: list[str] | None = None  # None = auto-detect unanalyzed
     force: bool = False
+    depth: _Literal["rekordbox", "high"] | None = None
 
 
 class MergeReq(BaseModel):
@@ -3064,7 +3071,7 @@ def get_beatgrid(tid: str):
 
 
 @app.post("/api/track/{tid}/analyze", dependencies=[Depends(require_session)])
-async def analyze_track(tid: str):
+async def analyze_track(tid: str, req: AnalyzeTrackReq = AnalyzeTrackReq()):
     """Analyzes a track to detect BPM and beat grid if missing from XML"""
     track = db.get_track_details(tid)
     if not track:
@@ -3074,11 +3081,12 @@ async def analyze_track(tid: str):
     if not path or not os.path.exists(path):
         raise HTTPException(404, "Audio file not found")
 
+    depth = SettingsManager.analysis_depth(req.depth)
     try:
         # Perform analysis in a separate process pool to avoid blocking the event loop
         loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(
-            AudioAnalyzer.get_executor(), BeatAnalyzer.analyze, path
+            AudioAnalyzer.get_executor(), BeatAnalyzer.analyze, path, depth
         )
 
         # PERSIST TO DATABASE IN-MEMORY
@@ -5786,7 +5794,7 @@ def rbep_get(name: str):
 
 @app.post("/api/audio/analyze", dependencies=[Depends(require_session)])
 def analyze_audio(req: AudioImportReq):
-    """Submit an audio file for high-accuracy background analysis."""
+    """Submit an audio file for background analysis at the requested or stored depth."""
     if not LIBROSA_AVAILABLE:
         logger.warning("Librosa not installed. Audio analysis will be mocked.")
 
@@ -5794,8 +5802,9 @@ def analyze_audio(req: AudioImportReq):
     if not file_path.exists() or not file_path.is_file():
         raise HTTPException(status_code=404, detail="Audio file not found")
 
+    depth = SettingsManager.analysis_depth(req.depth)
     task_id = f"analysis_{secrets.token_hex(8)}"
-    return AudioAnalyzer.analyze_track(task_id, str(file_path), req.mode)
+    return AudioAnalyzer.analyze_track(task_id, str(file_path), depth)
 
 
 @app.get("/api/audio/analyze/{task_id}")
@@ -5884,10 +5893,11 @@ async def analyze_track_full(tid: str, req: AnalyzeFullReq = AnalyzeFullReq()):
     if _is_rekordbox_running():
         raise HTTPException(409, "Rekordbox is running. Close it before writing analysis data.")
 
+    depth = SettingsManager.analysis_depth(req.depth)
     release = _claim_analysis_db_run()
     try:
         loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(None, writer.analyze_and_save, tid, req.force)
+        result = await loop.run_in_executor(None, writer.analyze_and_save, tid, req.force, depth)
 
         if result.get("status") == "error":
             logger.warning("analyze-full %s refused: %s", tid, result.get("error"))
@@ -5945,6 +5955,7 @@ async def analyze_batch(req: AnalyzeBatchReq = AnalyzeBatchReq()):
     if not track_ids:
         return {"status": "ok", "data": {"message": "No tracks to analyze", "total": 0}}
 
+    depth = SettingsManager.analysis_depth(req.depth)
     release = _claim_analysis_db_run()
 
     def stream_progress() -> Iterator[str]:
@@ -5958,7 +5969,7 @@ async def analyze_batch(req: AnalyzeBatchReq = AnalyzeBatchReq()):
         with _analyze_batch_count_lock:
             _analyze_batch_active += 1
         try:
-            for progress in writer.analyze_batch(track_ids, force=req.force):
+            for progress in writer.analyze_batch(track_ids, force=req.force, depth=depth):
                 yield json.dumps(progress) + "\n"
         finally:
             with _analyze_batch_count_lock:

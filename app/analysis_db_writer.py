@@ -19,6 +19,8 @@ from concurrent.futures.process import BrokenProcessPool
 from pathlib import Path
 from typing import Any
 
+from .analysis_cache import DEFAULT_DEPTH
+
 logger = logging.getLogger(__name__)
 
 #: File stem the writer uses inside a track's ANLZ dir (``ANLZ0000.DAT`` / ``.EXT`` / ``.2EX``).
@@ -64,6 +66,7 @@ class AnalysisDBWriter:
         self,
         track_id: str,
         force: bool = False,
+        depth: str = DEFAULT_DEPTH,
     ) -> dict[str, Any]:
         """
         Full pipeline: analyze a track and write results to Rekordbox DB + ANLZ files.
@@ -71,6 +74,8 @@ class AnalysisDBWriter:
         Args:
             track_id: djmdContent ID
             force: If True, re-analyze even if track is already analyzed
+            depth: "rekordbox" | "high" — resolved once by the caller in the main
+                process (never read from settings.json inside the worker)
 
         Returns:
             Dict with analysis results and write status. An ``error`` result
@@ -134,7 +139,7 @@ class AnalysisDBWriter:
 
         # 5. Run analysis
         try:
-            analysis = self._run_analysis(file_path)
+            analysis = self._run_analysis(file_path, depth)
         except Exception as e:
             logger.error(f"Analysis failed for track {track_id}: {e}")
             return {
@@ -192,7 +197,7 @@ class AnalysisDBWriter:
             "elapsed": round(elapsed_total, 2),
         }
 
-    def _run_analysis(self, file_path: str) -> dict[str, Any]:
+    def _run_analysis(self, file_path: str, depth: str = DEFAULT_DEPTH) -> dict[str, Any]:
         """Run the full analysis pipeline on one file in ``AnalysisEngine``'s worker pool.
 
         Never in the calling (sidecar) process: librosa / madmom hold the GIL and
@@ -201,7 +206,7 @@ class AnalysisDBWriter:
         """
         from .analysis_engine import AnalysisEngine, run_full_analysis
 
-        future = AnalysisEngine.get_executor().submit(run_full_analysis, file_path)
+        future = AnalysisEngine.get_executor().submit(run_full_analysis, file_path, depth=depth)
         try:
             return future.result(timeout=_ANALYSIS_TIMEOUT_S)
         except BrokenProcessPool:
@@ -365,15 +370,18 @@ class AnalysisDBWriter:
         self,
         track_ids: list[str],
         force: bool = False,
+        depth: str = DEFAULT_DEPTH,
     ) -> Generator[dict[str, Any], None, None]:
         """
         Analyze multiple tracks sequentially, yielding progress after each.
+
+        ``depth`` is resolved once per batch by the caller and applied to every track.
 
         Yields:
             Dict with: {track_id, index, total, status, bpm, key, ...}
         """
         total = len(track_ids)
-        logger.info(f"Starting batch analysis: {total} tracks (force={force})")
+        logger.info(f"Starting batch analysis: {total} tracks (force={force}, depth={depth})")
 
         analyzed = 0
         skipped = 0
@@ -381,7 +389,7 @@ class AnalysisDBWriter:
 
         for i, tid in enumerate(track_ids):
             try:
-                result = self.analyze_and_save(tid, force=force)
+                result = self.analyze_and_save(tid, force=force, depth=depth)
                 status = result.get("status", "error")
 
                 if status == "ok":

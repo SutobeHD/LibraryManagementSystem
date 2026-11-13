@@ -260,3 +260,12 @@ status = "idea"
 desc = "1,5-s-Polling/401-Loop reduzieren, SoundCloudView vs. SoundCloudSyncView zusammenführen."
 related = ["sc-url-download", "sc-playlist-sync", "import-progress-banner"]
 todo = ["View-Redundanz auflösen", "SC-Such-Recall mit echtem Künstler messen"]
+
+[[feature]]
+id = "download-loudness-normalize"
+group = "Downloads"
+name = "Lautstärke nach Download angleichen"
+status = "idea"
+desc = "Alle Tracks nach dem Download auf gleiche Lautstärke bringen, damit die Library einheitlich laut ist."
+related = ["sc-download-pipeline", "quality-tiers-audit", "library-analysis-report", "analysis-depth"]
+notes = "Wunsch tb 2026-11-08 (kam beim Thema Tier-Regel; die falschen D-Einstufungen liegen aber an fehlenden Höhen, nicht an Lautstärke). Offen: ReplayGain/LUFS-Tag schreiben (verlustfrei, Player-abhängig) vs. Audio neu rendern (ändert Nutzerdateien, braucht Backup + verlustfreies Ziel). Messbasis: LUFS der Library liegt bei -15.3 bis -4.4 (50 Tracks, Handover §3.5.1)."

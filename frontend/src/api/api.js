@@ -1,7 +1,11 @@
 import axios from 'axios';
 import toast from 'react-hot-toast';
 
-import { SC_REFRESH_TIMEOUT_MS } from '../config/constants';
+import {
+    ANALYSIS_DEPTHS,
+    ANALYSIS_DEPTH_DEFAULT,
+    SC_REFRESH_TIMEOUT_MS,
+} from '../config/constants';
 import {
     getSessionToken,
     isAuthBootstrapFailed,
@@ -145,6 +149,28 @@ export async function getScAuthMode() {
         return setScAuthMode(res.data?.sc_auth_mode);
     } catch {
         return SC_AUTH_MODE_DEFAULT; // don't cache a failed read
+    }
+}
+
+// ─── Analysis depth (settings key `analysis_depth`) ───────────────────────
+// Cached after the first read; SettingsView pushes the saved value through
+// setAnalysisDepth(). The per-run dialog (components/analysisDepth.js) reads it.
+let _analysisDepth = null;
+
+/** Overwrite the cached depth (called by SettingsView on save). */
+export function setAnalysisDepth(depth) {
+    _analysisDepth = ANALYSIS_DEPTHS.includes(depth) ? depth : ANALYSIS_DEPTH_DEFAULT;
+    return _analysisDepth;
+}
+
+/** Resolve the depth: cached value, else settings.json, else the default. */
+export async function getAnalysisDepth() {
+    if (_analysisDepth) return _analysisDepth;
+    try {
+        const res = await api.get('/api/settings');
+        return setAnalysisDepth(res.data?.analysis_depth);
+    } catch {
+        return ANALYSIS_DEPTH_DEFAULT; // don't cache a failed read
     }
 }
 

@@ -23,7 +23,21 @@ name = "Analyse-Einstellungen"
 status = "shipped"
 desc = "Tunables (BPM-Range, Cue-Limits, Memory-Grid, Samplerate) per RB_ANALYSIS_-Env, Settings-Tab Analysis."
 paths = ["app/analysis_settings.py", "frontend/src/components/settings/SettingsAnalysis.jsx"]
-notes = "DSP-Tunables nur per Env. UI-Preset analysis_quality liest kein Backend (toter Wert)."
+notes = "DSP-Tunables nur per Env (get_settings liest kein settings.json). Der tote UI-Preset analysis_quality ist seit 2026-11-09 durch analysis_depth ersetzt (siehe analysis-depth)."
+
+[[feature]]
+id = "analysis-depth"
+group = "DSP-Engine"
+name = "Analysetiefe: Rekordbox oder Hoch"
+status = "in_progress"
+branch = "feat/library-measure"
+pr = 78
+paths = ["app/analysis_extras.py", "tests/test_analysis_extras.py", "tests/test_analysis_engine_depth.py", "tests/test_analysis_depth_settings.py", "frontend/src/components/analysisDepth.js"]
+parent = "analysis-settings"
+desc = "Einstellbar, wie tief ein Track analysiert wird: Rekordbox-Level (BPM, Key, Grid, Waveforms, Phrasen, Cues) oder Hoch (zusätzlich Lautheit, Stereo, Stimmung, Frequenzgrenze, Clipping, Dynamik, Bass-Anteil)."
+related = ["analysis-engine", "analysis-cache", "analysis-api-manual", "library-analysis-report"]
+notes = "Wunsch 2026-11-08, gebaut 2026-11-09 auf feat/library-measure (Handover §3.6.2): run_full_analysis(depth=) als letzter kwarg, Rekordbox-Stufe = Rekordbox-Daten + LUFS/Peak, Hoch = plus Stereo/Mood/Genre-Hint/Extras E1-E8 (app/analysis_extras.py); Cache ANALYSIS_VERSION 4 mit Tiefen-Rang, kein Downgrade eines high-Eintrags, Cue-Toggles werden bei Cache-Treffer neu angewendet; Setting analysis_depth (Default rekordbox) über /api/settings, analysis_quality wird beim Laden verworfen; audio_analyzer-Regler mode entfernt; depth-Feld an /api/track/{tid}/analyze, analyze-full, /api/library/analyze-batch, /api/audio/analyze; UI: Settings-Karten + Pro-Lauf-Dialog (ConfirmModal mit Radios) im Kontextmenü Analysieren... und beim Drop-Detect. 1-Track-Smoke: rekordbox 30.7 s, high 29.6 s (+2.3 s Extras, Kaltstart-Rauschen)."
+todo = ["Stufen-Zeiten beider Level an 50 Tracks messen (bisher 1-Track-Smoke)", "process_import liest das Setting pro Datei statt pro Job (Folder-Scan-Loops in main.py)", "Batch-Analyse hat kein UI (analyze-batch streamt NDJSON, braucht fetch-Consumer); askAnalysisDepth({count}) ist vorbereitet", "/api/audio/analyze prüft file_path nur auf Existenz, kein validate_audio_path (vorbestehend, security-api-auth-hardening)"]
 
 [[feature]]
 id = "analysis-cache"
@@ -150,6 +164,20 @@ status = "idea"
 desc = "A/B über 10-50 echte Tracks, Live-master.db-Write mit User-DB, echter Stick im CDJ-3000."
 related = ["analysis-accuracy-harness", "usb-onelibrary-export"]
 
+[[feature]]
+id = "library-analysis-report"
+group = "Validierung"
+name = "Library-Analyse (Felder, Genres, Atlas-Abdeckung)"
+status = "in_progress"
+branch = "feat/library-measure"
+pr = 78
+desc = "Einmal über die ganze Library: Füllgrad aller Felder, Genre-Feld-Vokabular, Atlas-Abdeckung, Übereinstimmung mit eigenen Genre-Labels, Lücken, LMS-Analyse-Cache. Nur lesen."
+depends_on = ["genre-atlas-hints", "analysis-depth"]
+paths = ["scripts/library_analysis.py", "tests/test_library_analysis.py", "scripts/library_measure_anlz.py", "tests/test_library_measure_anlz.py", "scripts/library_measure_audio.py", "tests/test_library_measure_audio.py"]
+related = ["genre-atlas-hints", "insights-dashboard", "analysis-cache", "quality-tiers-audit"]
+notes = "Liest GET /api/library/tracks oder einen JSON-Abzug; schreibt tmp/library-analysis/{report.md,report.json,tracks.csv}. Stage D (library_measure_anlz.py, 2026-11-08): alle 4765 Tracks in 216 s read-only gelesen, 0 Dateifehler, PSSI 54.5 % maskiert und nach XOR-Unmask überall plausibel, 9 Tracks mit Tempo-Wechseln, 0 Hot Cues in der ganzen Library, PWV6/7 = [low, mid, high] je 3 Bytes (gemessen), 1732 ANLZ-Pfade mit alter .m4a-Endung (Analyse vor der Konvertierung). Stage E (library_measure_audio.py, 2026-11-08, 50 Tracks): 0.18 s CPU je Audio-Sekunde -> 67 CPU-h für 4633 Dateien, 6.6 h mit 12 Workern bei 85 % Effizienz, aber 5.7-8.9 GB RSS je Worker (madmom-Beats = 64 % CPU und +5 GB Peak); Waveform/PVBR/Cues weglassen spart nur ~1 %; Extras E1-E7 +12 %; Resume nach Kill verifiziert; 22 von 31 verlustfreien Containern mit harter Kante (konvertiert-Kandidaten). Erstlauf 2026-11-07: 67 % Atlas-Kandidat aus Metadaten, 21 % nur Tempo, 12 % keiner (Lücken in den Hauptgenre-Tempofenstern 142-148 und 155-170 BPM). LMS-Merkmale (LUFS, Stimmung, Phrasen) für 2 von 4648 lokalen Tracks im Cache."
+todo = ["Volle Messung nach docs/LIBRARY_ANALYSIS_HANDOVER.md: abgeleitete Merkmale (Stage B), ffprobe-Port (Stage C), Audio-Lauf (Stage E, ~53 CPU-Stunden), Quervergleiche, Report-Abschnitte + CSV-Spalten", "Stage D offen: PSSI kind->Label gegen Rekordbox-UI an 3 Tracks prüfen (Screenshots vom User), bank/u1 nach Unmask klären, PWV6/7 Byte-Skalierung verifizieren", "Vollauf (Stage E): ~7 h mit 10 Workern + Keep-awake, Start auf Zuruf des Users (Tier-Regel + fpcalc + Worker-Defaults sind seit 2026-11-09 erledigt)", "Tempo-Fallback in genre_atlas über min-max statt nur typische Fenster (füllt 581 Tracks ohne Kandidat)", "Szene-Notizen für die häufigsten Uploader"]
+
 # ── Ideen ─────────────────────────────────────────────────────────────────
 
 [[feature]]
@@ -176,3 +204,14 @@ name = "Verworfene Analyse-Experimente"
 status = "dropped"
 desc = "octave-snap, Even-Grid-Regularisierung, Octave-Window abschalten."
 notes = "Gemessen schlechter (Beat-F 0.921 -> 0.900, Phase-Fehler 4.5 -> 18.6 ms, Acc-1 regrediert)."
+
+[[feature]]
+id = "sound-component-sorting"
+group = "Ideen"
+name = "Nach Klang-Bestandteilen sortieren"
+status = "research"
+desc = "Nach einzelnen Klang-Bestandteilen sortieren: gleiche Bässe, Bass-Tiefe, benutzerdefinierte Klangklassen (Bells u.v.m.), Hi-Hat-Anteil und -Pattern, gleiche Hi-Hats, wie melodisch, Melodie-Art, ähnliche Melodien, ähnlicher Song-Aufbau (W9)."
+research = "sound-component-sorting"
+related = ["recommender-similar-tracks", "recommender-taste", "analysis-depth", "library-analysis-report"]
+notes = "Wunsch 2026-11-08, ausdrücklich nur festhalten, nicht lösen. Planung (P7) nach docs/LIBRARY_ANALYSIS_HANDOVER.md §9: 8 Wünsche in Wert / Ähnlichkeit / Kategorie geteilt, 10 Fragen an den User, Hürden gemessen (§9.2.1): Baseline ohne neue Dependency = Band-Split + hpss + chroma/mfcc ~33 CPU-h extra (Schätzung), pyin auf vollen Tracks ~103 CPU-h -> nur Ausschnitte oder isolierte Melodie; hpss braucht ~1.9 GB RSS pro Worker; GPU-torch für Windows = 2.0-2.9 GB Wheel, damit ist das +400-MB-Installer-Gate von recommender-taste nur mit CPU-torch (111-121 MB) erreichbar; der 22.05k-Backfill-Pfad von recommender-similar-tracks schneidet das Hi-Hat-Band ab. Kein torch/ONNX installiert, RTX 2070 SUPER 8 GB (CUDA 13.4), Stems für die Library ~1 TB vs 178 GB frei -> nie speichern. Ähnlichkeit erweitert die Named Slices von recommender-similar-tracks; torch-Entscheidung gemeinsam mit recommender-taste M2."
+todo = ["Approval-Gate: /approve oder /reject (7 Gate-Entscheidungen mit Defaults im Plan)", "User-Eingaben: 5 Bass-Paare + 5 Hats-Paare, PSSI-Screenshots für 157309106 / 235643068 / 80581211, Bells 5+5, Lead vs Pad 5+5, 5 Melodie-Paare, W7-Kategorie \"Unassed\"", "Nach /approve: Phase A (T1-T13) + Mess-Phase B0 (B1-B4)"]

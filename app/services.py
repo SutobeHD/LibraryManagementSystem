@@ -19,6 +19,7 @@ import psutil
 from mutagen.flac import FLAC
 from mutagen.id3 import APIC, ID3
 
+from .analysis_cache import DEFAULT_DEPTH, DEPTH_RANK
 from .config import EXPORT_DIR, FFMPEG_BIN, REKORDBOX_ROOT
 from .database import db
 
@@ -820,6 +821,7 @@ class SettingsManager:
         "sc_sync_folder_id": None,  # local Rekordbox playlist ID to create SC playlists inside
         "sc_auth_mode": "gui",  # "gui" = in-app OAuth window | "browser" = OS default browser
         "sc_download_format": "auto",  # "auto" (keep source codec) | "aiff" (convert to PCM AIFF lossless)
+        "analysis_depth": DEFAULT_DEPTH,  # "rekordbox" | "high" — how much run_full_analysis computes
         "legacy_pdb_stub": False,  # opt-in: write header-only export.pdb for CDJ-2000nxs2 (experimental — see app/usb_pdb.py)
         "scan_folders": [],  # absolute paths watched for new audio files (FolderWatcher)
         # opt-in: refresh favourite catalogues while the app is idle (artist_store.sync)
@@ -833,11 +835,17 @@ class SettingsManager:
     _LOAD_MAX_KEY_LEN = 64
     _LOAD_MAX_VALUE_BYTES = 8 * 1024
     _LOAD_MAX_LIST_ITEMS = 256
+    # Retired keys stripped on load so a stale settings.json stops round-tripping them.
+    # analysis_quality (fast/standard/thorough) was never read; analysis_depth replaces it.
+    _LEGACY_KEYS = frozenset({"analysis_quality"})
 
     @classmethod
     def _sanitize_loaded(cls, data: dict[str, Any]) -> dict[str, Any]:
         out: dict[str, Any] = {}
         for k, v in data.items():
+            if k in cls._LEGACY_KEYS:
+                logger.info("settings: dropped key=%s reason=legacy", k)
+                continue
             if not isinstance(k, str) or len(k) > cls._LOAD_MAX_KEY_LEN:
                 logger.info(
                     "settings: dropped key=%s reason=key_len>%d",
@@ -875,6 +883,19 @@ class SettingsManager:
         return out
 
     @classmethod
+    def analysis_depth(cls, override: str | None = None) -> str:
+        """The analysis depth to run with: ``override`` if given, else the stored setting.
+
+        Call once per job in the main process and pass the value down; worker
+        processes must not read settings.json (``CONFIG`` is cwd-relative).
+        """
+        if override is not None:
+            if override not in DEPTH_RANK:
+                raise ValueError(f"unknown analysis depth {override!r}")
+            return override
+        return str(cls.load().get("analysis_depth", DEFAULT_DEPTH))
+
+    @classmethod
     def load(cls) -> dict[str, Any]:
         try:
             with open(cls.CONFIG, encoding="utf-8") as f:
@@ -885,7 +906,13 @@ class SettingsManager:
                 )
                 return dict(cls.DEFAULT)
             sanitized = cls._sanitize_loaded(raw)
-            return {**cls.DEFAULT, **sanitized}
+            merged = {**cls.DEFAULT, **sanitized}
+            # SetReq.model_dump() writes undeclared Literal fields as null; GET must
+            # still hand the frontend a valid depth.
+            stored_depth = merged.get("analysis_depth")
+            if not isinstance(stored_depth, str) or stored_depth not in DEPTH_RANK:
+                merged["analysis_depth"] = DEFAULT_DEPTH
+            return merged
         except FileNotFoundError:
             # No settings file yet — the normal state of a fresh install, and
             # the defaults are the right answer. Not worth a WARNING on every
@@ -1073,13 +1100,13 @@ class BeatAnalyzer:
         return cls._engine_available
 
     @staticmethod
-    def analyze(path: str):
+    def analyze(path: str, depth: str = DEFAULT_DEPTH):
         """
         Full track analysis with Rekordbox-grade accuracy.
         Delegates to analysis_engine.py, then enriches with drop detection
         and dynamic grid for backward compatibility.
         """
-        logger.info(f"Starting analysis for: {path}")
+        logger.info(f"Starting analysis for: {path} (depth={depth})")
         if not os.path.exists(path):
             raise FileNotFoundError(f"Audio file not found: {path}")
 
@@ -1088,7 +1115,7 @@ class BeatAnalyzer:
             try:
                 from .analysis_engine import run_full_analysis
 
-                result = run_full_analysis(path)
+                result = run_full_analysis(path, depth=depth)
 
                 if result.get("status") == "ok":
                     logger.info(
@@ -1356,13 +1383,18 @@ class BeatAnalyzer:
 
 class ImportManager:
     @staticmethod
-    def process_import(file_path: Path, analysis_result: dict | None = None):
+    def process_import(
+        file_path: Path, analysis_result: dict | None = None, depth: str | None = None
+    ):
         """Orchestrates analysis and library insertion for a new file.
 
         analysis_result: optional, full output of run_full_analysis. If passed,
         re-analysis is skipped and beatgrid/cues/waveform are taken from there.
+        depth: analysis depth for this import; None = the stored setting, read
+        once here (main process) and passed to the engine and the ANLZ sidecar.
         """
         logger.info(f"Processing new import: {file_path}")
+        depth = SettingsManager.analysis_depth(depth)
         try:
             # 1. Analyze (skip if pre-computed result provided)
             if analysis_result:
@@ -1379,7 +1411,7 @@ class ImportManager:
                     "memory_cues": analysis_result.get("memory_cues", []),
                 }
             else:
-                analysis = BeatAnalyzer.analyze(str(file_path))
+                analysis = BeatAnalyzer.analyze(str(file_path), depth=depth)
 
             # 1.5 Extract Cover Art
             artwork_path = ""
@@ -1567,7 +1599,7 @@ class ImportManager:
                         )
                 except Exception:
                     pass
-                write_companion_anlz(file_path, full_result)
+                write_companion_anlz(file_path, full_result, depth=depth)
             except Exception as anlz_err:
                 logger.debug(f"ANLZ sidecar skipped for {file_path}: {anlz_err}")
 

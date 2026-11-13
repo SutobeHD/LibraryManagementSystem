@@ -128,6 +128,17 @@ export const ARTIST_DISCOVER_LIMIT = 25;
 // on the `auth_expired` marker, and a client abort (no response) reads as transient.
 export const SC_REFRESH_TIMEOUT_MS = 20_000;
 
+// Analysis depth levels — settings key `analysis_depth`, request field `depth` on the
+// analysis routes. `rekordbox` = what Rekordbox itself computes; `high` adds the
+// Stage-E measurements (docs/LIBRARY_ANALYSIS_HANDOVER.md §3.6, decision B5).
+export const ANALYSIS_DEPTHS = ['rekordbox', 'high'];
+export const ANALYSIS_DEPTH_DEFAULT = 'rekordbox';
+
+// Axios timeout for POST /api/track/{id}/analyze-full. One track takes 35-50 s
+// (handover §3.5.1), so the 10 s default aborts the request while the backend keeps
+// analysing and writing. `0` disables the client abort.
+export const ANALYZE_FULL_TIMEOUT_MS = 0;
+
 // TrackTable: width reserved for each %-width text column (Title/Artist/Album)
 // when computing the table's min width, so they never collapse to 0 px.
 export const TRACK_TABLE_TEXT_COL_MIN_PX = 160;
