@@ -4209,9 +4209,9 @@ An imported track's analysis must reach master.db (B4, 0.1 core-loop test).
 - `test_import_puts_anlz_in_the_share_in_live_mode_never_next_to_the_audio()`
 - `test_import_never_attaches_anlz_from_an_unusable_analysis()`
 
-### `tests/test_live_playlist_ops.py`
+### `tests/test_live_playlist_b11.py`
 
-Live playlist operations (B11, 0.1 core-loop test).
+Live playlist operations end to end against an rbox stand-in (B11, 0.1 core-loop test).
 
 - `rb()`
 - `live()`
@@ -4225,6 +4225,42 @@ Live playlist operations (B11, 0.1 core-loop test).
 - `test_move_next_to_a_sibling_with_gappy_seqs()`
 - `test_move_from_a_folder_next_to_a_root_sibling()`
 - `test_moving_a_folder_into_itself_is_refused()`
+
+### `tests/test_live_playlist_ops.py`
+
+Tests for the live-mode playlist primitives in `app/live_database.py`.
+
+- `live()` — A LiveRekordboxDB whose rbox handle is a mock — __init__ opens nothing.
+- `TestRemoveTrackFromPlaylist`
+- `  TestRemoveTrackFromPlaylist.test_calls_delete_playlist_song_with_one_argument()`
+- `  TestRemoveTrackFromPlaylist.test_never_passes_playlist_and_track()`
+- `  TestRemoveTrackFromPlaylist.test_returns_false_when_track_not_in_playlist()`
+- `  TestRemoveTrackFromPlaylist.test_coerces_ids_to_str_before_comparing()`
+- `  TestRemoveTrackFromPlaylist.test_backend_error_is_contained()`
+- `  TestRemoveTrackFromPlaylist.test_reorder_moves_the_row_instead_of_remove_and_re_add()`
+- `  TestRemoveTrackFromPlaylist.test_reorder_onto_its_own_place_writes_nothing()`
+- `TestPlaylistNode`
+- `  TestPlaylistNode.test_exposes_uuid()`
+- `  TestPlaylistNode.test_missing_uuid_is_none_not_an_error()`
+- `  TestPlaylistNode.test_attribute_maps_to_frontend_type()`
+- `  TestPlaylistNode.test_enum_like_attribute_is_coerced()`
+- `  TestPlaylistNode.test_root_parent_is_normalised()`
+- `TestPlaylistLookups`
+- `  TestPlaylistLookups.test_get_playlist_children_delegates_and_normalises_root()`
+- `  TestPlaylistLookups.test_get_playlist_by_path_returns_node()`
+- `  TestPlaylistLookups.test_get_playlist_by_path_missing_is_none()`
+- `  TestPlaylistLookups.test_lookup_errors_are_contained()`
+- `TestFacade` — `_serialised` is a decorator, not a registry — probe the wrapper instead.
+- `  TestFacade.test_removal_stays_serialised()`
+- `  TestFacade.test_lookup_passthroughs_exist()`
+- `  TestFacade.test_lookups_are_reads_not_serialised()`
+- `  TestFacade.test_facade_delegates_to_the_backend()`
+- `  TestFacade.test_facade_falls_back_to_cache_without_backend_support()`
+- `  TestFacade.test_facade_signatures_match_the_live_backend()`
+- `TestCreatePlaylistCaching`
+- `  TestCreatePlaylistCaching.test_folder_type_comes_from_the_returned_row()`
+- `  TestCreatePlaylistCaching.test_caller_intent_wins_when_rbox_omits_the_attribute()`
+- `  TestCreatePlaylistCaching.test_root_parent_is_passed_to_rbox_as_none()`
 
 ### `tests/test_logging_redaction.py`
 
