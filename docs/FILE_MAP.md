@@ -177,7 +177,7 @@
 | `src-tauri/build.rs` | Tauri build script (required, do not modify) |
 | `src-tauri/Cargo.toml` | Rust deps: tauri =2.10.2 (pinned), reqwest =0.12.28 (pinned), tauri-plugin-shell, tauri-plugin-dialog (folder picker via `open { directory: true }`), tauri-plugin-fs (binary writes via `writeFile` + folder creation via `mkdir`), cpal, symphonia, rustfft, rubato, ringbuf, memmap2, hound, lofty, sha2, tokio, serde |
 | `src-tauri/tauri.conf.json` | Tauri config: window title, size, splashscreen, bundle identifier |
-| `src-tauri/capabilities/main.json` | Permissions: `core:default`, `shell:allow-spawn` (sidecar `rb-backend` only — no `allow-execute` to prevent RCE), `dialog:default/allow-open/allow-save`, `fs:default/allow-write-file/allow-read-file/allow-mkdir` (binary writes + folder creation) |
+| `src-tauri/capabilities/main.json` | Permissions: `core:default`, `shell:allow-spawn` (sidecar `binaries/RB_Backend` only — must match `externalBin` + `SIDECAR_NAME` in `main.rs`, guarded by `sidecar_name_tests`; no `allow-execute` to prevent RCE), `dialog:default/allow-open/allow-save`, `fs:default/allow-write-file/allow-read-file/allow-mkdir` (binary writes + folder creation) |
 
 ---
 

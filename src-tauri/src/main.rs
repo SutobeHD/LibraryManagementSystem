@@ -15,6 +15,15 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::{Emitter, Manager, State};
 
+/// Release-build sidecar program name. Must match `bundle.externalBin`
+/// (`binaries/RB_Backend`) in `tauri.conf.json`, the `shell:allow-spawn`
+/// scope in `capabilities/main.json`, and `name=` in `backend.spec` —
+/// `tauri-plugin-shell` resolves it to `<exe_dir>/RB_Backend.exe`, so any
+/// drift panics the installed app at boot with `os error 2`. Guarded by
+/// `sidecar_name_tests` below.
+#[cfg_attr(debug_assertions, allow(dead_code))]
+const SIDECAR_NAME: &str = "RB_Backend";
+
 /// Shared boot-time session token captured from the Python sidecar's stdout.
 ///
 /// The sidecar prints ``LMS_TOKEN=<value>`` as its very first line at boot
@@ -710,7 +719,7 @@ fn main() {
             {
                 let shell = app.shell();
                 let sidecar_command = shell
-                    .sidecar("rb-backend")
+                    .sidecar(SIDECAR_NAME)
                     .map_err(|e| format!("failed to create sidecar command: {}", e))?;
 
                 let (mut rx, child) = sidecar_command
@@ -796,4 +805,58 @@ fn main() {
                 }
             }
         });
+}
+
+#[cfg(test)]
+mod sidecar_name_tests {
+    use super::SIDECAR_NAME;
+
+    const TAURI_CONF: &str = include_str!("../tauri.conf.json");
+    const CAPABILITY: &str = include_str!("../capabilities/main.json");
+    const BACKEND_SPEC: &str = include_str!("../../backend.spec");
+
+    fn expected_bin_path() -> String {
+        format!("binaries/{SIDECAR_NAME}")
+    }
+
+    #[test]
+    fn external_bin_matches_sidecar_name() {
+        let conf: serde_json::Value = serde_json::from_str(TAURI_CONF).expect("tauri.conf.json");
+        let bins: Vec<&str> = conf["bundle"]["externalBin"]
+            .as_array()
+            .expect("bundle.externalBin array")
+            .iter()
+            .filter_map(|v| v.as_str())
+            .collect();
+        assert_eq!(bins, vec![expected_bin_path().as_str()]);
+    }
+
+    #[test]
+    fn capability_spawn_scope_matches_sidecar_name() {
+        let cap: serde_json::Value =
+            serde_json::from_str(CAPABILITY).expect("capabilities/main.json");
+        let spawn = cap["permissions"]
+            .as_array()
+            .expect("permissions array")
+            .iter()
+            .find(|p| p["identifier"] == "shell:allow-spawn")
+            .expect("shell:allow-spawn permission");
+        let scoped: Vec<&str> = spawn["allow"]
+            .as_array()
+            .expect("allow array")
+            .iter()
+            .filter(|e| e["sidecar"] == true)
+            .filter_map(|e| e["name"].as_str())
+            .collect();
+        assert_eq!(scoped, vec![expected_bin_path().as_str()]);
+    }
+
+    #[test]
+    fn pyinstaller_spec_builds_sidecar_name() {
+        let needle = format!("name='{SIDECAR_NAME}'");
+        assert!(
+            BACKEND_SPEC.contains(&needle),
+            "backend.spec must build {needle} so the binary matches externalBin"
+        );
+    }
 }

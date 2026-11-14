@@ -13,7 +13,7 @@ name = "Sidecar-Supervisor"
 status = "shipped"
 desc = "Startet die Python-Sidecar, fängt das Token aus stdout ab und filtert es, Kill bei Exit, Dev-Autospawn."
 related = ["bearer-session-auth", "pyinstaller-backend-bundle"]
-notes = "Code in src-tauri/src/main.rs (Hub)."
+notes = "Code in src-tauri/src/main.rs (Hub). Test: testen - 2026-11-14 Release-Sidecar-Name auf RB_Backend vereinheitlicht (SIDECAR_NAME, war rb-backend -> Release-EXE panicte os error 2; Branch fix/release-sidecar-cors). Installierte App (MSI/NSIS) vom User prüfen."
 
 [[feature]]
 id = "pyinstaller-backend-bundle"
@@ -22,7 +22,7 @@ name = "Backend-Bundle (PyInstaller)"
 status = "shipped"
 desc = "backend_entry + backend.spec -> RB_Backend-Binary als Tauri externalBin."
 paths = ["backend_entry.py", "backend.spec"]
-notes = "Sidecar-Name RB_Backend vs. rb-backend uneinheitlich (Linux-Doc)."
+notes = "Sidecar-Name überall RB_Backend (backend.spec, externalBin, Capability, main.rs SIDECAR_NAME); cargo test sidecar_name_tests hält das synchron."
 
 [[feature]]
 id = "tauri-capabilities"

@@ -228,7 +228,7 @@ Source of truth: `app/auth.py`. Draftplan: `docs/research/implement/draftplan_se
     sys.stdout.write("LMS_TOKEN=<value>\n")           ← first stdout line
     %APPDATA%/MusicLibraryManager/.session-token      ← persisted (user-data dir)
         │
-        ├── Tauri prod (shell.sidecar("rb-backend"))
+        ├── Tauri prod (shell.sidecar(SIDECAR_NAME = "RB_Backend"))
         │     src-tauri/src/main.rs:472 CommandEvent::Stdout
         │     → capture_token_line() strips "LMS_TOKEN=" prefix
         │     → stores in tauri::State<SessionToken> (Arc<Mutex<String>>)
