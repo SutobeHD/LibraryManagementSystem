@@ -1532,7 +1532,11 @@ class OneLibraryUsbWriter:
     def _anlz_sources(track: dict, source) -> Generator[Path, None, None]:
         """Candidate `.DAT` files, best first. The analysis fallback runs lazily."""
         rekordbox_lookup = getattr(source, "get_rekordbox_anlz_dat", None)
-        rekordbox_dat = rekordbox_lookup(track) if rekordbox_lookup else None
+        try:
+            rekordbox_dat = rekordbox_lookup(track) if rekordbox_lookup else None
+        except Exception as exc:  # rbox raises its own types; fall through to the cache
+            logger.warning("[ANLZ] Rekordbox lookup failed for %s: %s", track.get("id"), exc)
+            rekordbox_dat = None
         if rekordbox_dat is not None:
             yield rekordbox_dat
 

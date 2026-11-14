@@ -399,3 +399,18 @@ def test_fresh_analysis_fallback_never_writes_into_the_music_folder(
     assert rel == "/PIONEER/USBANLZ/P000/00000007/ANLZ0000.DAT"
     assert sorted(p.name for p in music.iterdir()) == ["Track.mp3"]
     assert anlz_sidecar.sidecar_dir_for(audio).is_relative_to(anlz_cache_sandbox)
+
+
+def test_a_failing_rekordbox_lookup_falls_back_to_the_lms_sidecar(tmp_path, monkeypatch):
+    _no_analysis(monkeypatch)
+    side = tmp_path / "side"
+    _source_trio(side)
+
+    class _BrokenLive(_LiveSrc):
+        def get_rekordbox_anlz_dat(self, track):
+            raise RuntimeError("share_directory unavailable")
+
+    w = _writer(tmp_path)
+    rel = w._generate_or_copy_anlz_for({"id": "7"}, "7", _BrokenLive(None, side), STICK)
+
+    assert rel == "/PIONEER/USBANLZ/P000/00000007/ANLZ0000.DAT"
