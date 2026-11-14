@@ -34,6 +34,7 @@ from fastapi import (
     Response,
     UploadFile,
 )
+from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -1215,21 +1216,45 @@ def track_genre_suggestions(tid: str, limit: _GenreHintLimit = 8) -> dict[str, A
     return result
 
 
+def _json_default(o: Any) -> Any:
+    """``json.dumps`` fallback for the odd non-JSON value in a track dict (Path, date...)."""
+    return jsonable_encoder(o)
+
+
+def _encode_track_list(tracks: list[dict[str, Any]]) -> bytes:
+    """JSON array of ``tracks``, encoded like Starlette's ``JSONResponse``.
+
+    One ``json.dumps`` per track, not one for the list: the C encoder holds the GIL
+    for a whole call, and the full list is ~145 MB once the beat grids are loaded.
+    Short calls let the event-loop thread run in between.
+    """
+    parts = [
+        json.dumps(
+            t, default=_json_default, ensure_ascii=False, allow_nan=False, separators=(",", ":")
+        )
+        for t in tracks
+    ]
+    return ("[" + ",".join(parts) + "]").encode("utf-8")
+
+
 @app.get("/api/library/tracks")
-def get_library_tracks(light: bool = False):
+def get_library_tracks(light: bool = False) -> Response:
     """Every track of the loaded library (hide_streaming applied).
 
     ``light=true`` leaves out beatGrid, Cues, positionMarks and phrases.
+
+    Returns a ready ``Response`` encoded here, in the threadpool. For a returned list
+    FastAPI runs ``jsonable_encoder`` and ``json.dumps`` on the event loop; for the full
+    list that froze every other request (health, task polls) for ~18 s.
     """
     try:
         tracks = db.get_all_tracks()
         logger.info(f"Returning {len(tracks)} tracks for library view")
-        if light:
-            return [_light_track(t) for t in tracks]
-        return tracks
+        payload = [_light_track(t) for t in tracks] if light else tracks
+        return Response(content=_encode_track_list(payload), media_type="application/json")
     except Exception as e:
         logger.error(f"Failed to fetch library tracks: {e}")
-        return []
+        return Response(content=b"[]", media_type="application/json")
 
 
 @app.get("/api/insights/low_quality")

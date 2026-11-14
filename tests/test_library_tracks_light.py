@@ -21,6 +21,7 @@ tracks; nothing reads a master.db.
 from __future__ import annotations
 
 import asyncio
+import json
 import sys
 import threading
 import xml.etree.ElementTree as ET
@@ -199,10 +200,66 @@ def test_light_survives_the_beatgrid_loader_writing_meanwhile(
     writer.start()
     try:
         for _ in range(50):
-            out = main.get_library_tracks(light=True)
+            out = json.loads(main.get_library_tracks(light=True).body)
             assert len(out) == 300
             assert not any("beatGrid" in d for d in out)
+            # The full list is encoded in the route now, under the same writes.
+            full = json.loads(main.get_library_tracks(light=False).body)
+            assert len(full) == 300
     finally:
         stop.set()
         writer.join(timeout=10)
         sys.setswitchinterval(old_interval)
+
+
+# --- B3: the full list is encoded off the event loop ------------------------------
+#
+# For a returned list FastAPI runs jsonable_encoder + json.dumps on the event loop.
+# With the beat grids loaded the full list is ~145 MB: every other request (health,
+# task polls) waited ~18 s and the frontend's 10 s timeout fired.
+
+
+def test_full_list_is_encoded_in_the_threadpool_not_on_the_event_loop(
+    facade: RekordboxDB, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    loop_threads: list[threading.Thread] = []
+    encode_threads: list[threading.Thread] = []
+    real_encode = main._encode_track_list
+
+    def spy(tracks: list[dict[str, Any]]) -> bytes:
+        encode_threads.append(threading.current_thread())
+        return real_encode(tracks)
+
+    monkeypatch.setattr(main, "_encode_track_list", spy)
+
+    async def _go() -> httpx.Response:
+        loop_threads.append(threading.current_thread())
+        transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as ac:
+            return await ac.get("/api/library/tracks")
+
+    r = asyncio.run(_go())
+
+    assert r.status_code == 200, r.text
+    assert r.headers["content-type"] == "application/json"
+    assert r.json() == list(facade.xml_db.tracks.values())
+    assert encode_threads and encode_threads[0] is not loop_threads[0]
+
+
+def test_encoding_matches_starlette_json_response(facade: RekordboxDB) -> None:
+    from fastapi.responses import JSONResponse
+
+    facade.xml_db.tracks["1"]["Title"] = "Ümlaut / 東京"  # non-ASCII stays raw UTF-8
+    facade.xml_db.tracks["1"]["path"] = Path("C:/music/a.mp3")  # non-JSON value
+    expected = JSONResponse(content=main.jsonable_encoder(list(facade.xml_db.tracks.values()))).body
+
+    assert _get().content == expected
+
+
+def test_a_nan_value_is_an_empty_list_not_invalid_json(facade: RekordboxDB) -> None:
+    # Same contract as before: JSONResponse refused NaN (allow_nan=False) and the
+    # route's except answered []. Never ship "NaN" the browser cannot parse.
+    facade.xml_db.tracks["1"]["BPM"] = float("nan")
+    r = _get()
+    assert r.status_code == 200
+    assert r.json() == []
