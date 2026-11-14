@@ -72,7 +72,7 @@ name = "CORS-Lockdown"
 status = "shipped"
 research = "security-cors-allow-credentials-tightening"
 desc = "Nur localhost/tauri-Origins, explizite Methoden, allow_credentials=False, kein Auth-Cookie."
-notes = "Code in app/main.py. Cookie-Auth-PRs immer ablehnen."
+notes = "Code in app/main.py (CORS_ALLOWED_ORIGINS). Cookie-Auth-PRs immer ablehnen. Test: testen - 2026-11-14 http://tauri.localhost ergänzt (Windows-Origin der Release-App, useHttpsScheme default false; fehlte -> jeder Preflight OPTIONS 400). Tests in tests/test_auth.py TestCaseM2. Installierte App vom User prüfen."
 
 [[feature]]
 id = "audio-path-sandbox"
