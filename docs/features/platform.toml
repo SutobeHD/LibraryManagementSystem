@@ -13,7 +13,7 @@ name = "Sidecar-Supervisor"
 status = "shipped"
 desc = "Startet die Python-Sidecar, fängt das Token aus stdout ab und filtert es, Kill bei Exit, Dev-Autospawn."
 related = ["bearer-session-auth", "pyinstaller-backend-bundle"]
-notes = "Code in src-tauri/src/main.rs (Hub)."
+notes = "Code in src-tauri/src/main.rs (Hub). Test: testen - 2026-11-14 Release-Sidecar-Name auf RB_Backend vereinheitlicht (SIDECAR_NAME, war rb-backend -> Release-EXE panicte os error 2; Branch fix/release-sidecar-cors). Release-Build kompilierte auf main gar nicht (Release-only-Imports von f92de03 als unused entfernt) - Fix 59d0c34 aus PR #60 übernommen. get_session_token las im Release vor Sidecar-Boot den Token des Vorlaufs aus .session-token -> Frontend cachte ihn -> 401 auf allen Mutationen; Datei-Fallback jetzt nur Debug. Installierte App (MSI/NSIS) vom User prüfen."
 
 [[feature]]
 id = "pyinstaller-backend-bundle"
@@ -22,7 +22,7 @@ name = "Backend-Bundle (PyInstaller)"
 status = "shipped"
 desc = "backend_entry + backend.spec -> RB_Backend-Binary als Tauri externalBin."
 paths = ["backend_entry.py", "backend.spec"]
-notes = "Sidecar-Name RB_Backend vs. rb-backend uneinheitlich (Linux-Doc)."
+notes = "Sidecar-Name überall RB_Backend (backend.spec, externalBin, Capability, main.rs SIDECAR_NAME); cargo test sidecar_name_tests hält das synchron."
 
 [[feature]]
 id = "tauri-capabilities"
@@ -72,7 +72,7 @@ name = "CORS-Lockdown"
 status = "shipped"
 research = "security-cors-allow-credentials-tightening"
 desc = "Nur localhost/tauri-Origins, explizite Methoden, allow_credentials=False, kein Auth-Cookie."
-notes = "Code in app/main.py. Cookie-Auth-PRs immer ablehnen."
+notes = "Code in app/main.py (CORS_ALLOWED_ORIGINS). Cookie-Auth-PRs immer ablehnen. Test: testen - 2026-11-14 http://tauri.localhost ergänzt (Windows-Origin der Release-App, useHttpsScheme default false; fehlte -> jeder Preflight OPTIONS 400). Tests in tests/test_auth.py TestCaseM2. Installierte App vom User prüfen."
 
 [[feature]]
 id = "audio-path-sandbox"

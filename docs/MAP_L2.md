@@ -1989,6 +1989,13 @@ Tests for ``app/auth.py`` -- Bearer-token session authentication.
 - `  TestCaseL_WrongScheme.test_non_bearer_scheme_is_401()`
 - `TestCaseM_OptionsPreflight`
 - `  TestCaseM_OptionsPreflight.test_options_preflight_short_circuits_before_auth()`
+- `TestCaseM2_RealAppCorsAllowlist` — CORS allowlist of the real ``app/main.py`` app, not a stand-in.
+- `  TestCaseM2_RealAppCorsAllowlist.test_tauri_origin_in_allowlist()`
+- `  TestCaseM2_RealAppCorsAllowlist.test_preflight_from_allowed_origin_is_200()`
+- `  TestCaseM2_RealAppCorsAllowlist.test_preflight_for_mutation_from_windows_tauri_origin()`
+- `  TestCaseM2_RealAppCorsAllowlist.test_simple_get_from_windows_tauri_origin_echoes_origin()`
+- `  TestCaseM2_RealAppCorsAllowlist.test_preflight_from_foreign_origin_is_rejected()`
+- `  TestCaseM2_RealAppCorsAllowlist.test_credentials_stay_disabled()`
 - `TestCaseN_UngatedAcceptsAuthHeader`
 - `  TestCaseN_UngatedAcceptsAuthHeader.test_heartbeat_with_bearer_header_still_2xx()`
 
