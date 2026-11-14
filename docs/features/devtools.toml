@@ -29,6 +29,20 @@ desc = "Jedes Feature trägt einen Tag Idee / Geplant / Angefangen / Fertig / Te
 todo = ["Mindmap im Browser selbst durchklicken (Umschalter Tag/Status, Chips, Liste)", "Tags der Features mit Test-Stand 'Fertig' nach und nach bestätigen"]
 notes = "Phase wird aus status abgeleitet; nur Fertig/Testen/Getestet brauchen das Feld test. Erstbelegung 2026-11-07 aus TOML-Notizen, Memory und PR-Testplänen."
 
+[[feature]]
+id = "feature-map-roadmap"
+group = "Arbeitsweise"
+name = "Feature-Map: Roadmap / Versionen"
+status = "unmerged"
+test = "testen"
+branch = "feat/feature-map-roadmap"
+parent = "feature-map"
+depends_on = ["feature-map-phases"]
+desc = "Versionsplan 0.1 Alpha bis 1.0 + Später: jedes Feature einer Version zugeordnet, pro Version Fortschritt, was bis 'testbar' fehlt (PRs mergen, bauen), Tab Roadmap in der Mindmap, --roadmap im Terminal."
+paths = ["docs/features/_roadmap.toml"]
+todo = ["Versionszuordnung mit dem User durchgehen und anpassen", "App-Version (package.json/tauri.conf.json/Cargo.toml/pyproject = 1.0.0) auf 0.x zurücksetzen, sobald das Schema steht"]
+notes = "Gestapelt auf feat/feature-map-phases (PR #61). Erstbelegung 2026-11-14: alle 207 App-Features verteilt (+2 Tooling-Punkte in 0.5), devtools sonst nicht versioniert."
+
 # ── Research-Pipeline ─────────────────────────────────────────────────────
 
 [[feature]]

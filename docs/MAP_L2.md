@@ -5406,8 +5406,14 @@ Feature registry plus a live overlay of which branch or worktree touches which f
 - `phase_of()`
 - `Feature`
 - `Area`
+- `Release`
+- `  Release.label()`
 - `Registry`
+- `  Registry.release()`
+- `  Registry.unplanned()`
 - `load_registry()`
+- `release_summary()` — Progress of one release: phase counts, merge blockers, unbuilt features, state.
+- `current_release()` — First non-'later' release that is not reached yet.
 - `path_matches()`
 - `Mapper` — Maps repo file paths onto feature ids.
 - `  Mapper.is_hub()`
@@ -5421,6 +5427,7 @@ Feature registry plus a live overlay of which branch or worktree touches which f
 - `tracked_files()`
 - `cmd_brief()`
 - `cmd_active()`
+- `cmd_roadmap()`
 - `cmd_who()`
 - `cmd_list()`
 - `cmd_check()`
