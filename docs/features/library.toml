@@ -146,10 +146,11 @@ group = "Import"
 name = "Import-Manager"
 status = "shipped"
 desc = "Drag-Drop/Ordner-Import, Ordner wird Playlist, 7-Stufen-Pipeline."
-paths = ["frontend/src/components/ImportView.jsx", "app/import_tracker.py", "tests/test_import*.py"]
+paths = ["frontend/src/components/ImportView.jsx", "app/import_tracker.py", "tests/test_import*.py", "tests/test_live_import_analysis.py"]
 routes = ["/api/library/import-paths", "/api/audio/import", "/api/import/tasks"]
 depends_on = ["native-tag-read", "analysis-on-import", "anlz-writer"]
 related = ["download-manager-view", "import-progress-banner"]
+notes = "Live-Modus: Import schreibt BPM (centi), Länge, Key (Rekordbox-Schreibweise) in master.db und die ANLZ-Dateien in den Rekordbox-share unter /PIONEER/USBANLZ/<uuid[:3]>/<uuid[3:]>/ samt AnalysisDataPath + analysed=105 (B4, fix/kernloop-0.1-bugs)."
 
 [[feature]]
 id = "import-quality-panel"

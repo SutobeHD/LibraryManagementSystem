@@ -1231,6 +1231,17 @@ class RekordboxDB:
             return self.active_db.add_track(track_data)
         return None
 
+    def attach_import_anlz(self, tid: str, analysis_result: dict[str, Any]) -> str | None:
+        """Live mode: ANLZ into Rekordbox's share + ``AnalysisDataPath``. Else None.
+
+        Not wrapped by ``_serialised``: the live method writes the ANLZ files outside
+        ``db_lock`` and takes it only around its own ``master.db`` write.
+        """
+        live = self.live_db
+        if self.mode == "live" and live is not None and hasattr(live, "attach_import_anlz"):
+            return live.attach_import_anlz(tid, analysis_result)
+        return None
+
     def delete_track(self, tid: str) -> bool:
         if hasattr(self.active_db, "delete_track"):
             return self.active_db.delete_track(tid)

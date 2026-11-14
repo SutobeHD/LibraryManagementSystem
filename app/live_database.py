@@ -971,8 +971,8 @@ class LiveRekordboxDB:
             item = self.db.create_content(path)
             tid = str(item.id)
 
-            # 2. Update metadata. No BPM: it never reached master.db here, and
-            # update_track_metadata now refuses the whole update for a key it cannot write.
+            # 2. Text metadata. BPM, length and key are not user-editable fields
+            # (update_track_metadata refuses them), so step 2b writes them directly.
             updates = {
                 k: track_data[k]
                 for k in ("Title", "Artist", "Album", "Genre", "Comment")
@@ -982,15 +982,21 @@ class LiveRekordboxDB:
             if updates:
                 self.update_track_metadata(tid, updates)
 
-            # 3. Cache the new track locally
+            # 2b. The analysis columns Rekordbox, the track list and the USB export read.
+            # Without them an imported track showed BPM 0 after a reload and reached
+            # the stick with bpmx100 = 0 and length = 0.
+            written = self._write_import_analysis_columns(tid, track_data)
+
+            # 3. Cache the new track locally, with what master.db really holds
             self.tracks[tid] = {
                 "ID": tid,
                 "Title": track_data.get("Title", ""),
                 "Artist": track_data.get("Artist", ""),
                 "Album": track_data.get("Album", ""),
-                "BPM": track_data.get("BPM", 0),
+                "BPM": written.get("BPM", 0.0),
+                "Key": written.get("Key", ""),
                 "path": path,
-                "TotalTime": track_data.get("TotalTime", 0),
+                "TotalTime": written.get("TotalTime", 0.0),
                 "beatGrid": track_data.get("beatGrid", []),
                 "Comment": track_data.get("Comment", ""),
                 "Artwork": track_data.get("Artwork", ""),
@@ -1005,6 +1011,144 @@ class LiveRekordboxDB:
 
             logger.error(f"Failed to add track to live DB: {e}")
             raise e
+
+    @staticmethod
+    def _import_key_name(track_data: dict[str, Any]) -> str | None:
+        """Rekordbox key name ("Am", "Dbm", "F#") for an import's analysis, else None."""
+        from .analysis_db_writer import rekordbox_key_name
+
+        name = rekordbox_key_name(track_data.get("KeyID"))
+        if name:
+            return name
+        # Fallback: the engine's short key ("C#m", "A"), sharps as the engine spells them.
+        m = re.fullmatch(r"([A-G])(#?)(m?)", str(track_data.get("Key") or "").strip())
+        if not m:
+            return None
+        pitch = ("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
+        root = m.group(1) + m.group(2)
+        if root not in pitch:  # "E#", "B#"
+            return None
+        return rekordbox_key_name(pitch.index(root) + 1 + (12 if m.group(3) else 0))
+
+    def _write_import_analysis_columns(
+        self, tid: str, track_data: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Write BPM (centi-BPM), length (whole seconds) and key into a new content row.
+
+        Returns the values that landed as cache fields (``BPM``, ``TotalTime``, ``Key``);
+        a refused write is logged and leaves them out, so the cache never shows a BPM
+        master.db does not hold. ``analysed`` / ``AnalysisDataPath`` stay untouched here:
+        they belong to ANLZ files, which ``attach_import_anlz`` writes.
+        """
+        from .database import db_lock
+
+        try:
+            bpm = float(track_data.get("BPM") or 0)
+            length = float(track_data.get("TotalTime") or 0)
+        except (TypeError, ValueError):
+            bpm, length = 0.0, 0.0
+        key_name = self._import_key_name(track_data)
+
+        out: dict[str, Any] = {}
+        try:
+            with db_lock():
+                item = self.db.get_content_by_id(tid)
+                if item is None:
+                    raise LookupError(f"content {tid} vanished after create_content")
+                if bpm > 0:
+                    item.bpm = round(bpm * 100)
+                if length > 0:
+                    item.length = max(1, round(length))
+                if bpm > 0 or length > 0:
+                    self.db.update_content(item)
+                    if bpm > 0:
+                        out["BPM"] = round(bpm * 100) / 100.0
+                    if length > 0:
+                        out["TotalTime"] = float(max(1, round(length)))
+                if key_name:
+                    self.db.update_content_key(tid, key_name)
+                    out["Key"] = key_name
+        except Exception as e:  # rbox raises its own error types
+            logger.error(
+                "op=import_analysis_columns tid=%s bpm=%s length=%s key=%s err=%s",
+                tid,
+                bpm,
+                length,
+                key_name,
+                e,
+            )
+        else:
+            logger.info(
+                "op=import_analysis_columns tid=%s bpm=%s length=%s key=%s",
+                tid,
+                out.get("BPM"),
+                out.get("TotalTime"),
+                out.get("Key"),
+            )
+        return out
+
+    def attach_import_anlz(self, tid: str, analysis_result: dict[str, Any]) -> str | None:
+        """Write a new track's ANLZ trio into Rekordbox's share and record it in master.db.
+
+        The dir is the one Rekordbox itself uses for the row's uuid
+        (``analysis_db_writer.rekordbox_anlz_rel_path``), so Rekordbox, ``analyze-full``
+        and the USB export find the files the same way as for a track Rekordbox
+        analysed. Sets ``AnalysisDataPath`` and ``analysed`` only once the ``.DAT`` is
+        on disk. A row that already records a path is left alone.
+
+        Returns the recorded ``AnalysisDataPath`` or None (nothing written).
+        """
+        from .analysis_db_writer import REKORDBOX_ANALYSED, rekordbox_anlz_rel_path
+        from .anlz_writer import write_anlz_files
+        from .database import db_lock
+
+        tid = str(tid)
+        try:
+            item = self.db.get_content_by_id(tid)
+        except Exception as e:  # rbox raises its own error types
+            logger.error("op=attach_import_anlz tid=%s read failed: %s", tid, e)
+            return None
+        if item is None or getattr(item, "analysis_data_path", None):
+            return None
+        rel = rekordbox_anlz_rel_path(getattr(item, "uuid", None))
+        share = self.db.share_directory()
+        if not rel or not share:
+            logger.warning("op=attach_import_anlz tid=%s no uuid or share dir", tid)
+            return None
+        share_root = Path(share).resolve()
+        anlz_dir = (share_root / rel.lstrip("/")).parent
+        if not anlz_dir.is_relative_to(share_root):
+            logger.error("op=attach_import_anlz tid=%s dir escapes the share", tid)
+            return None
+
+        try:
+            anlz_dir.mkdir(parents=True, exist_ok=True)
+            paths = write_anlz_files(
+                anlz_dir=str(anlz_dir),
+                track_path=str(getattr(item, "folder_path", "") or ""),
+                analysis_result=analysis_result,
+                filename_base="ANLZ0000",
+            )
+        except Exception as e:  # anlz_writer raises from struct / numpy / OSError
+            logger.error("op=attach_import_anlz tid=%s ANLZ write failed: %s", tid, e)
+            return None
+        if "dat" not in paths:
+            logger.error("op=attach_import_anlz tid=%s no .DAT written", tid)
+            return None
+
+        try:
+            with db_lock():
+                item = self.db.get_content_by_id(tid)
+                if item is None:
+                    return None
+                item.analysis_data_path = rel
+                item.analysed = REKORDBOX_ANALYSED
+                self.db.update_content(item)
+        except Exception as e:  # rbox raises its own error types
+            logger.error("op=attach_import_anlz tid=%s master.db write failed: %s", tid, e)
+            return None
+        logger.info("op=attach_import_anlz tid=%s path=%s", tid, rel)
+        return rel
 
     def delete_track(self, tid: str) -> bool:
         tid = str(tid)
