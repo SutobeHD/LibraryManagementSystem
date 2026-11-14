@@ -21,7 +21,7 @@
 | `app/analysis_settings.py` | LibraryManagementSystem -- Analysis Settings |
 | `app/anlz_cue_patch.py` | anlz_cue_patch.py — non-destructive memory-cue injection into existing ANLZ files. |
 | `app/anlz_safe.py` | Safe wrapper around `rbox.MasterDb` + `rbox.Anlz` for PQTZ beatgrid loading. |
-| `app/anlz_sidecar.py` | ANLZ-Sidecar writer — shared helper used by every track-import path |
+| `app/anlz_sidecar.py` | LMS ANLZ cache — DAT/EXT/2EX files LMS generated for a track that has no |
 | `app/anlz_usb_export.py` | Ready one track's ANLZ trio for a USB stick: the transform Rekordbox applies on export. |
 | `app/anlz_writer.py` | LibraryManagementSystem -- ANLZ Binary File Writer |
 | `app/artist_store/__init__.py` | artist_store — Artist-Hub sidecar package (``artists.db``). |
@@ -327,7 +327,8 @@
 | `tests/test_library_tracks_light.py` | GET /api/library/tracks — the optional ``light`` projection (app/main.py). |
 | `tests/test_librosa_lazy_import.py` | Booting the sidecar (``import app.main``) must not import librosa / numpy. |
 | `tests/test_live_cue_loading.py` | Cue loading in `app.live_database`. |
-| `tests/test_live_playlist_ops.py` | Tests for the live-mode playlist primitives in `app/live_database.py`. |
+| `tests/test_live_import_analysis.py` | An imported track's analysis must reach master.db (B4, 0.1 core-loop test). |
+| `tests/test_live_playlist_ops.py` | Live playlist operations (B11, 0.1 core-loop test). |
 | `tests/test_logging_redaction.py` | Unit tests for `app.logging_utils.RedactingFormatter`. |
 | `tests/test_main_route_table.py` | app/main.py defines each top-level name once, so no request model or handler is shadowed. |
 | `tests/test_main_security.py` | Regression tests for ``POST /api/file/reveal`` sandbox. |

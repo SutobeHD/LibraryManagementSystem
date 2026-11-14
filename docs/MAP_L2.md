@@ -36,6 +36,9 @@ LibraryManagementSystem -- Analysis Result Cache
 
 LibraryManagementSystem -- Analysis-to-Database Writer
 
+- `AnalysisDbUpdateError` — master.db refused the analysis write (row missing, rbox error, bad value).
+- `rekordbox_key_name()` — Rekordbox key name for an ``analysis_engine`` key id (1-12 major, 13-24 minor).
+- `rekordbox_anlz_rel_path()` — The ``AnalysisDataPath`` Rekordbox records for a content row, from its uuid.
 - `AnalysisDBWriter` — Writes analysis results into the Rekordbox live database.
 - `  AnalysisDBWriter.shutdown()`
 - `  AnalysisDBWriter.analyze_and_save()` — Full pipeline: analyze a track and write results to Rekordbox DB + ANLZ files.
@@ -96,6 +99,7 @@ Safe wrapper around `rbox.MasterDb` + `rbox.Anlz` for PQTZ beatgrid loading.
 
 - `resolve_anlz_paths()` — Map track id -> {"DAT", "EXT", "EX2"} absolute ANLZ paths.
 - `resolve_anlz_dir()` — Directory holding a track's ANLZ files, or None if it has none.
+- `resolve_anlz_dat()` — Absolute ``.DAT`` path master.db records for a track, or None.
 - `SafeAnlzParser` — Process-isolated PQTZ extractor with crash recovery.
 - `  SafeAnlzParser.load_all_beatgrids()` — Load PQTZ beatgrids for every track id in one efficient pass.
 - `  SafeAnlzParser.parse_pqtz()` — Parse PQTZ entries from one ANLZ DAT file.
@@ -104,10 +108,12 @@ Safe wrapper around `rbox.MasterDb` + `rbox.Anlz` for PQTZ beatgrid loading.
 
 ### `app/anlz_sidecar.py`
 
-ANLZ-Sidecar writer — shared helper used by every track-import path
+LMS ANLZ cache — DAT/EXT/2EX files LMS generated for a track that has no
 
-- `sidecar_dir_for()` — Stable, collision-resistant per-track sidecar directory.
-- `write_companion_anlz()` — Write DAT/EXT/2EX next to file_path.
+- `anlz_cache_root()` — Root of the LMS ANLZ cache: the per-user cache dir, outside every music folder.
+- `sidecar_dir_for()` — Stable, collision-resistant per-track ANLZ cache directory (keyed on the path).
+- `legacy_sidecar_dir_for()` — Where builds before 0.1 wrote the sidecar, next to the audio.
+- `write_companion_anlz()` — Write DAT/EXT/2EX for file_path into the LMS ANLZ cache.
 
 ### `app/anlz_usb_export.py`
 
@@ -499,6 +505,7 @@ Batch comment edits over the live library (``POST /api/tools/batch-comment``).
 - `  RekordboxDB.get_playlist_tracks()`
 - `  RekordboxDB.get_track_details()`
 - `  RekordboxDB.add_track()`
+- `  RekordboxDB.attach_import_anlz()` — Live mode: ANLZ into Rekordbox's share + ``AnalysisDataPath``.
 - `  RekordboxDB.delete_track()`
 - `  RekordboxDB.rename_playlist()`
 - `  RekordboxDB.move_playlist()`
@@ -673,7 +680,8 @@ LibrarySource — uniform abstraction over Live (master.db) and XML modes.
 - `  LibrarySource.iter_playlists()` — yields {id, name, parent_id, type ('0'|'1'|'4'), track_ids: list}
 - `  LibrarySource.get_track()`
 - `  LibrarySource.get_playlist_track_ids()`
-- `  LibrarySource.get_anlz_sidecar_dir()` — Returns directory containing prebuilt ANLZ files (from import-time analysis), if any.
+- `  LibrarySource.get_rekordbox_anlz_dat()` — The ``.DAT`` Rekordbox's own analysis wrote for this track, if the mode has one.
+- `  LibrarySource.get_anlz_sidecar_dir()` — Directory with LMS-generated ANLZ files for the track (cache, then legacy).
 - `XmlLibrarySource` — Reads from RekordboxXMLDB.
 - `  XmlLibrarySource.iter_tracks()`
 - `  XmlLibrarySource.get_track()`
@@ -684,6 +692,7 @@ LibrarySource — uniform abstraction over Live (master.db) and XML modes.
 - `  LiveLibrarySource.get_track()`
 - `  LiveLibrarySource.iter_playlists()`
 - `  LiveLibrarySource.get_playlist_track_ids()`
+- `  LiveLibrarySource.get_rekordbox_anlz_dat()` — The ``.DAT`` at the AnalysisDataPath master.db records, when it is on disk.
 - `from_db()` — Factory: pick correct source from DBWrapper.
 
 ### `app/live_database.py`
@@ -703,6 +712,7 @@ LibrarySource — uniform abstraction over Live (master.db) and XML modes.
 - `  LiveRekordboxDB.get_playlist_tracks()`
 - `  LiveRekordboxDB.get_track_details()`
 - `  LiveRekordboxDB.add_track()`
+- `  LiveRekordboxDB.attach_import_anlz()` — Write a new track's ANLZ trio into Rekordbox's share and record it in master.db.
 - `  LiveRekordboxDB.delete_track()`
 - `  LiveRekordboxDB.update_track_comment()`
 - `  LiveRekordboxDB.update_track_metadata()` — Write ``updates`` to one master.db row.
@@ -714,7 +724,7 @@ LibrarySource — uniform abstraction over Live (master.db) and XML modes.
 - `  LiveRekordboxDB.get_analysis_writer()` — Returns an AnalysisDBWriter instance bound to this database.
 - `  LiveRekordboxDB.get_unanalyzed_track_ids()` — Returns list of track IDs that have BPM=0 or no beatgrid.
 - `  LiveRekordboxDB.rename_playlist()`
-- `  LiveRekordboxDB.move_playlist()`
+- `  LiveRekordboxDB.move_playlist()` — Move a playlist / folder into a parent, optionally right before/after a sibling.
 - `  LiveRekordboxDB.delete_playlist()`
 - `  LiveRekordboxDB.create_playlist()`
 - `  LiveRekordboxDB.add_track_to_playlist()`
@@ -724,7 +734,7 @@ LibrarySource — uniform abstraction over Live (master.db) and XML modes.
 - `  LiveRekordboxDB.get_playlist_track_ids()` — Content ids currently linked to a playlist, read fresh (not from the cache).
 - `  LiveRekordboxDB.playlist_xml_path()` — Path to Rekordbox's masterPlaylists6.xml, or None when rbox found none.
 - `  LiveRekordboxDB.get_playlist_by_path()` — Resolve a folder/playlist path like ["Artists", "Boys Noize"].
-- `  LiveRekordboxDB.reorder_playlist_track()` — Reorders a track in a playlist.
+- `  LiveRekordboxDB.reorder_playlist_track()` — Move a track to 0-based position ``new_index`` of the playlist (clamped).
 
 ### `app/logging_utils.py`
 
@@ -2554,6 +2564,7 @@ soundcloud_client.rs
 Pytest fixtures shared across the suite.
 
 - `auth_token()` — Pin ``app.auth.SESSION_TOKEN`` to ``TEST_SESSION_TOKEN`` for the test.
+- `anlz_cache_sandbox()` — Point the LMS ANLZ cache at the session's temp dir, never the user's cache.
 - `empty_library()` — Swap ``app.main.db`` for a library that knows no tracks.
 - `pytest_configure()` — Register the ``no_auth`` marker so ``--strict-markers`` is happy.
 
@@ -2619,8 +2630,10 @@ Tests for app/analysis_cache.py — persistent analysis-result cache.
 
 Unit tests for AnalysisDBWriter — the values it writes into Rekordbox master.db.
 
-- `test_key_id_to_name_inverts_engine_map()` — The master.db key write must invert analysis_engine's key_id map exactly.
+- `test_key_id_to_name_inverts_engine_map_in_rekordbox_spelling()` — The master.db key write must invert analysis_engine's key_id map exactly, and
+- `test_key_names_match_the_minor_set_of_a_real_library()`
 - `test_key_id_to_name_unknown()`
+- `test_anlz_rel_path_follows_rekordbox_uuid_layout()`
 - `test_update_cache_bpm_key_beatgrid_shape()` — _update_cache mirrors the master.db write: BPM float, Camelot key, and a
 - `test_master_db_bpm_is_centi_bpm_int()` — master.db stores BPM as int(round(bpm*100)) — guard the scaling contract.
 - `test_update_db_writes_master_db_inside_db_write_lock()` — The analysis write is a full-row ``update_content``: re-read and write must both
@@ -2631,8 +2644,14 @@ Unit tests for AnalysisDBWriter — the values it writes into Rekordbox master.d
 - `test_track_without_an_analysis_data_path_is_refused_before_any_dsp()`
 - `test_failed_dat_write_leaves_master_db_untouched()`
 - `test_writes_into_the_recorded_dir_then_flags_the_row()`
+- `test_analysed_flag_fits_rbox_c_long_column()` — The old 0xFFFFFFFF raised OverflowError inside rbox, so BPM and key never landed
+- `test_refused_db_write_is_an_error_result_and_leaves_the_cache()`
+- `test_update_db_raises_for_a_missing_row()`
+- `test_failed_key_write_is_not_swallowed()`
 - `test_analysis_runs_in_the_worker_pool_not_the_sidecar()` — librosa/madmom in the sidecar process held the GIL for minutes per batch.
 - `test_a_crashed_worker_drops_the_pool_for_the_next_track()`
+- `test_rewrites_a_rekordbox_reanalysis_under_its_recorded_file_name()`
+- `test_key_failure_after_the_row_write_keeps_the_cache_on_the_new_bpm()`
 
 ### `tests/test_analysis_edge.py`
 
@@ -2759,6 +2778,10 @@ ANLZ trio -> USB stick transform (`app.anlz_usb_export`) and its wiring in
 - `test_sidecar_ships_with_the_stick_path()`
 - `test_invalid_sidecar_falls_back_to_a_fresh_analysis()`
 - `test_no_source_and_no_audio_returns_none()`
+- `test_rekordbox_anlz_wins_over_sidecar_and_analysis()`
+- `test_invalid_rekordbox_anlz_falls_back_to_the_lms_sidecar()`
+- `test_fresh_analysis_fallback_never_writes_into_the_music_folder()`
+- `test_a_failing_rekordbox_lookup_falls_back_to_the_lms_sidecar()`
 
 ### `tests/test_anlz_usb_export_sync.py`
 
@@ -4118,6 +4141,11 @@ Tests for app/library_source.py — the Live/XML normalization layer.
 - `test_live_normalize_garbage_does_not_crash()`
 - `test_sidecar_lookup_uses_the_writers_resolved_path_key()` — The writer hashes str(path.resolve()); a stored path with `..` must still hit.
 - `test_sidecar_lookup_misses_cleanly()`
+- `test_sidecar_dir_is_in_the_anlz_cache_never_next_to_the_audio()`
+- `test_write_companion_anlz_leaves_the_music_folder_untouched()`
+- `test_legacy_sidecar_next_to_the_audio_is_still_read()`
+- `test_cache_wins_over_the_legacy_sidecar()`
+- `test_live_source_finds_rekordbox_anlz_from_master_db()`
 
 ### `tests/test_library_tracks_light.py`
 
@@ -4131,6 +4159,9 @@ GET /api/library/tracks — the optional ``light`` projection (app/main.py).
 - `test_hide_streaming_applies_light_or_not()`
 - `test_usb_source_and_rekordbox_xml_keep_grids_after_a_light_fetch()` — The CDJ-facing readers of the cached dicts, after a light fetch.
 - `test_light_survives_the_beatgrid_loader_writing_meanwhile()` — A writer keeps removing and re-inserting beatGrid on every cached dict
+- `test_full_list_is_encoded_in_the_threadpool_not_on_the_event_loop()`
+- `test_encoding_matches_starlette_json_response()`
+- `test_a_nan_value_is_an_empty_list_not_invalid_json()`
 
 ### `tests/test_librosa_lazy_import.py`
 
@@ -4161,40 +4192,39 @@ Cue loading in `app.live_database`.
 - `test_unparsable_mirror_row_does_not_abort_the_rest()`
 - `test_both_sources_failing_is_logged_not_raised()`
 
+### `tests/test_live_import_analysis.py`
+
+An imported track's analysis must reach master.db (B4, 0.1 core-loop test).
+
+- `master()`
+- `live()`
+- `test_add_track_writes_bpm_length_and_key()`
+- `test_import_key_is_stored_in_rekordbox_spelling()`
+- `test_refused_analysis_write_leaves_the_cache_at_what_master_db_holds()`
+- `test_attach_import_anlz_uses_rekordbox_share_layout()`
+- `test_attach_import_anlz_records_nothing_without_a_dat()`
+- `test_attach_import_anlz_removes_its_files_when_master_db_refuses()`
+- `test_attach_import_anlz_never_replaces_a_recorded_path()`
+- `test_attach_import_anlz_refuses_a_uuid_that_escapes_the_share()`
+- `test_import_puts_anlz_in_the_share_in_live_mode_never_next_to_the_audio()`
+- `test_import_never_attaches_anlz_from_an_unusable_analysis()`
+
 ### `tests/test_live_playlist_ops.py`
 
-Tests for the live-mode playlist primitives in `app/live_database.py`.
+Live playlist operations (B11, 0.1 core-loop test).
 
-- `live()` — A LiveRekordboxDB whose rbox handle is a mock — __init__ opens nothing.
-- `TestRemoveTrackFromPlaylist`
-- `  TestRemoveTrackFromPlaylist.test_calls_delete_playlist_song_with_one_argument()`
-- `  TestRemoveTrackFromPlaylist.test_never_passes_playlist_and_track()`
-- `  TestRemoveTrackFromPlaylist.test_returns_false_when_track_not_in_playlist()`
-- `  TestRemoveTrackFromPlaylist.test_coerces_ids_to_str_before_comparing()`
-- `  TestRemoveTrackFromPlaylist.test_backend_error_is_contained()`
-- `  TestRemoveTrackFromPlaylist.test_reorder_round_trips_through_the_fixed_primitive()`
-- `TestPlaylistNode`
-- `  TestPlaylistNode.test_exposes_uuid()`
-- `  TestPlaylistNode.test_missing_uuid_is_none_not_an_error()`
-- `  TestPlaylistNode.test_attribute_maps_to_frontend_type()`
-- `  TestPlaylistNode.test_enum_like_attribute_is_coerced()`
-- `  TestPlaylistNode.test_root_parent_is_normalised()`
-- `TestPlaylistLookups`
-- `  TestPlaylistLookups.test_get_playlist_children_delegates_and_normalises_root()`
-- `  TestPlaylistLookups.test_get_playlist_by_path_returns_node()`
-- `  TestPlaylistLookups.test_get_playlist_by_path_missing_is_none()`
-- `  TestPlaylistLookups.test_lookup_errors_are_contained()`
-- `TestFacade` — `_serialised` is a decorator, not a registry — probe the wrapper instead.
-- `  TestFacade.test_removal_stays_serialised()`
-- `  TestFacade.test_lookup_passthroughs_exist()`
-- `  TestFacade.test_lookups_are_reads_not_serialised()`
-- `  TestFacade.test_facade_delegates_to_the_backend()`
-- `  TestFacade.test_facade_falls_back_to_cache_without_backend_support()`
-- `  TestFacade.test_facade_signatures_match_the_live_backend()`
-- `TestCreatePlaylistCaching`
-- `  TestCreatePlaylistCaching.test_folder_type_comes_from_the_returned_row()`
-- `  TestCreatePlaylistCaching.test_caller_intent_wins_when_rbox_omits_the_attribute()`
-- `  TestCreatePlaylistCaching.test_root_parent_is_passed_to_rbox_as_none()`
+- `rb()`
+- `live()`
+- `test_added_track_shows_up_without_a_reload()`
+- `test_removed_track_disappears_without_a_reload()`
+- `test_reorder_puts_the_track_at_the_target_index()`
+- `test_reorder_of_a_track_not_in_the_playlist_is_refused()`
+- `test_move_into_an_empty_folder()`
+- `test_move_back_to_root()`
+- `test_move_back_to_root_by_dropping_onto_root()`
+- `test_move_next_to_a_sibling_with_gappy_seqs()`
+- `test_move_from_a_folder_next_to_a_root_sibling()`
+- `test_moving_a_folder_into_itself_is_refused()`
 
 ### `tests/test_logging_redaction.py`
 
@@ -5062,7 +5092,7 @@ Track-metadata writes refuse fields and values the backend cannot store (issue K
 - `test_live_bad_artist_does_not_leave_the_title_half_written()`
 - `test_live_accepts_the_range_edges()`
 - `test_live_writes_every_allowed_field()`
-- `test_live_add_track_does_not_send_bpm()`
+- `test_live_add_track_sends_bpm_and_key_outside_the_metadata_update()`
 - `test_live_add_track_skips_missing_tags()`
 - `test_writable_fields_follow_the_mode()`
 - `test_facade_live_refuses_before_the_first_track()`
