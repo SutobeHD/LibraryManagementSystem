@@ -1134,21 +1134,39 @@ class LiveRekordboxDB:
             return None
         if "dat" not in paths:
             logger.error("op=attach_import_anlz tid=%s no .DAT written", tid)
+            self._discard_anlz(anlz_dir, paths)
             return None
 
         try:
             with db_lock():
                 item = self.db.get_content_by_id(tid)
-                if item is None:
+                if item is None or getattr(item, "analysis_data_path", None):
+                    # Gone, or recorded by someone else meanwhile: leave the row alone.
+                    self._discard_anlz(anlz_dir, paths)
                     return None
                 item.analysis_data_path = rel
                 item.analysed = REKORDBOX_ANALYSED
                 self.db.update_content(item)
         except Exception as e:  # rbox raises its own error types
             logger.error("op=attach_import_anlz tid=%s master.db write failed: %s", tid, e)
+            self._discard_anlz(anlz_dir, paths)
             return None
         logger.info("op=attach_import_anlz tid=%s path=%s", tid, rel)
         return rel
+
+    @staticmethod
+    def _discard_anlz(anlz_dir: Path, paths: dict[str, str]) -> None:
+        """Remove ANLZ files this import just wrote that no master.db row points to."""
+        for f in paths.values():
+            try:
+                Path(f).unlink(missing_ok=True)
+            except OSError as e:
+                logger.warning("op=attach_import_anlz unlink %s failed: %s", f, e)
+        for d in (anlz_dir, anlz_dir.parent):  # rmdir only succeeds on an empty dir
+            try:
+                d.rmdir()
+            except OSError:
+                break
 
     def delete_track(self, tid: str) -> bool:
         tid = str(tid)

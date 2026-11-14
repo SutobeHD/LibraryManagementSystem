@@ -183,6 +183,18 @@ def test_attach_import_anlz_records_nothing_without_a_dat(
     assert master.writes == []
 
 
+def test_attach_import_anlz_removes_its_files_when_master_db_refuses(
+    live: LiveRekordboxDB, master: _MasterDb, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    written: list[dict[str, Any]] = []
+    monkeypatch.setattr("app.anlz_writer.write_anlz_files", _fake_anlz_writer(written))
+    master.refuse_update = True
+
+    assert live.attach_import_anlz("1", {"status": "ok"}) is None
+    assert master.writes == []  # nothing landed in master.db
+    assert not (master.share / "PIONEER" / "USBANLZ" / "44d").exists()  # no orphan trio
+
+
 def test_attach_import_anlz_never_replaces_a_recorded_path(
     live: LiveRekordboxDB, master: _MasterDb, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -237,7 +249,7 @@ _FULL = {
     "camelot": "8A",
     "key_id": 22,
     "duration": 60.0,
-    "beats": [],
+    "beats": [{"time_ms": 500, "tempo": 12800, "beat_number": 1}],
 }
 
 
@@ -270,3 +282,29 @@ def test_import_puts_anlz_in_the_share_in_live_mode_never_next_to_the_audio(
         assert facade.attached == []
         assert companion == [audio]
     assert not (audio.parent / ".lms_anlz").exists()
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        {**_FULL, "beats": []},  # analysis ran but found nothing
+        {**_FULL, "status": "error"},
+        {k: v for k, v in _FULL.items() if k != "status"},
+    ],
+)
+def test_import_never_attaches_anlz_from_an_unusable_analysis(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, result: dict[str, Any]
+) -> None:
+    # analysed=105 makes Rekordbox trust the files and never re-analyse the track.
+    audio = tmp_path / "music" / "a.wav"
+    audio.parent.mkdir()
+    audio.write_bytes(b"RIFF")
+    facade = _Facade("live")
+    monkeypatch.setattr(services, "db", facade)
+    monkeypatch.setattr(services, "REKORDBOX_ROOT", tmp_path / "rb" / "rekordbox")
+    monkeypatch.setattr("app.audio_tags.read_tags", lambda p: {"title": "T"})
+    monkeypatch.setattr(services.SettingsManager, "load", lambda: {"write_tags_to_files": False})
+
+    services.ImportManager.process_import(audio, analysis_result=result)
+
+    assert facade.attached == []

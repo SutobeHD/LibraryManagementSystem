@@ -1577,8 +1577,12 @@ class ImportManager:
                         from .analysis_engine import run_full_analysis
 
                         full_result = run_full_analysis(str(file_path)) or {}
-                    if full_result.get("status", "ok") == "ok":
+                    # analysed=105 makes Rekordbox trust the files and never re-analyse:
+                    # a failed or empty analysis must not get that far.
+                    if full_result.get("status") == "ok" and full_result.get("beats"):
                         db.attach_import_anlz(str(tid), full_result)
+                    else:
+                        logger.warning(f"ANLZ not attached for {file_path}: no usable analysis")
                 else:
                     write_companion_anlz(file_path, full_result)
             except Exception as anlz_err:
