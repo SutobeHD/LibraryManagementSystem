@@ -13,7 +13,7 @@ name = "Sidecar-Supervisor"
 status = "shipped"
 desc = "Startet die Python-Sidecar, fängt das Token aus stdout ab und filtert es, Kill bei Exit, Dev-Autospawn."
 related = ["bearer-session-auth", "pyinstaller-backend-bundle"]
-notes = "Code in src-tauri/src/main.rs (Hub). Test: testen - 2026-11-14 Release-Sidecar-Name auf RB_Backend vereinheitlicht (SIDECAR_NAME, war rb-backend -> Release-EXE panicte os error 2; Branch fix/release-sidecar-cors). Release-Build kompilierte auf main gar nicht (Release-only-Imports von f92de03 als unused entfernt) - Fix 59d0c34 aus PR #60 übernommen. Installierte App (MSI/NSIS) vom User prüfen."
+notes = "Code in src-tauri/src/main.rs (Hub). Test: testen - 2026-11-14 Release-Sidecar-Name auf RB_Backend vereinheitlicht (SIDECAR_NAME, war rb-backend -> Release-EXE panicte os error 2; Branch fix/release-sidecar-cors). Release-Build kompilierte auf main gar nicht (Release-only-Imports von f92de03 als unused entfernt) - Fix 59d0c34 aus PR #60 übernommen. get_session_token las im Release vor Sidecar-Boot den Token des Vorlaufs aus .session-token -> Frontend cachte ihn -> 401 auf allen Mutationen; Datei-Fallback jetzt nur Debug. Installierte App (MSI/NSIS) vom User prüfen."
 
 [[feature]]
 id = "pyinstaller-backend-bundle"

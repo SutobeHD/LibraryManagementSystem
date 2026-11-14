@@ -90,11 +90,16 @@ fn session_token_file_path() -> Option<PathBuf> {
 /// Two sources, in order:
 /// 1. **stdout capture** — when Tauri itself spawned the sidecar (`spawn_child`
 ///    / `shell.sidecar`), the reader thread captured the ``LMS_TOKEN=`` banner.
-/// 2. **file fallback** — when ``beforeDevCommand`` (``npm run dev:full``)
-///    spawned the backend, Tauri never owns its stdout (port-busy => spawn
-///    skipped), so the in-memory token stays empty. The sidecar ALSO writes
-///    the token to ``.session-token`` at boot regardless of who spawned it;
-///    read it from there.
+/// 2. **file fallback (debug builds only)** — when ``beforeDevCommand``
+///    (``npm run dev:full``) spawned the backend, Tauri never owns its stdout
+///    (port-busy => spawn skipped), so the in-memory token stays empty. The
+///    sidecar ALSO writes the token to ``.session-token`` at boot regardless
+///    of who spawned it; read it from there.
+///
+///    Release builds always spawn the sidecar themselves, and the frozen
+///    sidecar needs seconds to boot. Until it overwrites the file, the file
+///    still holds the PREVIOUS run's token; the frontend caches the first
+///    token it gets, so every gated request then failed with 401.
 ///
 /// # Errors
 /// - ``"token-not-ready"`` if neither source has the token yet. Callers MUST
@@ -114,6 +119,9 @@ fn get_session_token(state: State<SessionToken>) -> Result<String, String> {
         }
     }
     // Source 2: file fallback (externally-spawned sidecar — dev:full path).
+    if !cfg!(debug_assertions) {
+        return Err("token-not-ready".to_string());
+    }
     if let Some(path) = session_token_file_path() {
         if let Ok(contents) = std::fs::read_to_string(&path) {
             let tok = contents.trim();
