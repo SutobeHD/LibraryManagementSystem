@@ -119,9 +119,9 @@ group = "Export-Formate"
 name = "Cover auf den Stick"
 status = "partial"
 desc = "Eingebettetes Cover oder cover.jpg nach PIONEER/Artwork (klein + mittel)."
-paths = ["app/usb_artwork.py"]
+paths = ["app/usb_artwork.py", "tests/test_usb_artwork.py"]
 todo = ["_bucket_for: id 1 -> 00001 (Referenz-Stick), nicht 00000"]
-notes = "rbxport nutzt id//20+1; docs/reference/rbxport/export.md §5."
+notes = "rbxport nutzt id//20+1; docs/reference/rbxport/export.md §5. Pillow==13.0.0 jetzt in requirements.txt + backend.spec (Build bricht ohne ab); vorher blieb PIONEER/Artwork leer (B8, fix/kernloop-0.1-bugs)."
 
 [[feature]]
 id = "usb-folder-relocation"

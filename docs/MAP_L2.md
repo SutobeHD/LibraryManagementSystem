@@ -5145,6 +5145,16 @@ Track-metadata writes refuse fields and values the backend cannot store (issue K
 - `test_xml_write_that_dies_halfway_leaves_the_library_whole()`
 - `test_xml_unserialisable_nested_value_is_false_and_the_next_save_works()`
 
+### `tests/test_usb_artwork.py`
+
+Cover art for the USB stick, with the real Pillow (B8, 0.1 core-loop test).
+
+- `test_resize_turns_any_image_into_a_bounded_rgb_jpeg()`
+- `test_transparent_pixels_become_white_not_black()`
+- `test_garbage_bytes_are_refused_without_raising()`
+- `test_write_artwork_pair_writes_both_cdj_variants()`
+- `test_pillow_is_pinned_and_bundled()`
+
 ### `tests/test_usb_copy_atomic.py`
 
 USB audio copies must not leave a truncated file that never self-heals.
