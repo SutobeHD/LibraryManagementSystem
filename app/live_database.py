@@ -1417,58 +1417,81 @@ class LiveRekordboxDB:
             logger.error(f"Failed to rename playlist {pid}: {e}")
             return False
 
+    @staticmethod
+    def _seq_value_for(
+        order: list[Any], moving: Any, target: Any, after: bool, attr: str = "seq"
+    ) -> int:
+        """The ``seq`` that puts ``moving`` right before / after ``target`` in ``order``.
+
+        rbox's ``move_playlist`` / ``move_playlist_song`` take a seq VALUE, not a list
+        position, and shift the rows between the old and the new value by one (verified
+        on a master.db copy, 2026-11-14). Real libraries carry gaps and duplicates in
+        those values, so a list index is not a seq. rbox refuses a value above the row
+        count, hence the clamp.
+        """
+        old, t = int(getattr(moving, attr) or 0), int(getattr(target, attr) or 0)
+        if after:
+            new = t if old < t else t + 1
+        else:
+            new = t - 1 if old < t else t
+        return max(1, min(new, len(order)))
+
+    def _refresh_playlist_nodes(self) -> None:
+        """Rebuild the playlist-tree cache from master.db (parents and seqs after a move)."""
+        self.playlists = sorted(
+            (self._playlist_node(pl) for pl in self.db.get_playlists()),
+            key=lambda x: x.get("Seq", 0),
+        )
+
     def move_playlist(self, pid, new_parent_id, target_id=None, position=None):
+        """Move a playlist / folder into a parent, optionally right before/after a sibling.
+
+        ``position`` "inside" drops it at the end of folder ``target_id``; "before" /
+        "after" place it next to ``target_id`` in that node's parent; otherwise it goes
+        to the end of ``new_parent_id``. ROOT is passed to rbox as "root": its
+        ``parent_id=None`` means "keep the current parent", which is why moving back to
+        ROOT never worked.
+        """
+        pid = str(pid)
         try:
-            # 1. Determine actual parent and target sequence
-            sibling = None
-            actual_parent = None
-            target_seq = 0
-
+            target = None
             if position == "inside" and target_id:
-                actual_parent = None if str(target_id).upper() == "ROOT" else str(target_id)
-                # Max seq + 1 for new parent
-                siblings = [p for p in self.playlists if p["ParentID"] == (target_id or "ROOT")]
-                target_seq = max([p.get("Seq", 0) for p in siblings], default=-1) + 1
+                parent = str(target_id)
             elif target_id and position in ("before", "after"):
-                sibling = next((p for p in self.playlists if p["ID"] == str(target_id)), None)
-                if sibling:
-                    sp = sibling.get("ParentID", "ROOT")
-                    actual_parent = None if str(sp).upper() == "ROOT" else str(sp)
-                    target_seq = sibling.get("Seq", 0)
-                    if position == "after":
-                        target_seq += 1
-                else:
-                    actual_parent = (
-                        None if str(new_parent_id).upper() == "ROOT" else str(new_parent_id)
-                    )
-                    target_seq = 0
+                target = next((p for p in self.playlists if p["ID"] == str(target_id)), None)
+                parent = str(target["ParentID"]) if target else str(new_parent_id or "ROOT")
             else:
-                actual_parent = None if str(new_parent_id).upper() == "ROOT" else str(new_parent_id)
-                target_seq = 0
+                parent = str(new_parent_id or "ROOT")
+            parent_arg = "root" if parent.upper() == "ROOT" else parent
+            if parent_arg == pid:
+                raise ValueError("a playlist cannot be moved into itself")
 
-            logger.info(f"Moving playlist {pid} to parent_id={actual_parent}, seq={target_seq}")
+            current = next((p for p in self.playlists if p["ID"] == pid), None)
+            current_parent = str(current["ParentID"]) if current else None
+            if current_parent is None or current_parent.upper() != parent.upper():
+                # seq=None appends: an explicit seq is checked against the OLD parent's
+                # count, so it fails for an empty folder ("Invalid sequence number: 0").
+                self.db.move_playlist(pid, seq=None, parent_id=parent_arg)
 
-            # 2. Call DB (rbox should handle the shift if seq is provided)
-            # If rbox move_playlist(pid, seq=target_seq, parent_id=actual_parent) works as expected:
-            self.db.move_playlist(str(pid), seq=target_seq, parent_id=actual_parent)
+            if target is not None and target["ID"] != pid:
+                order = sorted(
+                    self.db.get_playlist_children(parent_arg), key=lambda r: int(r.seq or 0)
+                )
+                me = next((r for r in order if str(r.id) == pid), None)
+                tgt = next((r for r in order if str(r.id) == target["ID"]), None)
+                if me is not None and tgt is not None:
+                    seq = self._seq_value_for(order, me, tgt, after=position == "after")
+                    if seq != int(me.seq or 0):
+                        self.db.move_playlist(pid, seq=seq)
 
-            # 3. Update Cache & Re-sort siblings locally to reflect the move
-            resolved_parent = str(actual_parent) if actual_parent else "ROOT"
-
-            for p in self.playlists:
-                if p["ID"] == str(pid):
-                    p["ParentID"] = resolved_parent
-                    p["Seq"] = target_seq
-                    break
-
-            # Simple local re-sequencing for siblings to keep cache in sync
-            parent_siblings = [p for p in self.playlists if p["ParentID"] == resolved_parent]
-            parent_siblings.sort(key=lambda x: (x.get("Seq", 0), 0 if x["ID"] == str(pid) else 1))
-
-            for i, p in enumerate(parent_siblings):
-                p["Seq"] = i
-
-            self.playlists.sort(key=lambda x: x.get("Seq", 0))
+            logger.info(
+                "op=move_playlist pid=%s parent=%s target=%s position=%s",
+                pid,
+                parent_arg,
+                target_id,
+                position,
+            )
+            self._refresh_playlist_nodes()
             return True
         except Exception as e:
             logger.error(f"Failed to move playlist {pid}: {e}")
@@ -1504,10 +1527,19 @@ class LiveRekordboxDB:
             logger.error(f"Failed to create playlist {name}: {e}")
             return None
 
+    def _refresh_playlist_tracks(self, pid: str) -> None:
+        """Re-read one playlist's track order into ``playlists_tracks``.
+
+        ``get_playlist_tracks`` serves from that cache; without this an added track
+        stayed invisible until the next library load.
+        """
+        self.playlists_tracks[str(pid)] = self.get_playlist_track_ids(pid)
+
     def add_track_to_playlist(self, pid, tid):
         try:
             # rbox uses create_playlist_song(playlist_id, track_id)
             self.db.create_playlist_song(str(pid), str(tid))
+            self._refresh_playlist_tracks(pid)
             return True
         except Exception as e:
             logger.error(f"Failed to add track {tid} to playlist {pid}: {e}")
@@ -1528,6 +1560,7 @@ class LiveRekordboxDB:
                 logger.warning("track %s is not in playlist %s — nothing to remove", tid, pid)
                 return False
             self.db.delete_playlist_song(str(row.id))
+            self._refresh_playlist_tracks(pid)
             return True
         except Exception as e:
             logger.error(f"Failed to remove track {tid} from playlist {pid}: {e}")
@@ -1601,16 +1634,26 @@ class LiveRekordboxDB:
             return None
 
     def reorder_playlist_track(self, pid: str, track_id: str, new_index: int) -> bool:
-        """
-        Reorders a track in a playlist.
-        For now, this performs a Remove + Add, which effectively moves it to the end.
-        True index-based reordering requires deeper SQL access not yet implemented in rbox wrapper.
+        """Move a track to 0-based position ``new_index`` of the playlist (clamped).
+
+        Same contract as the XML backend. Used to be remove + add, which always put the
+        track at the end and still answered success.
         """
         try:
-            # 1. Remove
-            self.remove_track_from_playlist(pid, track_id)
-            # 2. Add (Appends to end)
-            self.add_track_to_playlist(pid, track_id)
+            songs = sorted(self.db.get_playlist_songs(str(pid)), key=lambda r: int(r.track_no or 0))
+            me = next((r for r in songs if str(r.content_id) == str(track_id)), None)
+            if me is None:
+                logger.warning("track %s is not in playlist %s — nothing to reorder", track_id, pid)
+                return False
+            others = [r for r in songs if r is not me]
+            idx = max(0, min(int(new_index), len(others)))
+            if others:
+                after = idx == len(others)
+                anchor = others[-1] if after else others[idx]
+                seq = self._seq_value_for(songs, me, anchor, after=after, attr="track_no")
+                if seq != int(me.track_no or 0):
+                    self.db.move_playlist_song(str(me.id), seq)
+            self._refresh_playlist_tracks(pid)
             return True
         except Exception as e:
             logger.error(f"Failed to reorder playlist track: {e}")

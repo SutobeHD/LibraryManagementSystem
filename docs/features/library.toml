@@ -51,6 +51,7 @@ paths = ["frontend/src/components/PlaylistBrowser.jsx"]
 routes = ["/api/playlists/tree", "/api/playlists/create", "/api/playlists/rename", "/api/playlists/move", "/api/playlists/delete"]
 depends_on = ["live-master-db"]
 related = ["standalone-library-mode"]
+notes = "Live-move_playlist war in leere Ordner und zurück nach ROOT kaputt (rbox: parent_id=None = Eltern behalten, seq ist ein Wert <= Anzahl). Fix auf fix/kernloop-0.1-bugs (B11): ROOT als \"root\", seq=None zum Anhängen, vor/nach per seq-Wert, Baum-Cache danach frisch aus master.db."
 
 [[feature]]
 id = "playlist-track-ops"
@@ -58,10 +59,11 @@ group = "Playlists"
 name = "Tracks in Playlists (add/remove/reorder)"
 status = "partial"
 desc = "Track hinzufügen/entfernen, Drag-Reorder innerhalb der Playlist."
+paths = ["tests/test_live_playlist_ops.py"]
 routes = ["/api/playlists/add-track", "/api/playlists/remove-track", "/api/playlists/reorder"]
 depends_on = ["playlist-tree-crud", "db-write-lock"]
-todo = ["Fix da6ba0d (falsche rbox-Arity bei remove/reorder) mit PR #58 landen", "Test-Playlist anlegen, Remove/Reorder real prüfen, wegräumen"]
-notes = "Im Live-Modus auf main kaputt."
+todo = ["Test-Playlist im echten Rekordbox anlegen, Add/Remove/Reorder prüfen, wegräumen"]
+notes = "Im Live-Modus auf main kaputt. Auf fix/kernloop-0.1-bugs (B11): add/remove frischen den playlists_tracks-Cache auf, reorder setzt den Track per rbox move_playlist_song an target_index (0-basiert, geklemmt wie XML); da6ba0d (rbox-Arity) liegt schon in PR #60."
 
 [[feature]]
 id = "smart-playlists"
