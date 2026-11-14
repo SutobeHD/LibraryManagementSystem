@@ -21,22 +21,52 @@ sys.path.insert(0, ROOT)
 
 from app.analysis_db_writer import AnalysisDBWriter  # noqa: E402
 
+#: Engine pitch class (sharps) -> the name Rekordbox's own analysis stores.
+_RB_ROOT = {
+    "C": "C", "C#": "Db", "D": "D", "D#": "Eb", "E": "E", "F": "F",
+    "F#": "F#", "G": "G", "G#": "Ab", "A": "A", "A#": "Bb", "B": "B",
+}  # fmt: skip
 
-def test_key_id_to_name_inverts_engine_map():
-    """The master.db key write must invert analysis_engine's key_id map exactly.
 
-    Drift between the two (writer vs engine) would silently store the wrong key
-    for half the wheel — this guards all 24 keys.
+def test_key_id_to_name_inverts_engine_map_in_rekordbox_spelling():
+    """The master.db key write must invert analysis_engine's key_id map exactly, and
+    spell the key the way Rekordbox does ("Am", "Dbm", "F#").
+
+    Drift between writer and engine would silently store the wrong key for half the
+    wheel. A non-Rekordbox spelling ("A minor") made ``update_content_key`` add a new
+    djmdKey row next to Rekordbox's own "Am" instead of reusing it.
     """
     from app.analysis_engine import _REKORDBOX_KEY_ID
 
     for full_key, key_id in _REKORDBOX_KEY_ID.items():
-        assert AnalysisDBWriter._key_id_to_name(key_id) == full_key
+        root, mode = full_key.split()
+        expected = _RB_ROOT[root] + ("m" if mode == "minor" else "")
+        assert AnalysisDBWriter._key_id_to_name(key_id) == expected
+
+
+def test_key_names_match_the_minor_set_of_a_real_library():
+    # The twelve minor names a real master.db holds (2026-11-14 copy), verbatim.
+    real = {"Cm", "Dbm", "Dm", "Ebm", "Em", "Fm", "F#m", "Gm", "Abm", "Am", "Bbm", "Bm"}
+    assert {AnalysisDBWriter._key_id_to_name(i) for i in range(13, 25)} == real
 
 
 def test_key_id_to_name_unknown():
     assert AnalysisDBWriter._key_id_to_name(0) is None
     assert AnalysisDBWriter._key_id_to_name(99) is None
+    assert AnalysisDBWriter._key_id_to_name(None) is None
+    assert AnalysisDBWriter._key_id_to_name(True) is None
+
+
+def test_anlz_rel_path_follows_rekordbox_uuid_layout():
+    from app.analysis_db_writer import rekordbox_anlz_rel_path
+
+    # A real row: uuid 44d00cc2-... is recorded at /PIONEER/USBANLZ/44d/00cc2-.../.
+    assert (
+        rekordbox_anlz_rel_path("44d00cc2-7321-4a2e-88d7-fbcc7074c1b3")
+        == "/PIONEER/USBANLZ/44d/00cc2-7321-4a2e-88d7-fbcc7074c1b3/ANLZ0000.DAT"
+    )
+    for bad in (None, "", "abc", "../x/y", "a/b-cdef", "c:\\evil", "ab\\cd"):
+        assert rekordbox_anlz_rel_path(bad) is None
 
 
 def test_update_cache_bpm_key_beatgrid_shape():
@@ -310,7 +340,90 @@ def test_writes_into_the_recorded_dir_then_flags_the_row(tmp_path, monkeypatch):
     recorded_dir = share / "PIONEER" / "USBANLZ" / "44d" / "00cc2-7321-4a2e-88d7-fbcc7074c1b3"
     assert seen["anlz_dir"] == str(recorded_dir)
     assert recorded_dir.is_dir()  # recorded but not created yet: the writer makes it
-    assert master.writes == ["update_content(9, analysed=4294967295)", "update_content_key(9)"]
+    assert master.writes == ["update_content(9, analysed=105)", "update_content_key(9)"]
+
+
+class _CLongRow:
+    """rbox content row: integer columns are C longs, so 0xFFFFFFFF raises on assignment."""
+
+    def __init__(self, cid: str) -> None:
+        self.id = cid
+        self.analysis_data_path = _REL
+        self._analysed = 0
+        self.bpm = 0
+
+    @property
+    def analysed(self) -> int:
+        return self._analysed
+
+    @analysed.setter
+    def analysed(self, value: int) -> None:
+        if not -(2**31) <= value < 2**31:
+            raise OverflowError("Python int too large to convert to C long")
+        self._analysed = value
+
+
+class _CLongMasterDb(_RecordingMasterDb):
+    def get_content_by_id(self, tid):
+        tid = str(tid)
+        return _CLongRow(tid) if tid in self.rel_by_id else None
+
+
+def test_analysed_flag_fits_rbox_c_long_column(tmp_path):
+    """The old 0xFFFFFFFF raised OverflowError inside rbox, so BPM and key never landed
+    while the route still said ok. 105 is what Rekordbox itself writes."""
+    from app.analysis_db_writer import REKORDBOX_ANALYSED
+
+    master = _CLongMasterDb(str(tmp_path / "share"), {"9": _REL})
+    writer = AnalysisDBWriter(_LiveDBWith({"9": {"BPM": 0}}, master))
+
+    assert REKORDBOX_ANALYSED == 105
+    assert writer._update_db("9", dict(_ANALYSIS)) is True
+    assert master.writes == ["update_content(9, analysed=105)", "update_content_key(9)"]
+
+
+def test_refused_db_write_is_an_error_result_and_leaves_the_cache(tmp_path, monkeypatch):
+    class _RefusingMasterDb(_RecordingMasterDb):
+        def update_content(self, item) -> None:
+            raise RuntimeError("database is locked")
+
+    master = _RefusingMasterDb(str(tmp_path / "share"), {"9": _REL})
+    writer = AnalysisDBWriter(_LiveDBWith({"9": {"BPM": 0, "path": _audio_file(tmp_path)}}, master))
+    monkeypatch.setattr(writer, "_run_analysis", lambda p: dict(_ANALYSIS))
+    monkeypatch.setattr(
+        "app.anlz_writer.write_anlz_files",
+        lambda **kw: {"dat": os.path.join(kw["anlz_dir"], "ANLZ0000.DAT")},
+    )
+
+    result = writer.analyze_and_save("9", force=True)
+
+    assert result["status"] == "error"
+    assert result["reason"] == "db_update_failed"
+    assert "database is locked" in result["error"]
+    assert writer.live_db.tracks["9"]["BPM"] == 0  # cache still mirrors master.db
+
+
+def test_update_db_raises_for_a_missing_row(tmp_path):
+    from app.analysis_db_writer import AnalysisDbUpdateError
+
+    master = _RecordingMasterDb(str(tmp_path / "share"), {})
+    writer = AnalysisDBWriter(_LiveDBWith({}, master))
+    with pytest.raises(AnalysisDbUpdateError):
+        writer._update_db("9", dict(_ANALYSIS))
+    assert master.writes == []
+
+
+def test_failed_key_write_is_not_swallowed(tmp_path):
+    from app.analysis_db_writer import AnalysisDbUpdateError
+
+    class _KeyRefusingMasterDb(_RecordingMasterDb):
+        def update_content_key(self, tid, key) -> None:
+            raise RuntimeError("key table locked")
+
+    master = _KeyRefusingMasterDb(str(tmp_path / "share"), {"9": _REL})
+    writer = AnalysisDBWriter(_LiveDBWith({"9": {"BPM": 0}}, master))
+    with pytest.raises(AnalysisDbUpdateError, match="key table locked"):
+        writer._update_db("9", dict(_ANALYSIS))
 
 
 # --- where the DSP runs ------------------------------------------------------

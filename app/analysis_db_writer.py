@@ -28,6 +28,42 @@ _ANLZ_BASE = "ANLZ0000"
 #: waiting and reports ``analysis_failed``. A long DJ mix legitimately takes minutes.
 _ANALYSIS_TIMEOUT_S = 900.0
 
+#: ``djmdContent.Analysed`` for a fully analysed track: the value Rekordbox itself writes
+#: (4905 of 4906 rows of a real library, 2026-11-14). rbox maps the column to a C long,
+#: so the old 0xFFFFFFFF raised OverflowError on assignment and killed the whole write.
+REKORDBOX_ANALYSED = 105
+
+#: Pitch classes as Rekordbox's own analysis names them in ``djmdKey.ScaleName``: flats,
+#: except F#. All twelve minor names (Dbm, Ebm, F#m, Abm, Bbm, ...) appear verbatim in a
+#: real library. ``update_content_key`` reuses a row by exact name and creates a new one
+#: for any other spelling, so "A minor" would add a key Rekordbox never uses.
+_REKORDBOX_PITCH_NAMES = ("C", "Db", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B")
+
+
+class AnalysisDbUpdateError(RuntimeError):
+    """master.db refused the analysis write (row missing, rbox error, bad value)."""
+
+
+def rekordbox_key_name(key_id: Any) -> str | None:
+    """Rekordbox key name for an ``analysis_engine`` key id (1-12 major, 13-24 minor)."""
+    if not isinstance(key_id, int) or isinstance(key_id, bool) or not 1 <= key_id <= 24:
+        return None
+    root = _REKORDBOX_PITCH_NAMES[(key_id - 1) % 12]
+    return root if key_id <= 12 else f"{root}m"
+
+
+def rekordbox_anlz_rel_path(content_uuid: str | None) -> str | None:
+    """The ``AnalysisDataPath`` Rekordbox records for a content row, from its uuid.
+
+    ``/PIONEER/USBANLZ/<uuid[:3]>/<uuid[3:]>/ANLZ0000.DAT`` (relative to the share dir).
+    4897 of 4905 analysed rows of a real library follow it exactly (2026-11-14); the
+    other 8 are Rekordbox re-analyses (``ANLZ0001``) or relocated files.
+    """
+    u = (content_uuid or "").strip()
+    if len(u) < 4 or any(c in u for c in "/\\:") or ".." in u:
+        return None
+    return f"/PIONEER/USBANLZ/{u[:3]}/{u[3:]}/{_ANLZ_BASE}.DAT"
+
 
 class AnalysisDBWriter:
     """
@@ -75,9 +111,9 @@ class AnalysisDBWriter:
         Returns:
             Dict with analysis results and write status. An ``error`` result
             carries a ``reason`` (``track_not_found`` / ``no_anlz_path`` /
-            ``audio_missing`` / ``analysis_failed`` / ``anlz_write_failed``) so
-            callers can map it without parsing ``error``, which may hold an
-            absolute file path.
+            ``audio_missing`` / ``analysis_failed`` / ``anlz_write_failed`` /
+            ``db_update_failed``) so callers can map it without parsing ``error``,
+            which may hold an absolute file path.
         """
 
         # 1. Validate track exists
@@ -165,8 +201,19 @@ class AnalysisDBWriter:
                 "error": f"Writing ANLZ files for track {track_id} failed",
             }
 
-        # 7. Update database
-        db_updated = self._update_db(track_id, analysis)
+        # 7. Update database. A refused write is an error, not "ok": the ANLZ files are
+        # new but master.db still holds the old BPM / key, and the cache keeps the old
+        # values too so the UI shows what master.db really says.
+        try:
+            db_updated = self._update_db(track_id, analysis)
+        except AnalysisDbUpdateError as e:
+            logger.error(f"DB update failed for track {track_id}: {e}")
+            return {
+                "status": "error",
+                "reason": "db_update_failed",
+                "error": f"master.db update failed for track {track_id}: {e}",
+                "anlz_paths": anlz_paths,
+            }
 
         # 8. Update in-memory cache
         self._update_cache(track_id, analysis)
@@ -250,15 +297,18 @@ class AnalysisDBWriter:
 
     def _update_db(self, track_id: str, analysis: dict[str, Any]) -> bool:
         """
-        Update djmdContent fields in master.db via rbox.
+        Update djmdContent fields in master.db via rbox. True once every field landed.
 
-        Updates: bpm, key_id, analysed flag. Never ``analysis_data_path``: the
+        Updates: bpm, key, analysed flag. Never ``analysis_data_path``: the
         caller only gets here for a track whose path master.db already records
         and whose ANLZ files were just written there.
 
         Holds ``db_lock`` from the re-read to the last write: ``update_content``
         writes the whole row, so a row read outside the lock would clobber a
         concurrent comment / rating / artist edit.
+
+        Raises ``AnalysisDbUpdateError`` when any part is refused (missing row, rbox
+        error, a value rbox cannot store); the caller turns that into an error result.
         """
         from .database import db_lock
 
@@ -266,40 +316,26 @@ class AnalysisDBWriter:
             with db_lock():
                 item = self.live_db.db.get_content_by_id(str(track_id))
                 if not item:
-                    logger.error(f"Content {track_id} not found in DB for update")
-                    return False
+                    raise AnalysisDbUpdateError(f"content {track_id} not found in master.db")
 
-                # BPM: stored as integer (bpm * 100)
-                bpm_int = round(analysis["bpm"] * 100)
+                bpm_int = round(analysis["bpm"] * 100)  # master.db stores centi-BPM
                 item.bpm = bpm_int
-
-                # Analysed flag (Rekordbox uses this to know the track has been analyzed)
-                # The 'analysed' field is a bitmask; different bits mean different analysis
-                # stages. Typical fully-analyzed value observed: 4294967295 (all bits set)
-                # or simpler values. We set it to indicate BPM + key + waveform are done.
-                item.analysed = 4294967295  # 0xFFFFFFFF — fully analyzed
-
+                item.analysed = REKORDBOX_ANALYSED
                 self.live_db.db.update_content(item)
                 logger.info(
-                    f"Updated djmdContent for {track_id}: bpm={bpm_int}, analysed=0xFFFFFFFF"
+                    f"Updated djmdContent for {track_id}: bpm={bpm_int}, "
+                    f"analysed={REKORDBOX_ANALYSED}"
                 )
 
-                # Update key via dedicated method (handles djmdKey join table)
-                key_id = analysis.get("key_id", 0)
-                if key_id > 0:
-                    full_key = self._key_id_to_name(key_id)
-                    if full_key:
-                        try:
-                            self.live_db.db.update_content_key(str(track_id), full_key)
-                            logger.info(f"Updated key for {track_id}: {full_key} (key_id={key_id})")
-                        except Exception as e:
-                            logger.warning(f"update_content_key failed for {track_id}: {e}")
-
-            return True
-
-        except Exception as e:
-            logger.error(f"DB update failed for track {track_id}: {e}")
-            return False
+                key_name = self._key_id_to_name(analysis.get("key_id", 0))
+                if key_name:
+                    self.live_db.db.update_content_key(str(track_id), key_name)
+                    logger.info(f"Updated key for {track_id}: {key_name}")
+        except AnalysisDbUpdateError:
+            raise
+        except Exception as e:  # rbox raises its own error types plus OverflowError/TypeError
+            raise AnalysisDbUpdateError(f"{type(e).__name__}: {e}") from e
+        return True
 
     def _update_cache(self, track_id: str, analysis: dict[str, Any]):
         """Update the in-memory track cache with analysis results."""
@@ -326,36 +362,9 @@ class AnalysisDBWriter:
         logger.debug(f"Cache updated for track {tid}: BPM={track['BPM']}, Key={track['Key']}")
 
     @staticmethod
-    def _key_id_to_name(key_id: int) -> str | None:
-        """Convert Rekordbox key_id to the full key name (e.g., 'Am' or 'Cmaj')."""
-        # Reverse of _REKORDBOX_KEY_ID from analysis_engine
-        _ID_TO_KEY = {
-            1: "C major",
-            2: "C# major",
-            3: "D major",
-            4: "D# major",
-            5: "E major",
-            6: "F major",
-            7: "F# major",
-            8: "G major",
-            9: "G# major",
-            10: "A major",
-            11: "A# major",
-            12: "B major",
-            13: "C minor",
-            14: "C# minor",
-            15: "D minor",
-            16: "D# minor",
-            17: "E minor",
-            18: "F minor",
-            19: "F# minor",
-            20: "G minor",
-            21: "G# minor",
-            22: "A minor",
-            23: "A# minor",
-            24: "B minor",
-        }
-        return _ID_TO_KEY.get(key_id)
+    def _key_id_to_name(key_id: Any) -> str | None:
+        """Rekordbox key name ("Am", "F#", "Dbm") for an engine key id, else None."""
+        return rekordbox_key_name(key_id)
 
     # -----------------------------------------------------------------------
     # Batch analysis

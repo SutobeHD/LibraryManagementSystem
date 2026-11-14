@@ -5867,6 +5867,10 @@ _ANALYZE_FULL_ERRORS: dict[str, tuple[int, str]] = {
         "master.db records no analysis path for this track. Analyse it once in Rekordbox first.",
     ),
     "audio_missing": (409, "The track's audio file is missing on disk"),
+    "db_update_failed": (
+        500,
+        "The analysis files were written, but updating master.db failed. Check logs.",
+    ),
 }
 
 

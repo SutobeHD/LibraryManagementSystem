@@ -163,6 +163,7 @@ _SECRET_PATH = r"C:\Users\someone\Music\private\track.mp3"
         ("no_anlz_path", "Track 42 has no AnalysisDataPath in master.db.", 409),
         ("audio_missing", f"Audio file not found: {_SECRET_PATH}", 409),
         ("anlz_write_failed", "Writing ANLZ files for track 42 failed", 500),
+        ("db_update_failed", "master.db update failed for track 42: OverflowError", 500),
         ("analysis_failed", f"Analysis failed: cannot decode {_SECRET_PATH}", 500),
         (None, f"something else at {_SECRET_PATH}", 500),
     ],
@@ -180,6 +181,8 @@ def test_analyze_full_maps_writer_errors_by_reason_without_leaking_paths(
     r = _post("/api/track/42/analyze-full", auth_token)
     assert r.status_code == status_code, r.text
     assert "private" not in r.json()["detail"]
+    if reason == "db_update_failed":
+        assert "master.db failed" in r.json()["detail"]  # never a silent ok
 
 
 @pytest.mark.no_auth

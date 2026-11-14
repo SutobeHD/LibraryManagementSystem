@@ -75,7 +75,7 @@ paths = ["app/audio_analyzer.py", "app/analysis_db_writer.py"]
 routes = ["/api/audio/analyze", "/api/track/{tid}/analyze", "/api/track/{tid}/analyze-full", "/api/library/analyze-batch"]
 depends_on = ["analysis-engine", "anlz-writer", "live-master-db"]
 related = ["db-write-lock-retrofit"]
-notes = "Kein Frontend ruft die Routen. AnalysisDBWriter schreibt ohne _db_write_lock. analyze-full/-batch liefern 400 (K1, Fix auf PR #58)."
+notes = "Kein Frontend ruft die Routen. Schreibt unter db_lock analysed=105 + Key in Rekordbox-Schreibweise (Am, Dbm, F#); ein abgelehnter master.db-Write ist db_update_failed -> 500, nie still ok (B6, fix/kernloop-0.1-bugs)."
 
 # ── Matching & Klassifikation ─────────────────────────────────────────────
 
