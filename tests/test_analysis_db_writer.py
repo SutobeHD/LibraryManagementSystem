@@ -473,3 +473,43 @@ def test_a_crashed_worker_drops_the_pool_for_the_next_track(monkeypatch):
         AnalysisDBWriter(object())._run_analysis("x.mp3")
 
     assert dropped == [True]
+
+
+def test_rewrites_a_rekordbox_reanalysis_under_its_recorded_file_name(tmp_path, monkeypatch):
+    # 8 rows of a real library record ANLZ0001.DAT (Rekordbox re-analysis); the USB
+    # export ships exactly that file, so writing ANLZ0000.* never reached the stick.
+    rel = "/PIONEER/USBANLZ/72a/fb195-5909/ANLZ0001.DAT"
+    master = _RecordingMasterDb(str(tmp_path / "share"), {"9": rel})
+    writer = AnalysisDBWriter(_LiveDBWith({"9": {"BPM": 0, "path": _audio_file(tmp_path)}}, master))
+    monkeypatch.setattr(writer, "_run_analysis", lambda p: dict(_ANALYSIS))
+    seen: dict = {}
+
+    def _fake_write(**kw):
+        seen.update(kw)
+        return {"dat": os.path.join(kw["anlz_dir"], f"{kw['filename_base']}.DAT")}
+
+    monkeypatch.setattr("app.anlz_writer.write_anlz_files", _fake_write)
+
+    assert writer.analyze_and_save("9")["status"] == "ok"
+    assert seen["filename_base"] == "ANLZ0001"
+    assert seen["anlz_dir"].endswith(os.path.join("72a", "fb195-5909"))
+
+
+def test_key_failure_after_the_row_write_keeps_the_cache_on_the_new_bpm(tmp_path, monkeypatch):
+    class _KeyRefusingMasterDb(_RecordingMasterDb):
+        def update_content_key(self, tid, key) -> None:
+            raise RuntimeError("key table locked")
+
+    master = _KeyRefusingMasterDb(str(tmp_path / "share"), {"9": _REL})
+    writer = AnalysisDBWriter(_LiveDBWith({"9": {"BPM": 0, "path": _audio_file(tmp_path)}}, master))
+    monkeypatch.setattr(writer, "_run_analysis", lambda p: dict(_ANALYSIS))
+    monkeypatch.setattr(
+        "app.anlz_writer.write_anlz_files",
+        lambda **kw: {"dat": os.path.join(kw["anlz_dir"], "ANLZ0000.DAT")},
+    )
+
+    result = writer.analyze_and_save("9", force=True)
+
+    assert result["reason"] == "db_update_failed"
+    assert master.writes == ["update_content(9, analysed=105)"]  # BPM landed
+    assert writer.live_db.tracks["9"]["BPM"] == 124.0  # so the cache shows it

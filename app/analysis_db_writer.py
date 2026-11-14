@@ -41,7 +41,15 @@ _REKORDBOX_PITCH_NAMES = ("C", "Db", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", 
 
 
 class AnalysisDbUpdateError(RuntimeError):
-    """master.db refused the analysis write (row missing, rbox error, bad value)."""
+    """master.db refused the analysis write (row missing, rbox error, bad value).
+
+    ``bpm_written``: the row update (BPM + analysed) landed before a later part
+    (the key) failed, so master.db already holds the new BPM.
+    """
+
+    def __init__(self, message: str, *, bpm_written: bool = False) -> None:
+        super().__init__(message)
+        self.bpm_written = bpm_written
 
 
 def rekordbox_key_name(key_id: Any) -> str | None:
@@ -126,13 +134,14 @@ class AnalysisDBWriter:
             }
 
         # 2. Where this track's ANLZ files live: only the AnalysisDataPath recorded in
-        # master.db counts. Files in a dir we picked ourselves would be linked to no
+        # master.db counts, file name included (a Rekordbox re-analysis records
+        # ANLZ0001.DAT). Files in a dir we picked ourselves would be linked to no
         # row, while the row still claimed "analysed" — Rekordbox then shows a BPM
-        # with no grid or waveform and never re-analyses the track. Recording a new
-        # path means reproducing Rekordbox's share layout, which nothing here has
-        # verified, so such a track is refused before any DSP runs.
-        anlz_dir = self._recorded_anlz_dir(track_id)
-        if anlz_dir is None:
+        # with no grid or waveform and never re-analyses the track. A track without a
+        # path is refused before any DSP runs; LMS imports record one at import time
+        # (``LiveRekordboxDB.attach_import_anlz``).
+        recorded_dat = self._recorded_anlz_dat(track_id)
+        if recorded_dat is None:
             return {
                 "status": "error",
                 "reason": "no_anlz_path",
@@ -145,8 +154,7 @@ class AnalysisDBWriter:
         # 3. Check if already analyzed (skip unless forced)
         if not force:
             existing_bpm = track.get("BPM", 0)
-            dat_exists = (Path(anlz_dir) / f"{_ANLZ_BASE}.DAT").is_file()
-            if existing_bpm and existing_bpm > 0 and dat_exists:
+            if existing_bpm and existing_bpm > 0 and recorded_dat.is_file():
                 logger.info(
                     f"Track {track_id} already analyzed (BPM={existing_bpm}), skipping. Use force=True to re-analyze."
                 )
@@ -193,7 +201,7 @@ class AnalysisDBWriter:
 
         # 6. Write ANLZ binary files. Without a .DAT (beat grid) master.db must not say
         # "analysed"; write_anlz_files swallows each file's failure on its own.
-        anlz_paths = self._write_anlz(track_id, file_path, analysis, anlz_dir)
+        anlz_paths = self._write_anlz(track_id, file_path, analysis, recorded_dat)
         if "dat" not in anlz_paths:
             return {
                 "status": "error",
@@ -202,12 +210,14 @@ class AnalysisDBWriter:
             }
 
         # 7. Update database. A refused write is an error, not "ok": the ANLZ files are
-        # new but master.db still holds the old BPM / key, and the cache keeps the old
-        # values too so the UI shows what master.db really says.
+        # new but master.db still holds the old values. The cache follows master.db:
+        # only a BPM that did land (the key write failed after it) reaches it.
         try:
             db_updated = self._update_db(track_id, analysis)
         except AnalysisDbUpdateError as e:
             logger.error(f"DB update failed for track {track_id}: {e}")
+            if e.bpm_written:
+                track["BPM"] = analysis["bpm"]
             return {
                 "status": "error",
                 "reason": "db_update_failed",
@@ -258,42 +268,41 @@ class AnalysisDBWriter:
             raise
 
     def _write_anlz(
-        self, track_id: str, file_path: str, analysis: dict[str, Any], anlz_dir: str
+        self, track_id: str, file_path: str, analysis: dict[str, Any], recorded_dat: Path
     ) -> dict[str, str]:
-        """Write the ANLZ files into the track's recorded ANLZ dir; ``{}`` on failure."""
+        """Write the ANLZ trio under the recorded ``.DAT``'s dir and name; ``{}`` on failure."""
         try:
             from .anlz_writer import write_anlz_files
 
             # The path is recorded but Rekordbox creates the dir lazily.
-            Path(anlz_dir).mkdir(parents=True, exist_ok=True)
+            recorded_dat.parent.mkdir(parents=True, exist_ok=True)
             return write_anlz_files(
-                anlz_dir=anlz_dir,
+                anlz_dir=str(recorded_dat.parent),
                 track_path=file_path,
                 analysis_result=analysis,
-                filename_base=_ANLZ_BASE,
+                filename_base=recorded_dat.stem,
             )
         except Exception as e:
             logger.error(f"Failed to write ANLZ files for track {track_id}: {e}")
             return {}
 
-    def _recorded_anlz_dir(self, track_id: str) -> str | None:
-        """Dir of the AnalysisDataPath master.db records for the track, or None.
+    def _recorded_anlz_dat(self, track_id: str) -> Path | None:
+        """The ``.DAT`` path master.db records for the track (may not exist yet), or None.
 
         Not via ``get_content_anlz_paths`` / ``get_content_anlz_dir``: both
         ``unwrap()`` on an empty AnalysisDataPath and abort the process (see
         ``app/anlz_safe.py``). A track with a tag BPM that Rekordbox never analysed
         is exactly that row, and no ``except`` can catch the abort.
         """
-        from .anlz_safe import resolve_anlz_dir
+        from .anlz_safe import resolve_anlz_dat
 
-        return resolve_anlz_dir(self.live_db.db, str(track_id))
+        dat = resolve_anlz_dat(self.live_db.db, str(track_id))
+        return Path(dat) if dat else None
 
     def _has_anlz_dat(self, track_id: str) -> bool:
-        """True when the track's recorded ANLZ dir already holds ``ANLZ0000.DAT``."""
-        anlz_dir = self._recorded_anlz_dir(track_id)
-        if not anlz_dir:
-            return False
-        return (Path(anlz_dir) / f"{_ANLZ_BASE}.DAT").is_file()
+        """True when the ``.DAT`` master.db records for the track is on disk."""
+        dat = self._recorded_anlz_dat(track_id)
+        return dat is not None and dat.is_file()
 
     def _update_db(self, track_id: str, analysis: dict[str, Any]) -> bool:
         """
@@ -312,6 +321,7 @@ class AnalysisDBWriter:
         """
         from .database import db_lock
 
+        row_written = False
         try:
             with db_lock():
                 item = self.live_db.db.get_content_by_id(str(track_id))
@@ -322,6 +332,7 @@ class AnalysisDBWriter:
                 item.bpm = bpm_int
                 item.analysed = REKORDBOX_ANALYSED
                 self.live_db.db.update_content(item)
+                row_written = True
                 logger.info(
                     f"Updated djmdContent for {track_id}: bpm={bpm_int}, "
                     f"analysed={REKORDBOX_ANALYSED}"
@@ -334,7 +345,7 @@ class AnalysisDBWriter:
         except AnalysisDbUpdateError:
             raise
         except Exception as e:  # rbox raises its own error types plus OverflowError/TypeError
-            raise AnalysisDbUpdateError(f"{type(e).__name__}: {e}") from e
+            raise AnalysisDbUpdateError(f"{type(e).__name__}: {e}", bpm_written=row_written) from e
         return True
 
     def _update_cache(self, track_id: str, analysis: dict[str, Any]):
