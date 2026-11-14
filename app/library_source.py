@@ -48,22 +48,26 @@ class LibrarySource:
     def get_playlist_track_ids(self, pid) -> list[str]:
         raise NotImplementedError
 
+    def get_rekordbox_anlz_dat(self, track: dict) -> Path | None:
+        """The ``.DAT`` Rekordbox's own analysis wrote for this track, if the mode has one."""
+        return None
+
     def get_anlz_sidecar_dir(self, track: dict) -> Path | None:
-        """Returns directory containing prebuilt ANLZ files (from import-time analysis), if any."""
+        """Directory with LMS-generated ANLZ files for the track (cache, then legacy)."""
         path = track.get("path")
         if not path:
             return None
-        from .anlz_sidecar import sidecar_dir_for
+        from .anlz_sidecar import legacy_sidecar_dir_for, sidecar_dir_for
 
         # The writer keys the folder on the RESOLVED path. Hashing the stored
         # string instead missed every sidecar whose path differs from it (`..`,
         # a relative path, letter case on Windows) and re-ran a full analysis.
         try:
-            candidate = sidecar_dir_for(Path(path))
+            candidates = (sidecar_dir_for(Path(path)), legacy_sidecar_dir_for(Path(path)))
         except (OSError, ValueError) as exc:
             logger.debug("sidecar lookup skipped for %r: %s", path, exc)
             return None
-        return candidate if candidate.exists() else None
+        return next((c for c in candidates if c.exists()), None)
 
 
 class XmlLibrarySource(LibrarySource):
@@ -165,6 +169,27 @@ class LiveLibrarySource(LibrarySource):
                 str(t.get("id") or t.get("ID")) for t in self.live_db.get_playlist_tracks(str(pid))
             ]
         return []
+
+    def get_rekordbox_anlz_dat(self, track: dict) -> Path | None:
+        """The ``.DAT`` at the AnalysisDataPath master.db records, when it is on disk.
+
+        Via ``anlz_safe.resolve_anlz_dat``: rbox's own path helpers abort the process
+        for a row without a path.
+        """
+        tid = track.get("id")
+        master = getattr(self.live_db, "db", None)
+        if not tid or master is None:
+            return None
+        from .anlz_safe import resolve_anlz_dat
+
+        dat = resolve_anlz_dat(master, str(tid))
+        if not dat:
+            return None
+        try:
+            return Path(dat) if Path(dat).is_file() else None
+        except OSError as exc:
+            logger.debug("rekordbox ANLZ lookup skipped for %s: %s", tid, exc)
+            return None
 
     @staticmethod
     def _normalize(tid: str, t: dict) -> dict:

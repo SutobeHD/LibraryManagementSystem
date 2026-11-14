@@ -200,10 +200,21 @@ def resolve_anlz_dir(db, track_id: str) -> str | None:
         db: An open `rbox.MasterDb`.
         track_id: Stringified track id.
     """
+    dat = resolve_anlz_dat(db, track_id)
+    return str(Path(dat).parent) if dat else None
+
+
+def resolve_anlz_dat(db, track_id: str) -> str | None:
+    """Absolute ``.DAT`` path master.db records for a track, or None. Never aborts.
+
+    Same column read as ``resolve_anlz_dir`` (see there for why not the rbox
+    helpers). The file name is kept: a Rekordbox re-analysis records ``ANLZ0001.DAT``.
+    Whether the file exists is the caller's check.
+    """
     try:
         content = db.get_content_by_id(str(track_id))
     except Exception as exc:
-        logger.debug("resolve_anlz_dir: content %s unreadable: %s", track_id, exc)
+        logger.debug("resolve_anlz_dat: content %s unreadable: %s", track_id, exc)
         return None
     if content is None:
         return None
@@ -214,8 +225,8 @@ def resolve_anlz_dir(db, track_id: str) -> str | None:
     share = db.share_directory()  # Optional[str]: None when no share dir is configured
     if not share:
         return None
-    dat = Path(share) / str(rel).lstrip("/\\").replace("/", os.sep)
-    return str(dat.parent)
+    # lstrip is load-bearing: Path("C:/share") / "/PIONEER/x" drops the share root.
+    return str(Path(share) / str(rel).lstrip("/\\").replace("/", os.sep))
 
 
 def _import_anlz_file_cls() -> Any:

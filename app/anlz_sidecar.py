@@ -1,14 +1,17 @@
 """
-ANLZ-Sidecar writer — shared helper used by every track-import path
-(SoundCloud download, drag-drop import, folder watcher) so the resulting
-DAT/EXT/2EX files always end up in a deterministic location next to the
-audio file. The USB-sync engine (OneLibraryUsbWriter) then copies them
-straight to PIONEER/USBANLZ/<bucket>/<hash>/ on the stick.
+LMS ANLZ cache — DAT/EXT/2EX files LMS generated for a track that has no
+Rekordbox analysis (XML-mode import, SoundCloud download, USB-export fallback).
+The USB-sync engine (OneLibraryUsbWriter) copies them to
+PIONEER/USBANLZ/<bucket>/<hash>/ on the stick.
 
-Layout:
-    <music_dir>/.lms_anlz/<sha-of-abs-path>/ANLZ0000.DAT
-                                            /ANLZ0000.EXT
-                                            /ANLZ0000.2EX
+Layout (per-user cache dir, never the music folder):
+    <user cache>/MusicLibraryManager/anlz/<sha-of-abs-path>/ANLZ0000.DAT
+                                                            /ANLZ0000.EXT
+                                                            /ANLZ0000.2EX
+
+Older builds wrote ``<music_dir>/.lms_anlz/<sha>/`` next to the audio file, i.e.
+into the user's music collection. Those folders are still read
+(``legacy_sidecar_dir_for``) but nothing writes there any more.
 """
 
 from __future__ import annotations
@@ -18,21 +21,38 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from platformdirs import user_cache_dir
+
 logger = logging.getLogger(__name__)
+
+_APP_DIRNAME = "MusicLibraryManager"
+
+
+def anlz_cache_root() -> Path:
+    """Root of the LMS ANLZ cache: the per-user cache dir, outside every music folder."""
+    return Path(user_cache_dir(_APP_DIRNAME, appauthor=False)) / "anlz"
+
+
+def _path_key(file_path: Path) -> str:
+    return hashlib.sha1(str(file_path.resolve()).encode("utf-8")).hexdigest()[:16]
 
 
 def sidecar_dir_for(file_path: Path) -> Path:
-    """Stable, collision-resistant per-track sidecar directory."""
-    h = hashlib.sha1(str(file_path.resolve()).encode("utf-8")).hexdigest()[:16]
-    return file_path.parent / ".lms_anlz" / h
+    """Stable, collision-resistant per-track ANLZ cache directory (keyed on the path)."""
+    return anlz_cache_root() / _path_key(file_path)
+
+
+def legacy_sidecar_dir_for(file_path: Path) -> Path:
+    """Where builds before 0.1 wrote the sidecar, next to the audio. Read-only."""
+    return file_path.parent / ".lms_anlz" / _path_key(file_path)
 
 
 def write_companion_anlz(
     file_path: Path, analysis_result: dict[str, Any] | None = None
 ) -> Path | None:
     """
-    Write DAT/EXT/2EX next to file_path. Returns the sidecar directory on
-    success, None on failure.
+    Write DAT/EXT/2EX for file_path into the LMS ANLZ cache. Returns the cache
+    directory on success, None on failure. Never writes next to the audio file.
 
     If analysis_result is None, runs the full analysis pipeline (uses the
     on-disk cache so re-imports are cheap).

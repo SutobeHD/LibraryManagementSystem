@@ -327,3 +327,75 @@ def test_no_source_and_no_audio_returns_none(tmp_path, monkeypatch):
     missing = str(tmp_path / "gone.mp3")
     assert w._generate_or_copy_anlz_for({"id": "7", "path": missing}, "7", _Src(), STICK) is None
     assert not os.path.exists(w.anlz_root / "P000" / "00000007")
+
+
+# ── B7: Rekordbox's own analysis first, nothing written into the music folder ──
+
+
+class _LiveSrc(_Src):
+    def __init__(self, rekordbox_dat=None, sidecar=None):
+        super().__init__(sidecar)
+        self.rekordbox_dat = rekordbox_dat
+
+    def get_rekordbox_anlz_dat(self, track):
+        return self.rekordbox_dat
+
+
+def test_rekordbox_anlz_wins_over_sidecar_and_analysis(tmp_path, monkeypatch):
+    _no_analysis(monkeypatch)
+    rb = _source_trio(tmp_path / "share" / "PIONEER" / "USBANLZ" / "44d" / "abc")
+    side = _source_trio(tmp_path / "side").parent  # a valid LMS sidecar too
+    # Make the two sources distinguishable: the Rekordbox DAT gets one more beat.
+    rb.write_bytes(build_dat(LOCAL, [*BEATS, BEATS[-1]], [0] * 400, [7] * 400, [3] * 100))
+    w = _writer(tmp_path)
+
+    rel = w._generate_or_copy_anlz_for({"id": "7"}, "7", _LiveSrc(rb, side), STICK)
+
+    assert rel == "/PIONEER/USBANLZ/P000/00000007/ANLZ0000.DAT"
+    out = (w.anlz_root / "P000" / "00000007" / "ANLZ0000.DAT").read_bytes()
+    assert out == ux.to_usb_bytes(rb.read_bytes(), STICK)
+
+
+def test_invalid_rekordbox_anlz_falls_back_to_the_lms_sidecar(tmp_path, monkeypatch):
+    _no_analysis(monkeypatch)
+    rb = tmp_path / "share" / "ANLZ0000.DAT"
+    rb.parent.mkdir(parents=True)
+    rb.write_bytes(b"PMAI" + b"\0" * 10)
+    side = tmp_path / "side"
+    _source_trio(side)
+    w = _writer(tmp_path)
+
+    rel = w._generate_or_copy_anlz_for({"id": "7"}, "7", _LiveSrc(rb, side), STICK)
+
+    assert rel == "/PIONEER/USBANLZ/P000/00000007/ANLZ0000.DAT"
+    out = (w.anlz_root / "P000" / "00000007" / "ANLZ0000.DAT").read_bytes()
+    assert out == ux.to_usb_bytes((side / "ANLZ0000.DAT").read_bytes(), STICK)
+
+
+def test_fresh_analysis_fallback_never_writes_into_the_music_folder(
+    tmp_path, monkeypatch, anlz_cache_sandbox
+):
+    from app import anlz_sidecar
+
+    music = tmp_path / "music"
+    music.mkdir()
+    audio = music / "Track.mp3"
+    audio.write_bytes(b"\xff\xfb")
+
+    def _write(**kw):
+        _source_trio(Path(kw["anlz_dir"]))
+        return {"dat": "x"}
+
+    monkeypatch.setattr("app.anlz_writer.write_anlz_files", _write)
+    monkeypatch.setattr(
+        "app.analysis_engine.run_full_analysis", lambda p: {"status": "ok", "waveform": {}}
+    )
+    w = _writer(tmp_path)
+
+    rel = w._generate_or_copy_anlz_for(
+        {"id": "7", "path": str(audio)}, "7", _LiveSrc(None, None), STICK
+    )
+
+    assert rel == "/PIONEER/USBANLZ/P000/00000007/ANLZ0000.DAT"
+    assert sorted(p.name for p in music.iterdir()) == ["Track.mp3"]
+    assert anlz_sidecar.sidecar_dir_for(audio).is_relative_to(anlz_cache_sandbox)

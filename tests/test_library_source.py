@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import os
 import sys
+from pathlib import Path
+from types import SimpleNamespace
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
@@ -121,3 +123,102 @@ def test_sidecar_lookup_misses_cleanly(tmp_path):
     assert src.get_anlz_sidecar_dir({"path": str(audio)}) is None
     assert src.get_anlz_sidecar_dir({"path": ""}) is None
     assert src.get_anlz_sidecar_dir({}) is None
+
+
+# --- B7: LMS ANLZ never goes into the music folder ------------------------------
+
+
+def test_sidecar_dir_is_in_the_anlz_cache_never_next_to_the_audio(tmp_path, anlz_cache_sandbox):
+    from app.anlz_sidecar import sidecar_dir_for
+
+    audio = tmp_path / "music" / "Track.mp3"
+    folder = sidecar_dir_for(audio)
+    assert folder.is_relative_to(anlz_cache_sandbox)
+    assert not folder.is_relative_to(audio.parent)
+
+
+def test_write_companion_anlz_leaves_the_music_folder_untouched(tmp_path, monkeypatch):
+    from app import anlz_sidecar
+
+    music = tmp_path / "music"
+    music.mkdir()
+    audio = music / "Track.mp3"
+    audio.write_bytes(b"\xff\xfb")
+    seen = {}
+
+    def _write(**kw):
+        seen.update(kw)
+        (Path(kw["anlz_dir"]) / "ANLZ0000.DAT").write_bytes(b"PMAI")
+        return {"dat": "x"}
+
+    monkeypatch.setattr("app.anlz_writer.write_anlz_files", _write)
+
+    out = anlz_sidecar.write_companion_anlz(audio, {"status": "ok", "waveform": {}})
+
+    assert out == anlz_sidecar.sidecar_dir_for(audio)
+    assert Path(seen["anlz_dir"]) == out
+    assert sorted(p.name for p in music.iterdir()) == ["Track.mp3"]
+
+
+def test_legacy_sidecar_next_to_the_audio_is_still_read(tmp_path):
+    from app.anlz_sidecar import legacy_sidecar_dir_for
+
+    audio = tmp_path / "music" / "Track.mp3"
+    audio.parent.mkdir()
+    audio.write_bytes(b"\xff\xfb")
+    legacy = legacy_sidecar_dir_for(audio)
+    legacy.mkdir(parents=True)
+    (legacy / "ANLZ0000.DAT").write_bytes(b"PMAI")
+
+    assert XmlLibrarySource(None).get_anlz_sidecar_dir({"path": str(audio)}) == legacy
+
+
+def test_cache_wins_over_the_legacy_sidecar(tmp_path):
+    from app.anlz_sidecar import legacy_sidecar_dir_for
+
+    audio = tmp_path / "music" / "Track.mp3"
+    audio.parent.mkdir()
+    audio.write_bytes(b"\xff\xfb")
+    legacy_sidecar_dir_for(audio).mkdir(parents=True)
+    cache = _sidecar_for(audio)
+
+    assert XmlLibrarySource(None).get_anlz_sidecar_dir({"path": str(audio)}) == cache
+
+
+class _Row:
+    def __init__(self, rel):
+        self.analysis_data_path = rel
+
+
+class _Master:
+    def __init__(self, share, rows):
+        self.share, self.rows = share, rows
+
+    def share_directory(self):
+        return str(self.share)
+
+    def get_content_by_id(self, tid):
+        return self.rows.get(tid)
+
+    def get_content_anlz_dir(self, tid):  # real rbox aborts the process here
+        raise AssertionError("aborting rbox helper called")
+
+    get_content_anlz_paths = get_content_anlz_dir
+
+
+def test_live_source_finds_rekordbox_anlz_from_master_db(tmp_path):
+    rel = "/PIONEER/USBANLZ/44d/00cc2-7321/ANLZ0001.DAT"  # re-analysis keeps its own name
+    dat = tmp_path / "share" / "PIONEER" / "USBANLZ" / "44d" / "00cc2-7321" / "ANLZ0001.DAT"
+    dat.parent.mkdir(parents=True)
+    dat.write_bytes(b"PMAI")
+    live = SimpleNamespace(
+        tracks={},
+        db=_Master(tmp_path / "share", {"1": _Row(rel), "2": _Row(None), "3": _Row(rel + "x")}),
+    )
+    src = LiveLibrarySource(live)
+
+    assert src.get_rekordbox_anlz_dat({"id": "1"}) == dat
+    assert src.get_rekordbox_anlz_dat({"id": "2"}) is None  # never analysed
+    assert src.get_rekordbox_anlz_dat({"id": "3"}) is None  # recorded but not on disk
+    assert src.get_rekordbox_anlz_dat({"id": "9"}) is None  # no row
+    assert XmlLibrarySource(None).get_rekordbox_anlz_dat({"id": "1"}) is None

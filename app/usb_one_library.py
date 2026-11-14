@@ -7,7 +7,8 @@ Workflow:
   2. Iterate LibrarySource → insert artists, albums, genres, keys, labels (deduped)
   3. Insert contents (tracks) with FK references
   4. Build playlist tree (folders → playlists → playlist_contents)
-  5. Copy ANLZ sidecars from .lms_anlz/<hash>/ to PIONEER/USBANLZ/<bucket>/<hash>/
+  5. Copy each track's ANLZ (Rekordbox's own, else the LMS ANLZ cache) to
+     PIONEER/USBANLZ/<bucket>/<hash>/
   6. Copy audio files to a stable USB layout
 """
 
@@ -1501,11 +1502,13 @@ class OneLibraryUsbWriter:
         """Write the track's ANLZ trio into PIONEER/USBANLZ/, Rekordbox-style.
 
         Sources, first one that validates wins:
-          1. the LMS sidecar in <music_dir>/.lms_anlz/<hash>/ (written at
-             import time by `anlz_sidecar.write_companion_anlz`);
-          2. a fresh analysis, cached as that sidecar — only reached when 1 is
-             missing or invalid, and only for a track with a local audio file
-             (streaming pseudo-tracks get None).
+          1. Rekordbox's own analysis: the `.DAT` at the AnalysisDataPath master.db
+             records (live mode) — the user's grids and cues, no DSP;
+          2. LMS-generated ANLZ from the ANLZ cache (`anlz_sidecar`), or a
+             pre-0.1 sidecar next to the audio (read only);
+          3. a fresh analysis written to the ANLZ cache — only reached when 1 and
+             2 are missing or invalid, and only for a track with a local audio
+             file (streaming pseudo-tracks get None). Never into the music folder.
 
         Each goes through `anlz_usb_export.export_trio`: PPTH becomes
         `usb_audio_path`, PSSI is masked, only `.DAT`/`.EXT`/`.2EX` are written
@@ -1528,6 +1531,11 @@ class OneLibraryUsbWriter:
     @staticmethod
     def _anlz_sources(track: dict, source) -> Generator[Path, None, None]:
         """Candidate `.DAT` files, best first. The analysis fallback runs lazily."""
+        rekordbox_lookup = getattr(source, "get_rekordbox_anlz_dat", None)
+        rekordbox_dat = rekordbox_lookup(track) if rekordbox_lookup else None
+        if rekordbox_dat is not None:
+            yield rekordbox_dat
+
         sidecar_dir = source.get_anlz_sidecar_dir(track)
         if sidecar_dir and sidecar_dir.exists():
             yield sidecar_dir / "ANLZ0000.DAT"

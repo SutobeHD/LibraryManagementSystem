@@ -89,7 +89,7 @@ name = "ANLZ auf den Stick"
 status = "shipped"
 desc = "USBANLZ/<bucket>/ANLZ0000.DAT/EXT/2EX pro Track, kopieren oder neu erzeugen."
 depends_on = ["anlz-writer"]
-notes = "Lebt in usb_one_library.py + anlz_sidecar.py. rbxport: CDJ-3000 leitet USBANLZ-Ordner aus Hash des USB-Pfads ab (wir: aus content id) - docs/reference/rbxport/export.md §4."
+notes = "Lebt in usb_one_library.py + anlz_sidecar.py. Quellen: 1) Rekordbox-ANLZ aus AnalysisDataPath (Live), 2) LMS-ANLZ-Cache im User-Cache-Ordner (alte .lms_anlz neben der Audiodatei nur lesend), 3) frische Analyse in den Cache - nie in den Musikordner (B7, fix/kernloop-0.1-bugs). rbxport: CDJ-3000 leitet USBANLZ-Ordner aus Hash des USB-Pfads ab (wir: aus content id) - docs/reference/rbxport/export.md §4."
 
 [[feature]]
 id = "usb-anlz-export-fixes"
