@@ -21,7 +21,7 @@
 | `app/analysis_settings.py` | LibraryManagementSystem -- Analysis Settings |
 | `app/anlz_cue_patch.py` | anlz_cue_patch.py — non-destructive memory-cue injection into existing ANLZ files. |
 | `app/anlz_safe.py` | Safe wrapper around `rbox.MasterDb` + `rbox.Anlz` for PQTZ beatgrid loading. |
-| `app/anlz_sidecar.py` | ANLZ-Sidecar writer — shared helper used by every track-import path |
+| `app/anlz_sidecar.py` | LMS ANLZ cache — DAT/EXT/2EX files LMS generated for a track that has no |
 | `app/anlz_usb_export.py` | Ready one track's ANLZ trio for a USB stick: the transform Rekordbox applies on export. |
 | `app/anlz_writer.py` | LibraryManagementSystem -- ANLZ Binary File Writer |
 | `app/artist_store/__init__.py` | artist_store — Artist-Hub sidecar package (``artists.db``). |
@@ -327,6 +327,8 @@
 | `tests/test_library_tracks_light.py` | GET /api/library/tracks — the optional ``light`` projection (app/main.py). |
 | `tests/test_librosa_lazy_import.py` | Booting the sidecar (``import app.main``) must not import librosa / numpy. |
 | `tests/test_live_cue_loading.py` | Cue loading in `app.live_database`. |
+| `tests/test_live_import_analysis.py` | An imported track's analysis must reach master.db (B4, 0.1 core-loop test). |
+| `tests/test_live_playlist_b11.py` | Live playlist operations end to end against an rbox stand-in (B11, 0.1 core-loop test). |
 | `tests/test_live_playlist_ops.py` | Tests for the live-mode playlist primitives in `app/live_database.py`. |
 | `tests/test_logging_redaction.py` | Unit tests for `app.logging_utils.RedactingFormatter`. |
 | `tests/test_main_route_table.py` | app/main.py defines each top-level name once, so no request model or handler is shadowed. |
@@ -370,6 +372,7 @@
 | `tests/test_stream_unicode_filename.py` | Regression: GET /api/stream 500 on non-latin-1 filenames. |
 | `tests/test_system_health.py` | Contract tests for ``GET /api/system/health`` -- unauth'd liveness probe. |
 | `tests/test_track_metadata_fields.py` | Track-metadata writes refuse fields and values the backend cannot store (issue K8). |
+| `tests/test_usb_artwork.py` | Cover art for the USB stick, with the real Pillow (B8, 0.1 core-loop test). |
 | `tests/test_usb_copy_atomic.py` | USB audio copies must not leave a truncated file that never self-heals. |
 | `tests/test_usb_lookup_batching.py` | Batched master.db lookups in the USB scan / diff / legacy-export paths. |
 | `tests/test_usb_manager.py` | Tests for `app/usb_manager.py`. |

@@ -64,6 +64,13 @@ lameenc==1.8.2
 # --- Audio Metadata / Format Detection ---
 mutagen==1.47.0
 
+# --- Cover art for the USB stick ---
+# app/usb_artwork.py decodes embedded art / cover.jpg, resizes to the CDJ sizes
+# and re-encodes JPEG; without it PIONEER/Artwork stays empty. 13.0.0 is the
+# first release with the fix for GHSA-wqgw-9xfh-qf2g (TIFF/EXIF IFD memory DoS,
+# <= 12.3.0 affected). Needs Python >= 3.11 (CI and release build use 3.11).
+Pillow==13.0.0
+
 # --- Loudness (ITU-R BS.1770 / EBU R128) ---
 pyloudnorm==0.1.1
 
