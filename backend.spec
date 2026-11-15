@@ -137,8 +137,25 @@ hiddenimports += [
 # --- Keyring backends (platform-specific) ---
 hiddenimports += collect_submodules('keyring.backends')
 
+# --- Pillow: cover art on the USB stick (app/usb_artwork.py) ---
+# Imported lazily inside a function, and Image.open() loads its format plugins by
+# name at runtime. A sidecar without it exports every stick with an empty
+# PIONEER/Artwork and only a log line says why, so the build refuses instead.
+# Tk/Qt bindings are left out: they would drag tkinter / Qt into the bundle.
+if not _installed('PIL'):
+    raise SystemExit(
+        'backend.spec: Pillow is missing (USB cover art).\n'
+        'Install it first:  pip install -r requirements.txt'
+    )
+hiddenimports += collect_submodules(
+    'PIL', filter=lambda name: name not in ('PIL.ImageTk', 'PIL.ImageQt', 'PIL._tkinter_finder')
+)
+
 # --- App-internal modules ---
 hiddenimports += collect_submodules('app')
+
+# --- App data files (read at runtime via Path(__file__).parent / 'data') ---
+datas += [('app/data/genre_atlas.json', 'app/data')]
 
 
 a = Analysis(

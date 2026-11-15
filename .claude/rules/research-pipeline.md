@@ -15,6 +15,8 @@ Full stage/prefix cheat-sheet + 12 routines + branch flow: `docs/research/README
 
 ## The 12 routines — quick map
 
+> **Status 2026-10-10: routines NOT deployed.** claude.ai/code/routines lists none (RemoteTrigger list empty; last routine activity 2026-06-10). Pipeline advances only interactively — nothing moves while user afk. Redeploy: `python scripts/print_routine.py --all` → paste each prompt into claude.ai/code/routines. 12 prompts versioned in `docs/research/routines/`.
+
 5 daily work-state routines move docs forward; 7 cross-cutting routines maintain pipeline health (find + verify + analysis).
 
 | Routine | Schedule (Berlin) | Trigger | Touches |

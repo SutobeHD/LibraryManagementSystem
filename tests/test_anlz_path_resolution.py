@@ -117,6 +117,16 @@ def test_resolve_dir_survives_a_raising_db():
     assert resolve_anlz_dir(Raising([]), "1") is None
 
 
+def test_resolve_dir_returns_none_without_a_share_directory():
+    """`share_directory()` is Optional; `Path(None)` used to raise TypeError."""
+
+    class NoShare(FakeDb):
+        def share_directory(self):
+            return None
+
+    assert resolve_anlz_dir(NoShare([FakeContent(1, REL)]), "1") is None
+
+
 def _resolve_with(db, track_ids=None):
     """Call resolve_anlz_paths with `rbox.MasterDb` swapped for the stub."""
     import types

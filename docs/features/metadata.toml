@@ -23,8 +23,9 @@ id = "track-write-safety"
 group = "Tag-Editing"
 parent = "track-metadata-update"
 name = "Feld-Validierung + sichere Writes"
-status = "in_progress"
-branch = "claude/fix-track-metadata-fields"
+status = "unmerged"
+branch = "claude/dreamy-planck-w7771v"
+pr = 60
 desc = "Felder ablehnen, die Live/XML nicht speichern kann; XML-Save atomar; 400/422 statt stillem 200."
 paths = ["app/track_fields.py", "tests/test_track_metadata_fields.py"]
 related = ["db-write-lock", "artist-merge"]
@@ -122,7 +123,22 @@ name = "Genre-Atlas (eigenes Repo)"
 status = "research"
 desc = "Alle Genres + Subgenres + Beziehungen als eigenes Daten-Repo."
 related = ["genre-normalization", "genre-definition-schema", "ranking-genre-tree"]
-notes = "Sitzung 'Genre-Atlas: eigenes Repo' vom 2026-10-25 - Stand dort prüfen, bevor hier Genre-Daten entstehen."
+notes = "Eigenes Repo C:/Users/tb/Documents/GitHub/genre-atlas (301 Genres, 29 Tags, 116 Szenen, Stand 2026-11-02). LMS nutzt einen schlanken Snapshot, siehe genre-atlas-hints."
+
+[[feature]]
+id = "genre-atlas-hints"
+group = "Genre"
+name = "Genre-Vorschläge aus dem Genre-Atlas"
+status = "unmerged"
+branch = "claude/dreamy-planck-w7771v"
+pr = 60
+desc = "Schlägt pro Track Genres vor (Uploader/Label-Szene, Etiketten wie SoundCloud-'trance' oder Beatport-Kategorien, Genre-Namen, BPM-Fenster) - mit Begründung, schreibt nichts automatisch."
+parent = "genre-atlas"
+paths = ["app/genre_atlas.py", "app/data/genre_atlas.json", "scripts/sync_genre_atlas.py", "tests/test_genre_atlas.py", "tests/test_genre_atlas_routes.py", "frontend/src/components/GenreSuggestions.jsx"]
+routes = ["/api/genre-atlas"]
+related = ["genre-definition-schema", "genre-normalization", "ranking-genre-tree", "analysis-engine"]
+notes = "Nur Vorschläge (Detect-only, explainable) - passt zu genre-definition-schema (Definitionen als JSON, keine neue Dep) und genre-normalization (gleicher Normalisierungs-Schlüssel, eigene Library-Schreibweise hat Vorrang). hint_genre()/genre_hint bleiben unverändert (Recommender liest sie), kein ANALYSIS_VERSION-Bump. UI: Chips unter dem Genre-Feld im Ranking, Klick füllt nur das Feld, Speichern bleibt Save & Next."
+todo = ["Genauigkeit gegen Library-Genres messen (Top-1/Top-3)", "Vorschläge im Download-Manager zeigen", "Szene-Notizen für die häufigsten SoundCloud-Uploader der Library (nur 25 von 1601 erkannt)", "backend.spec bündelt app/templates/exportLibrary_template.db nicht (eigener Bug)"]
 
 # ── Artwork ───────────────────────────────────────────────────────────────
 

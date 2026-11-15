@@ -27,15 +27,45 @@ sys.path.insert(0, ROOT)
 
 from app.live_database import LiveRekordboxDB  # noqa: E402
 
+# Exactly the rbox 0.1.7 `DjmdCue` attribute names the loader reads. The stub
+# used to carry `hot_cue` / `commnt`, the loader read the same wrong names, and
+# both passed together while real rows loaded as memory cues.
+# test_djmd_cue_attr_names_match_rbox keeps this list honest.
+DJMD_CUE_ATTRS = (
+    "id",
+    "content_id",
+    "kind",
+    "in_msec",
+    "out_msec",
+    "comment",
+    "color",
+    "color_table_index",
+    "active_loop",
+)
+
 
 class FakeCue:
-    def __init__(self, cid, ident="1", hot_cue=0, in_msec=0, out_msec=-1, commnt=""):
+    def __init__(
+        self,
+        cid,
+        ident="1",
+        kind=0,
+        in_msec=0,
+        out_msec=-1,
+        comment="",
+        color=-1,
+        color_table_index=None,
+        active_loop=None,
+    ):
         self.content_id = cid
         self.id = ident
-        self.hot_cue = hot_cue
+        self.kind = kind
         self.in_msec = in_msec
         self.out_msec = out_msec
-        self.commnt = commnt
+        self.comment = comment
+        self.color = color
+        self.color_table_index = color_table_index
+        self.active_loop = active_loop
 
 
 class FakeContentCueRow:
@@ -85,11 +115,61 @@ def _entry(content_id="100", ident="1", kind=1, in_msec=1000, out_msec=-1, comme
 
 
 def test_uses_djmd_cue_when_it_is_readable():
-    inst = _db(FakeDb(cues=[FakeCue("100", ident="7", hot_cue=1, in_msec=500)]))
+    inst = _db(FakeDb(cues=[FakeCue("100", ident="7", kind=1, in_msec=500)]))
     inst._load_cues()
 
     assert [c["ID"] for c in inst.tracks["100"]["Cues"]] == ["7"]
     assert inst.tracks["100"]["Cues"][0]["InMsec"] == 500
+
+
+def test_djmd_hot_cue_keeps_its_slot_name_and_colour():
+    """A djmdCue hot cue must not degrade to a nameless memory cue."""
+    inst = _db(
+        FakeDb(
+            cues=[
+                FakeCue(
+                    "100",
+                    ident="7",
+                    kind=3,
+                    in_msec=1500,
+                    comment="Drop",
+                    color=2,
+                    color_table_index=22,
+                    active_loop=0,
+                ),
+                FakeCue("100", ident="8", kind=0, in_msec=250, comment="mem"),
+            ]
+        )
+    )
+    inst._load_cues()
+
+    hot, mem = inst.tracks["100"]["Cues"]
+    assert (hot["Kind"], hot["Num"], hot["Comment"]) == (3, 2, "Drop")
+    assert (hot["Color"], hot["ColorTableIndex"], hot["ActiveLoop"]) == (2, 22, 0)
+    assert (mem["Kind"], mem["Num"], mem["Comment"]) == (0, -1, "mem")
+    assert mem["ColorTableIndex"] is None
+
+
+def test_djmd_cue_attr_names_match_rbox():
+    """Every attribute the loader reads exists on the real rbox class.
+
+    `DjmdCue` has no `__getattr__`, so a misspelt name never raises — it just
+    returns the getattr default. A stub cannot catch that; the real class can.
+    """
+    rbox_mod = pytest.importorskip("rbox")
+    real = set(dir(rbox_mod._rbox.DjmdCue))
+    assert set(DJMD_CUE_ATTRS) <= real, sorted(set(DJMD_CUE_ATTRS) - real)
+    assert set(vars(FakeCue("1"))) == set(DJMD_CUE_ATTRS)
+
+
+def test_mirror_carries_colour_fields_and_tolerates_their_absence():
+    entry = _entry(kind=2) | {"Color": 5, "ColorTableIndex": 9, "ActiveLoop": 1}
+    inst = _db(FakeDb(cues_raises=True, content_cues=[FakeContentCueRow("100", [entry, _entry()])]))
+    inst._load_cues()
+
+    full, bare = inst.tracks["100"]["Cues"]
+    assert (full["Color"], full["ColorTableIndex"], full["ActiveLoop"]) == (5, 9, 1)
+    assert (bare["Color"], bare["ColorTableIndex"], bare["ActiveLoop"]) == (None, None, None)
 
 
 def test_falls_back_to_the_mirror_when_djmd_cue_raises():

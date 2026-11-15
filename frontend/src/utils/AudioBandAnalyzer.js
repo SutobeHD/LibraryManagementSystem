@@ -1,4 +1,3 @@
-
 /**
  * AudioBandAnalyzer
  * Splits an AudioBuffer into 3 frequency bands (Rekordbox-style):
@@ -20,7 +19,7 @@ class AudioBandAnalyzer {
         const lowConfig = [{ type: 'lowpass', freq: 400 }];
         const midConfig = [
             { type: 'highpass', freq: 400 },
-            { type: 'lowpass', freq: 2000 }
+            { type: 'lowpass', freq: 2000 },
         ];
         const highConfig = [{ type: 'highpass', freq: 2000 }];
 
@@ -34,11 +33,15 @@ class AudioBandAnalyzer {
     }
 
     static async renderFilteredBuffer(buffer, filterConfigs) {
-        const ctx = new OfflineAudioContext(buffer.numberOfChannels, buffer.length, buffer.sampleRate);
+        const ctx = new OfflineAudioContext(
+            buffer.numberOfChannels,
+            buffer.length,
+            buffer.sampleRate
+        );
         const source = ctx.createBufferSource();
         source.buffer = buffer;
         let lastNode = source;
-        filterConfigs.forEach(config => {
+        filterConfigs.forEach((config) => {
             const filter = ctx.createBiquadFilter();
             filter.type = config.type;
             filter.frequency.value = config.freq;
@@ -174,7 +177,8 @@ class AudioBandAnalyzer {
         if (!peaks || peaks.length === 0) return [];
         const out = [];
         for (let i = 0; i < peaks.length; i += factor) {
-            let min = 0, max = 0;
+            let min = 0,
+                max = 0;
             for (let j = i; j < Math.min(i + factor, peaks.length); j++) {
                 if (peaks[j].min < min) min = peaks[j].min;
                 if (peaks[j].max > max) max = peaks[j].max;
@@ -182,73 +186,6 @@ class AudioBandAnalyzer {
             out.push({ min, max });
         }
         return out;
-    }
-
-    /**
-     * Converts AudioBuffer to WAV Blob
-     * @param {AudioBuffer} buffer
-     * @returns {Blob}
-     */
-    static bufferToWav(buffer) {
-        const numOfChan = buffer.numberOfChannels;
-        const sampleRate = buffer.sampleRate;
-        const bitDepth = 16;
-        const bytesPerSample = bitDepth / 8;
-        const blockAlign = numOfChan * bytesPerSample;
-        const dataLength = buffer.length * blockAlign;
-        const headerLength = 44;
-        const totalLength = headerLength + dataLength;
-
-        const arrayBuffer = new ArrayBuffer(totalLength);
-        const view = new DataView(arrayBuffer);
-
-        let offset = 0;
-
-        const writeStr = (str) => {
-            for (let i = 0; i < str.length; i++) {
-                view.setUint8(offset++, str.charCodeAt(i));
-            }
-        };
-        const writeU32 = (val) => { view.setUint32(offset, val, true); offset += 4; };
-        const writeU16 = (val) => { view.setUint16(offset, val, true); offset += 2; };
-
-        // RIFF header
-        writeStr('RIFF');
-        writeU32(totalLength - 8);
-        writeStr('WAVE');
-
-        // fmt chunk
-        writeStr('fmt ');
-        writeU32(16);
-        writeU16(1);  // PCM
-        writeU16(numOfChan);
-        writeU32(sampleRate);
-        writeU32(sampleRate * blockAlign);
-        writeU16(blockAlign);
-        writeU16(bitDepth);
-
-        // data chunk
-        writeStr('data');
-        writeU32(dataLength);
-
-        // Extract channels
-        const channels = [];
-        for (let ch = 0; ch < numOfChan; ch++) {
-            channels.push(buffer.getChannelData(ch));
-        }
-
-        // Write interleaved samples
-        for (let i = 0; i < buffer.length; i++) {
-            for (let ch = 0; ch < numOfChan; ch++) {
-                let s = channels[ch][i];
-                s = Math.max(-1, Math.min(1, s));
-                s = s < 0 ? s * 0x8000 : s * 0x7FFF;
-                view.setInt16(offset, s, true);
-                offset += 2;
-            }
-        }
-
-        return new Blob([arrayBuffer], { type: 'audio/wav' });
     }
 }
 

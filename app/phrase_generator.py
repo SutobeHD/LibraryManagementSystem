@@ -13,6 +13,7 @@ are preserved.
 """
 
 import logging
+from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -34,7 +35,12 @@ class PhraseNotAnalysedError(RuntimeError):
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def extract_beats_from_db(track_id: int, db_path: str) -> list[float]:
+def extract_beats_from_db(
+    track_id: int,
+    db_path: str,
+    *,
+    anlz_dirs: Mapping[int, str | None] | None = None,
+) -> list[float]:
     """
     Retrieve stored beat positions (in seconds) for a track.
 
@@ -45,8 +51,10 @@ def extract_beats_from_db(track_id: int, db_path: str) -> list[float]:
     ANLZ / beat grid (not analysed).
 
     Args:
-        track_id: Rekordbox integer track ID.
-        db_path:  Absolute path to Rekordbox master.db (locates the ANLZ dir).
+        track_id:  Rekordbox integer track ID.
+        db_path:   Absolute path to Rekordbox master.db (locates the ANLZ dir).
+        anlz_dirs: Optional `resolve_anlz_dirs` result; skips the per-track
+                   master.db open for tracks it covers.
 
     Returns:
         Sorted list of beat timestamps in seconds. [] on any failure.
@@ -58,7 +66,7 @@ def extract_beats_from_db(track_id: int, db_path: str) -> list[float]:
         logger.warning("extract_beats_from_db: invalid db_path=%r", db_path)
         return []
 
-    anlz_dir = resolve_anlz_dir(track_id, db_path)
+    anlz_dir = _lookup_anlz_dir(track_id, db_path, anlz_dirs)
     if not anlz_dir:
         logger.info("extract_beats_from_db: no ANLZ dir for track_id=%d", track_id)
         return []
@@ -307,28 +315,28 @@ def phrase_cues_to_memory_dicts(
     return out
 
 
-def resolve_anlz_dir(track_id: int, db_path: str) -> str | None:
-    """
-    Find the existing ANLZ directory for a track via rbox, or None if the track
-    has no ANLZ files (i.e. not analysed).
-
-    Mirrors analysis_db_writer._resolve_anlz_dir but standalone (no live-db
-    instance needed): tries get_content_anlz_dir, then derives the parent from
-    explicit ANLZ file paths.
-    """
+def _open_master_db(db_path: str, caller: str) -> Any | None:
+    """Open master.db via rbox, or None (logged) when rbox or the file is unusable."""
     try:
         import rbox  # type: ignore
     except ImportError:
-        logger.warning("resolve_anlz_dir: rbox not installed")
+        logger.warning("%s: rbox not installed", caller)
+        return None
+    try:
+        return rbox.MasterDb(db_path)
+    except Exception as exc:
+        logger.warning("%s: cannot open master.db — %s", caller, exc)
         return None
 
+
+def _resolve_on(master_db: Any, track_id: int) -> str | None:
+    """ANLZ dir of `track_id` on an open handle, or None if it has none on disk."""
     # get_content_anlz_dir / get_content_anlz_paths abort the process (Rust
     # panic, uncatchable) for any track without an AnalysisDataPath, so this
     # goes through the pure-Python resolver instead.
     from .anlz_safe import resolve_anlz_dir as _resolve
 
     try:
-        master_db = rbox.MasterDb(db_path)
         anlz_dir = _resolve(master_db, str(track_id))
         if anlz_dir and Path(anlz_dir).is_dir():
             return anlz_dir
@@ -337,12 +345,60 @@ def resolve_anlz_dir(track_id: int, db_path: str) -> str | None:
     return None
 
 
+def resolve_anlz_dir(track_id: int, db_path: str) -> str | None:
+    """
+    Find the existing ANLZ directory for a track via rbox, or None if the track
+    has no ANLZ files (i.e. not analysed).
+
+    Mirrors analysis_db_writer._resolve_anlz_dir but standalone (no live-db
+    instance needed). Opens master.db once per call — for many tracks use
+    `resolve_anlz_dirs`.
+    """
+    master_db = _open_master_db(db_path, "resolve_anlz_dir")
+    if master_db is None:
+        return None
+    return _resolve_on(master_db, track_id)
+
+
+def resolve_anlz_dirs(track_ids: Iterable[int], db_path: str) -> dict[int, str | None]:
+    """
+    Resolve the ANLZ directory of many tracks with ONE master.db open.
+
+    Each open re-derives the SQLCipher key (~0.2 s measured on the rbox
+    OneLibrary template); a phrase batch otherwise pays it twice per track
+    (extract + commit). Hand the result to `extract_beats_from_db` /
+    `commit_phrase_cues` as `anlz_dirs=`.
+
+    Returns plain strings, never the handle: rbox handles are pyo3
+    `unsendable` and using one from another executor thread aborts the
+    process. Returns {} when master.db cannot be opened, so callers fall back
+    to per-track resolution instead of skipping the whole batch as
+    "not analysed". A value of None means the track has no ANLZ files.
+    """
+    master_db = _open_master_db(db_path, "resolve_anlz_dirs")
+    if master_db is None:
+        return {}
+    return {tid: _resolve_on(master_db, tid) for tid in track_ids}
+
+
+def _lookup_anlz_dir(
+    track_id: int, db_path: str, anlz_dirs: Mapping[int, str | None] | None
+) -> str | None:
+    """Prefetched ANLZ dir when `anlz_dirs` covers the track, else a fresh lookup."""
+    if anlz_dirs is not None and track_id in anlz_dirs:
+        anlz_dir = anlz_dirs[track_id]
+        # Re-check: the map may be a whole batch old.
+        return anlz_dir if anlz_dir and Path(anlz_dir).is_dir() else None
+    return resolve_anlz_dir(track_id, db_path)
+
+
 def commit_phrase_cues(
     track_id: int,
     cues: list[dict],
     db_path: str,
     *,
     include_bar_markers: bool = False,
+    anlz_dirs: Mapping[int, str | None] | None = None,
 ) -> dict[str, Any]:
     """
     Write phrase markers as Rekordbox MEMORY cues into the track's existing
@@ -354,6 +410,8 @@ def commit_phrase_cues(
         cues:                Cue dicts from generate_phrase_cues().
         db_path:             Path to Rekordbox master.db (used to locate ANLZ).
         include_bar_markers: Also write bar-start markers as memory cues.
+        anlz_dirs:           Optional `resolve_anlz_dirs` result; skips the
+                             per-track master.db open for tracks it covers.
 
     Returns:
         {"written": int, "anlz_dir": str, "dat": bool, "ext": bool,
@@ -373,7 +431,7 @@ def commit_phrase_cues(
 
     memory_cues = phrase_cues_to_memory_dicts(cues, include_bar_markers=include_bar_markers)
 
-    anlz_dir = resolve_anlz_dir(track_id, db_path)
+    anlz_dir = _lookup_anlz_dir(track_id, db_path, anlz_dirs)
     if not anlz_dir:
         raise PhraseNotAnalysedError(
             f"track_id={track_id} has no ANLZ files — analyse the track first"

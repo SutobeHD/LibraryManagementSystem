@@ -66,8 +66,8 @@ rbox 0.1.7's `OneLibrary.create()` + `create_content()` are broken. Workaround: 
 `app/usb_pdb.py` byte layout verified **byte-for-byte against real Pioneer-exported F: drive**. Comments explain every magic number. Read the file before changing. Wrong flag/offset silently corrupts stick — Rekordbox refuses to load without telling you why.
 
 Critical invariants:
-- **Data-page flag `0x34`** (not `0x24`) on every real-export data page.
-- **Descriptor `empty_candidate = next_unused_page`** (past EOF). Pointing at any USED page (incl. `last_page`) flags library as corrupted.
+- **Data-page flag:** `0x34` on TRACKS data pages, `0x24` on every other table's data pages (F: verified: 7 TRACKS pages `0x34`, 12 others `0x24` — `usb_pdb.py:180`).
+- **Descriptor `empty_candidate`:** one distinct all-zero blank page **per table** (never shared); each table's chain terminator points at its own blank. Sharing one blank / pointing at a USED page → "Device library is corrupted" (`usb_pdb.py:862`).
 - **Index-page heap layout:** 24-byte structured prefix (`page_idx`, `next_btree`, const `0x03FFFFFF`, const `0`, `num_entries=0`, sentinel `0x1FFF`) + `0x1FFFFFF8` empty-slot padding to end. `next_btree = first_data_page` when table has data, else `0x03FFFFFF` sentinel.
 - **Empty tables = single index page** (`first == last`).
 - **Index-page header `u7 = num_b_tree_entries`** (= 0 for our writer).
@@ -75,3 +75,5 @@ Critical invariants:
 - **String encoder:** short ASCII / long UTF-16-LE.
 
 Run `pytest tests/test_pdb_structure.py` after any change. Fail = change is wrong unless reference fixture intentionally updated.
+
+Second opinion: `docs/reference/rbxport/` (rbxport study — export, ANLZ waveform encoding, Rekordbox UI look). Its `export.md` §11 lists where rbxport disagrees with the invariants above — verify on the reference stick before changing either side.
