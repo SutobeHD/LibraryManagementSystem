@@ -259,18 +259,25 @@ def safe_error_message(e: Exception) -> str:
 
 
 # --- SECURITY: CORS locked to localhost only ---
+# Tauri 2 webview origins: `tauri://localhost` (macOS/Linux),
+# `http://tauri.localhost` (Windows default, `useHttpsScheme` false — the
+# installed app is locked out without it), `https://tauri.localhost`
+# (Windows with `useHttpsScheme: true`).
+CORS_ALLOWED_ORIGINS: tuple[str, ...] = (
+    "http://localhost:1420",
+    "http://127.0.0.1:1420",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+    "tauri://localhost",
+    "http://tauri.localhost",
+    "https://tauri.localhost",
+)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:1420",
-        "http://127.0.0.1:1420",
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://localhost:8000",
-        "http://127.0.0.1:8000",
-        "tauri://localhost",
-        "https://tauri.localhost",
-    ],
+    allow_origins=list(CORS_ALLOWED_ORIGINS),
     allow_credentials=False,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "X-Session-Token", "Authorization"],
