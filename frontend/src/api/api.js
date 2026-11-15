@@ -433,5 +433,20 @@ export function cancellablePost(url, data, config = {}) {
     return { promise, cancel: () => controller.abort() };
 }
 
+// ─── Library track list ───────────────────────────────────────────────────────
+
+/**
+ * Every library track without beatGrid, Cues, positionMarks and phrases
+ * (`light=true`, app/main.py `_LIGHT_DROP_FIELDS`). The full list is ~140 MB
+ * for 4760 tracks and overruns the 10 s timeout; light is ~3 MB. No list view
+ * reads those fields — a view that needs them loads the one track.
+ */
+export function fetchLibraryTracks(config = {}) {
+    return api.get('/api/library/tracks', {
+        ...config,
+        params: { ...config.params, light: true },
+    });
+}
+
 export default api;
 export { API_BASE_URL };

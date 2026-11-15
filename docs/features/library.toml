@@ -25,7 +25,7 @@ status = "shipped"
 desc = "Ganze Library als Collection-Knoten, Suche mit bpm:/key:/genre:/year:/rating:, Track löschen."
 routes = ["/api/library/tracks", "/api/track/{tid}", "/api/track/delete", "/api/tracks/move"]
 depends_on = ["track-table", "live-master-db"]
-notes = "/api/tracks/move ist ein Stub. /api/library/tracks ohne Pagination; light=true-Projektion in #60 (perf-backend-quickwins)."
+notes = "/api/tracks/move ist ein Stub. /api/library/tracks ohne Pagination; light=true-Projektion in #60 (perf-backend-quickwins). Route kodiert ihr JSON selbst im Threadpool, pro Track ein json.dumps - blockiert den Event-Loop nicht mehr (B3, PR #82). Alle Listen-Views laden über fetchLibraryTracks() mit ?light=true (3,2 MB, ~0,2 s; PR #75). Editoren laden den Beatgrid mit PR #77."
 
 [[feature]]
 id = "category-browser"
@@ -51,6 +51,7 @@ paths = ["frontend/src/components/PlaylistBrowser.jsx"]
 routes = ["/api/playlists/tree", "/api/playlists/create", "/api/playlists/rename", "/api/playlists/move", "/api/playlists/delete"]
 depends_on = ["live-master-db"]
 related = ["standalone-library-mode"]
+notes = "Live-move_playlist war in leere Ordner und zurück nach ROOT kaputt (rbox: parent_id=None = Eltern behalten, seq ist ein Wert <= Anzahl). Fix auf fix/kernloop-0.1-bugs (B11): ROOT als \"root\", seq=None zum Anhängen, vor/nach per seq-Wert, Baum-Cache danach frisch aus master.db."
 
 [[feature]]
 id = "playlist-track-ops"
@@ -59,10 +60,11 @@ name = "Tracks in Playlists (add/remove/reorder)"
 status = "partial"
 test = "testen"
 desc = "Track hinzufügen/entfernen, Drag-Reorder innerhalb der Playlist."
+paths = ["tests/test_live_playlist_ops.py", "tests/test_live_playlist_b11.py"]
 routes = ["/api/playlists/add-track", "/api/playlists/remove-track", "/api/playlists/reorder"]
 depends_on = ["playlist-tree-crud", "db-write-lock"]
-todo = ["Fix da6ba0d (falsche rbox-Arity bei remove/reorder) mit PR #58 landen", "Test-Playlist anlegen, Remove/Reorder real prüfen, wegräumen"]
-notes = "Im Live-Modus auf main kaputt."
+todo = ["Test-Playlist im echten Rekordbox anlegen, Add/Remove/Reorder prüfen, wegräumen"]
+notes = "Im Live-Modus auf main kaputt. Auf fix/kernloop-0.1-bugs (B11): add/remove frischen den playlists_tracks-Cache auf, reorder setzt den Track per rbox move_playlist_song an target_index (0-basiert, geklemmt wie XML); da6ba0d (rbox-Arity) liegt schon in PR #60."
 
 [[feature]]
 id = "smart-playlists"
@@ -150,10 +152,11 @@ group = "Import"
 name = "Import-Manager"
 status = "shipped"
 desc = "Drag-Drop/Ordner-Import, Ordner wird Playlist, 7-Stufen-Pipeline."
-paths = ["frontend/src/components/ImportView.jsx", "app/import_tracker.py", "tests/test_import*.py"]
+paths = ["frontend/src/components/ImportView.jsx", "app/import_tracker.py", "tests/test_import*.py", "tests/test_live_import_analysis.py"]
 routes = ["/api/library/import-paths", "/api/audio/import", "/api/import/tasks"]
 depends_on = ["native-tag-read", "analysis-on-import", "anlz-writer"]
 related = ["download-manager-view", "import-progress-banner"]
+notes = "Live-Modus: Import schreibt BPM (centi), Länge, Key (Rekordbox-Schreibweise) in master.db und die ANLZ-Dateien in den Rekordbox-share unter /PIONEER/USBANLZ/<uuid[:3]>/<uuid[3:]>/ samt AnalysisDataPath + analysed=105 (B4, fix/kernloop-0.1-bugs)."
 
 [[feature]]
 id = "import-quality-panel"
