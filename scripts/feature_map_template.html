@@ -11,6 +11,8 @@
   --danger: #cf222e; --shadow: 0 1px 2px rgba(0,0,0,.06), 0 4px 16px rgba(0,0,0,.06);
   --st-shipped: #1a7f37; --st-partial: #7a8a00; --st-unmerged: #8250df; --st-in_progress: #c2410c;
   --st-planned: #0969da; --st-research: #0b7f8a; --st-idea: #6e7781; --st-dropped: #cf222e;
+  --ph-idee: #6e7781; --ph-geplant: #0969da; --ph-angefangen: #0b7f8a; --ph-fertig: #8250df;
+  --ph-testen: #c2410c; --ph-getestet: #1a7f37; --ph-verworfen: #cf222e;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
@@ -19,6 +21,8 @@
     --danger: #f85149; --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.35);
     --st-shipped: #3fb950; --st-partial: #b5c934; --st-unmerged: #a371f7; --st-in_progress: #f59e0b;
     --st-planned: #58a6ff; --st-research: #39c5cf; --st-idea: #8b949e; --st-dropped: #f85149;
+    --ph-idee: #8b949e; --ph-geplant: #58a6ff; --ph-angefangen: #39c5cf; --ph-fertig: #a371f7;
+    --ph-testen: #f59e0b; --ph-getestet: #3fb950; --ph-verworfen: #f85149;
   }
 }
 :root[data-theme="dark"] {
@@ -27,6 +31,8 @@
   --danger: #f85149; --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.35);
   --st-shipped: #3fb950; --st-partial: #b5c934; --st-unmerged: #a371f7; --st-in_progress: #f59e0b;
   --st-planned: #58a6ff; --st-research: #39c5cf; --st-idea: #8b949e; --st-dropped: #f85149;
+  --ph-idee: #8b949e; --ph-geplant: #58a6ff; --ph-angefangen: #39c5cf; --ph-fertig: #a371f7;
+  --ph-testen: #f59e0b; --ph-getestet: #3fb950; --ph-verworfen: #f85149;
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; }
@@ -66,6 +72,8 @@ header h1 span { color: var(--accent); }
 .chip .c { color: var(--muted); font-variant-numeric: tabular-nums; }
 .chip.off { opacity: .4; }
 .chip.off .dot { background: transparent !important; outline: 1.5px solid var(--faint); }
+.dimsw { display: inline-flex; align-items: center; gap: 6px; margin-right: 6px; color: var(--muted); font-size: 12px; }
+.dimsw .tabs button { padding: 2px 10px; }
 
 main { flex: 1; display: flex; min-height: 0; position: relative; }
 #stage { flex: 1; position: relative; min-width: 0; }
@@ -205,7 +213,13 @@ svg text { fill: var(--text); dominant-baseline: central; }
 const DATA = /*__FEATURE_MAP_DATA__*/null;
 const F = DATA.features;
 const STATUS = Object.fromEntries(DATA.statuses.map(s => [s.id, s]));
-const ORDER = DATA.statuses.map(s => s.id);
+const PHASES = DATA.phases || [];
+const PHASE = Object.fromEntries(PHASES.map(s => [s.id, s]));
+// Two ways to colour / filter / sort: by lifecycle tag (Phase) or by where the code sits (Status).
+const DIMS = {
+  phase: { list: PHASES, by: f => f.phase, css: "ph", hide: ["verworfen"], label: "Tag" },
+  status: { list: DATA.statuses, by: f => f.status, css: "st", hide: ["dropped"], label: "Status" },
+};
 const AREA = Object.fromEntries(DATA.areas.map(a => [a.id, a]));
 const HUES = [32, 205, 265, 150, 345, 185, 85, 20, 300, 170, 230, 0];
 const areaHue = Object.fromEntries(DATA.areas.map((a, i) => [a.id, HUES[i % HUES.length]]));
@@ -213,6 +227,7 @@ const overlapIds = new Set(Object.keys(DATA.overlaps || {}));
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
 const stColor = st => `var(--st-${st})`;
+const phColor = ph => `var(--ph-${ph})`;
 
 function store(key, val) {
   try {
@@ -221,12 +236,21 @@ function store(key, val) {
   } catch (e) { return undefined; }
 }
 
+const initDim = PHASES.length && store("dim") !== "status" ? "phase" : "status";
 const S = {
-  hidden: new Set(store("hidden") || ["dropped"]),
+  dim: initDim,
+  hidden: new Set(store("hidden:" + initDim) || DIMS[initDim].hide),
   expanded: new Set(store("expanded") || DATA.areas.map(a => "a:" + a.id)),
   q: "", onlyActive: false, allLinks: false, selected: null, view: "map",
-  tx: 0, ty: 0, k: 1, fitted: false, sortKey: "status", sortDir: 1,
+  tx: 0, ty: 0, k: 1, fitted: false, sortKey: initDim, sortDir: 1,
 };
+const D = () => DIMS[S.dim];
+const ORDER_OF = () => D().list.map(s => s.id);
+const valOf = f => D().by(f);
+const colorOf = v => `var(--${D().css}-${v})`;
+const fColor = f => colorOf(valOf(f));
+const labelOf = v => (D().list.find(s => s.id === v) || { label: v }).label;
+const phaseText = f => `${(PHASE[f.phase] || { label: f.phase || "?" }).label}${f.phase === "getestet" && f.tested ? " " + f.tested : ""}`;
 
 // ── tree ────────────────────────────────────────────────────────────────
 function featNode(f) {
@@ -242,7 +266,6 @@ function buildTree() {
       for (const f of Object.values(F)) {
         if (f.area === a.id && f.group === g && !(f.parent && F[f.parent])) gn.kids.push(featNode(f));
       }
-      gn.kids.sort((x, y) => ORDER.indexOf(x.f.status) - ORDER.indexOf(y.f.status) || x.name.localeCompare(y.name));
       an.kids.push(gn);
     }
     root.kids.push(an);
@@ -252,6 +275,13 @@ function buildTree() {
 const TREE = buildTree();
 const NODES = {};
 (function index(n, parent) { n.parent = parent; NODES[n.id] = n; n.kids.forEach(k => index(k, n)); })(TREE, null);
+function sortTree() {
+  const order = ORDER_OF();
+  Object.values(NODES).forEach(n => {
+    if (n.type === "group") n.kids.sort((x, y) => order.indexOf(valOf(x.f)) - order.indexOf(valOf(y.f)) || x.name.localeCompare(y.name));
+  });
+}
+sortTree();
 
 function haystack(f) {
   return [f.id, f.name, f.desc, f.group, f.notes, f.branch, f.research, ...(f.paths || []), ...(f.todo || [])]
@@ -259,7 +289,7 @@ function haystack(f) {
 }
 const HAY = Object.fromEntries(Object.values(F).map(f => [f.id, haystack(f)]));
 function passes(f) {
-  if (S.hidden.has(f.status)) return false;
+  if (S.hidden.has(valOf(f))) return false;
   if (S.onlyActive && !(f.activity || []).some(a => !a.stale)) return false;
   if (S.q && !S.q.split(/\s+/).every(t => HAY[f.id].includes(t))) return false;
   return true;
@@ -358,14 +388,14 @@ function curve(x1, y1, x2, y2) {
 }
 function miniBar(feats, x, y, w, h) {
   const counts = {};
-  feats.forEach(f => { counts[f.status] = (counts[f.status] || 0) + 1; });
+  feats.forEach(f => { const v = valOf(f); counts[v] = (counts[v] || 0) + 1; });
   const total = feats.length || 1;
   let out = `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${h / 2}" fill="var(--surface-2)"></rect>`;
   let cx = x;
-  for (const st of ORDER) {
+  for (const st of ORDER_OF()) {
     if (!counts[st]) continue;
     const sw = w * counts[st] / total;
-    out += `<rect x="${cx}" y="${y}" width="${sw}" height="${h}" fill="${stColor(st)}"></rect>`;
+    out += `<rect x="${cx}" y="${y}" width="${sw}" height="${h}" fill="${colorOf(st)}"></rect>`;
     cx += sw;
   }
   return `<g clip-path="inset(0 round ${h / 2}px)">${out}</g>`;
@@ -457,8 +487,8 @@ function renderMap() {
         g += `<circle class="${active ? "pulse" : ""}" cx="${dotX}" cy="${n.y}" r="8.5" fill="none" stroke="${ring}" stroke-width="2" ${active ? "" : 'stroke-dasharray="2 2"'}></circle>`;
       }
       g += st === "dropped"
-        ? `<circle cx="${dotX}" cy="${n.y}" r="4.5" fill="none" stroke="${stColor(st)}" stroke-width="1.6"></circle>`
-        : `<circle cx="${dotX}" cy="${n.y}" r="5" fill="${stColor(st)}"></circle>`;
+        ? `<circle cx="${dotX}" cy="${n.y}" r="4.5" fill="none" stroke="${fColor(f)}" stroke-width="1.6"></circle>`
+        : `<circle cx="${dotX}" cy="${n.y}" r="5" fill="${fColor(f)}"></circle>`;
       const lx = n.x + s * 16;
       const deco = st === "dropped" ? ' text-decoration="line-through" opacity=".7"' : "";
       g += `<text class="lbl" x="${lx}" y="${n.y}" text-anchor="${s > 0 ? "start" : "end"}"${deco}>${esc(n.name)}</text>`;
@@ -467,7 +497,7 @@ function renderMap() {
         g += `<circle class="tog" cx="${tx}" cy="${n.y}" r="6.5" data-tog="1"></circle><text class="togt" x="${tx}" y="${n.y}" data-tog="1">${n.open ? "−" : "+"}</text>`;
       }
     }
-    nodes += `<g class="${cls}" data-id="${esc(n.id)}"><title>${esc(n.type === "feature" ? `${n.f.id} - ${STATUS[n.f.status].label}` : n.name)}</title>${g}</g>`;
+    nodes += `<g class="${cls}" data-id="${esc(n.id)}"><title>${esc(n.type === "feature" ? `${n.f.id} - ${phaseText(n.f)} / ${STATUS[n.f.status].label}` : n.name)}</title>${g}</g>`;
   }
   $("vp").innerHTML = `<g>${links}</g><g>${xl}</g><g>${nodes}</g>`;
   applyTransform();
@@ -585,11 +615,13 @@ function select(id, center = true) {
   if (id && center) { const n = NODES[id]; if (n && n._vis) centerOn(n); }
 }
 function relChips(ids) {
-  return `<div class="rel">${ids.filter(i => F[i]).map(i => `<a data-f="${esc(i)}"><span class="dot" style="background:${stColor(F[i].status)}"></span>${esc(F[i].name)}</a>`).join("")}</div>`;
+  return `<div class="rel">${ids.filter(i => F[i]).map(i => `<a data-f="${esc(i)}"><span class="dot" style="background:${fColor(F[i])}"></span>${esc(F[i].name)}</a>`).join("")}</div>`;
 }
-function statusBadge(st) {
-  return `<span class="badge" style="color:${stColor(st)}"><span style="width:8px;height:8px;border-radius:50%;background:${stColor(st)}"></span>${esc(STATUS[st].label)}</span>`;
+function badge(color, label) {
+  return `<span class="badge" style="color:${color}"><span style="width:8px;height:8px;border-radius:50%;background:${color}"></span>${esc(label)}</span>`;
 }
+const statusBadge = st => badge(stColor(st), STATUS[st].label);
+const phaseBadge = ph => badge(phColor(ph), (PHASE[ph] || { label: ph }).label);
 function siteByName(name) { return (DATA.sites || []).find(s => s.name === name); }
 function renderPanel() {
   const P = $("panel");
@@ -604,7 +636,12 @@ function renderPanel() {
       <p>${live} aktive Baustellen (Branches / Worktrees, nicht in <span class="mono">${esc(DATA.base)}</span>), ${Object.keys(DATA.overlaps || {}).length} Features mit &Uuml;berschneidung.</p>
       <h3>Vor jeder Arbeit</h3>
       <div class="cmd"><code>python scripts/feature_map.py --who &lt;id|pfad&gt;</code></div>
-      <h3>Status-Bedeutung</h3>
+      <h3>Was steht zum Testen an?</h3>
+      <div class="cmd"><code>python scripts/feature_map.py --list --phase testen</code></div>
+      ${PHASES.length ? `<h3>Tags (Phase)</h3>
+      ${PHASES.map(s => `<p>${phaseBadge(s.id)} <span class="crumb">${esc(s.hint)}</span></p>`).join("")}
+      <p class="crumb">Idee bis Angefangen und Verworfen ergeben sich aus dem Status. Fertig / Testen / Getestet kommen aus dem Feld <span class="mono">test</span>.</p>` : ""}
+      <h3>Status (wo der Code liegt)</h3>
       ${DATA.statuses.map(s => `<p>${statusBadge(s.id)} <span class="crumb">${esc(s.hint)}</span></p>`).join("")}`;
     return;
   }
@@ -612,13 +649,14 @@ function renderPanel() {
   if (n.type !== "feature") {
     const feats = featuresUnder(n, true);
     const counts = {};
-    feats.forEach(f => { counts[f.status] = (counts[f.status] || 0) + 1; });
+    feats.forEach(f => { const v = valOf(f); counts[v] = (counts[v] || 0) + 1; });
     const area = AREA[n.area];
+    const order = ORDER_OF();
     P.innerHTML = `<div class="crumb">${n.type === "area" ? "Bereich" : n.type === "group" ? `${esc(area.name)} &rsaquo; Gruppe` : "Gesamt"}</div>
       <h2>${esc(n.name)}</h2>
       ${n.type === "area" && area.desc ? `<p>${esc(area.desc)}</p>` : ""}
-      <div class="bar">${ORDER.filter(s => counts[s]).map(s => `<span style="width:${100 * counts[s] / feats.length}%;background:${stColor(s)}" title="${esc(STATUS[s].label)}: ${counts[s]}"></span>`).join("")}</div>
-      <p class="crumb">${ORDER.filter(s => counts[s]).map(s => `${counts[s]} ${esc(STATUS[s].label)}`).join(" &middot; ")}</p>
+      <div class="bar">${order.filter(s => counts[s]).map(s => `<span style="width:${100 * counts[s] / feats.length}%;background:${colorOf(s)}" title="${esc(labelOf(s))}: ${counts[s]}"></span>`).join("")}</div>
+      <p class="crumb">${order.filter(s => counts[s]).map(s => `${counts[s]} ${esc(labelOf(s))}`).join(" &middot; ")}</p>
       ${n.type === "area" ? `<p class="crumb">Datei: <span class="mono">${esc(area.source)}</span></p>` : ""}
       <h3>Features (${feats.length})</h3>${relChips(feats.map(f => f.id))}`;
   } else {
@@ -636,7 +674,8 @@ function renderPanel() {
     }).join("");
     P.innerHTML = `<div class="crumb">${esc(area ? area.name : f.area)} &rsaquo; ${esc(f.group)}</div>
       <h2>${esc(f.name)}</h2>
-      <p>${statusBadge(f.status)} <span class="mono crumb">${esc(f.id)}</span></p>
+      <p>${f.phase ? phaseBadge(f.phase) + " " : ""}${statusBadge(f.status)} <span class="mono crumb">${esc(f.id)}</span></p>
+      ${f.phase === "getestet" && f.tested ? `<p class="crumb">getestet am ${esc(f.tested)}</p>` : ""}
       ${f.desc ? `<p>${esc(f.desc)}</p>` : ""}
       ${live.length >= 2 ? `<div class="warn"><b>Achtung:</b> ${live.length} Baustellen ber&uuml;hren dieses Feature gleichzeitig &ndash; vor &Auml;nderungen abstimmen.</div>` : ""}
       ${sec("Aktive Arbeit", actHtml)}
@@ -654,6 +693,10 @@ function renderPanel() {
       ${sec("Branch / PR", f.branch || f.pr ? `<p class="mono">${esc(f.branch || "")}${f.pr ? ` &middot; PR #${f.pr}` : ""}</p>` : "")}
       <h3>Im Terminal</h3>
       <div class="cmd"><code>python scripts/feature_map.py --who ${esc(f.id)}</code><button class="btn" data-copy="python scripts/feature_map.py --who ${esc(f.id)}">Kopieren</button></div>
+      ${["shipped", "partial", "unmerged"].includes(f.status) ? ["testen", "getestet", "fertig"].filter(v => v !== f.phase).map(v => {
+        const cmd = `python scripts/feature_map.py --mark ${v} ${f.id}`;
+        return `<div class="cmd"><code>${esc(cmd)}</code><button class="btn" data-copy="${esc(cmd)}">Kopieren</button></div>`;
+      }).join("") : ""}
       <p class="crumb">Eintrag pflegen in <span class="mono">${esc(f.source || "")}</span></p>`;
   }
 }
@@ -674,15 +717,17 @@ function renderList() {
   _sp.clear();
   const rows = Object.values(F).filter(passes);
   const key = S.sortKey, dir = S.sortDir;
-  const val = f => key === "status" ? ORDER.indexOf(f.status)
+  const val = f => key === "status" ? DATA.statuses.findIndex(s => s.id === f.status)
+    : key === "phase" ? PHASES.findIndex(s => s.id === f.phase) * 1e5 - Number((f.tested || "0").replace(/-/g, "")) / 1e3
     : key === "area" ? (DATA.areas.findIndex(a => a.id === f.area) * 1000 + AREA[f.area].groups.indexOf(f.group))
     : key === "active" ? -(f.activity || []).length
     : (f[key] || "").toString().toLowerCase();
   rows.sort((a, b) => { const x = val(a), y = val(b); return (x > y ? 1 : x < y ? -1 : a.name.localeCompare(b.name)) * dir; });
   const th = (k, label) => `<th data-sort="${k}">${label}${S.sortKey === k ? (S.sortDir > 0 ? " ▴" : " ▾") : ""}</th>`;
-  $("listView").innerHTML = `<table><thead><tr>${th("status", "Status")}${th("name", "Feature")}${th("area", "Bereich &rsaquo; Gruppe")}${th("active", "Aktiv")}${th("research", "Research")}${th("notes", "Notiz / offen")}</tr></thead><tbody>
+  $("listView").innerHTML = `<table><thead><tr>${PHASES.length ? th("phase", "Tag") : ""}${th("status", "Status")}${th("name", "Feature")}${th("area", "Bereich &rsaquo; Gruppe")}${th("active", "Aktiv")}${th("research", "Research")}${th("notes", "Notiz / offen")}</tr></thead><tbody>
     ${rows.map(f => `<tr class="row" data-f="${esc(f.id)}">
-      <td><span class="sdot" style="background:${stColor(f.status)}"></span>${esc(STATUS[f.status].label)}</td>
+      ${PHASES.length ? `<td style="white-space:nowrap"><span class="sdot" style="background:${phColor(f.phase)}"></span>${esc(phaseText(f))}</td>` : ""}
+      <td style="white-space:nowrap"><span class="sdot" style="background:${stColor(f.status)}"></span>${esc(STATUS[f.status].label)}</td>
       <td><b>${esc(f.name)}</b><div class="mono crumb">${esc(f.id)}</div></td>
       <td class="muted">${esc(AREA[f.area].name)} &rsaquo; ${esc(f.group)}</td>
       <td>${(f.activity || []).map(a => `<div class="mono${a.stale ? " crumb" : ""}">${esc(a.site)}</div>`).join("")}</td>
@@ -739,19 +784,33 @@ $("sitesView").addEventListener("click", e => {
 // ── chrome ─────────────────────────────────────────────────────────────
 function renderChips() {
   const counts = {};
-  Object.values(F).forEach(f => { counts[f.status] = (counts[f.status] || 0) + 1; });
-  $("chips").innerHTML = DATA.statuses.map(s => `<span class="chip${S.hidden.has(s.id) ? " off" : ""}" data-st="${s.id}" title="${esc(s.hint)} - klicken zum Ein-/Ausblenden">
-    <span class="dot" style="background:${stColor(s.id)}"></span>${esc(s.label)} <span class="c">${counts[s.id] || 0}</span></span>`).join("");
+  Object.values(F).forEach(f => { const v = valOf(f); counts[v] = (counts[v] || 0) + 1; });
+  const sw = PHASES.length ? `<span class="dimsw">Farbe nach <span class="tabs">${Object.entries(DIMS).map(([k, d]) =>
+    `<button data-dim="${k}" class="${S.dim === k ? "on" : ""}" title="${k === "phase" ? "Idee / Geplant / Angefangen / Fertig / Testen / Getestet" : "wo der Code liegt: main, Branch, ..."}">${d.label}</button>`).join("")}</span></span>` : "";
+  $("chips").innerHTML = sw + D().list.map(s => `<span class="chip${S.hidden.has(s.id) ? " off" : ""}" data-st="${s.id}" title="${esc(s.hint)} - klicken zum Ein-/Ausblenden, Strg+Klick = nur diesen">
+    <span class="dot" style="background:${colorOf(s.id)}"></span>${esc(s.label)} <span class="c">${counts[s.id] || 0}</span></span>`).join("");
+}
+function setDim(dim) {
+  if (dim === S.dim || !DIMS[dim]) return;
+  S.dim = dim;
+  store("dim", dim);
+  S.hidden = new Set(store("hidden:" + dim) || DIMS[dim].hide);
+  if (S.sortKey === "phase" || S.sortKey === "status") S.sortKey = dim;
+  sortTree();
+  renderChips(); renderPanel(); refresh();
 }
 $("chips").addEventListener("click", e => {
+  const d = e.target.closest("[data-dim]");
+  if (d) { setDim(d.dataset.dim); return; }
   const c = e.target.closest("[data-st]");
   if (!c) return;
   const st = c.dataset.st;
+  const order = ORDER_OF();
   if (e.altKey || e.ctrlKey || e.metaKey) {
-    const only = S.hidden.size === ORDER.length - 1 && !S.hidden.has(st);
-    S.hidden = new Set(only ? [] : ORDER.filter(x => x !== st));
+    const only = S.hidden.size === order.length - 1 && !S.hidden.has(st);
+    S.hidden = new Set(only ? [] : order.filter(x => x !== st));
   } else if (S.hidden.has(st)) S.hidden.delete(st); else S.hidden.add(st);
-  store("hidden", [...S.hidden]);
+  store("hidden:" + S.dim, [...S.hidden]);
   renderChips(); refresh();
 });
 function setView(v) {

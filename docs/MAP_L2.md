@@ -5487,6 +5487,7 @@ Scan an audio library with ffprobe, aggregate codec/bitrate/sample-rate.
 
 Feature registry plus a live overlay of which branch or worktree touches which feature.
 
+- `phase_of()`
 - `Feature`
 - `Area`
 - `Registry`
@@ -5507,6 +5508,8 @@ Feature registry plus a live overlay of which branch or worktree touches which f
 - `cmd_who()`
 - `cmd_list()`
 - `cmd_check()`
+- `set_test_tag()` — Rewrite the `test`/`tested` lines of one `[[feature]]` block.
+- `cmd_mark()`
 - `cmd_coverage()`
 - `build_model()`
 - `cmd_html()`
