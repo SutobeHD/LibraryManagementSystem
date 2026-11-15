@@ -89,7 +89,7 @@ name = "ANLZ auf den Stick"
 status = "shipped"
 desc = "USBANLZ/<bucket>/ANLZ0000.DAT/EXT/2EX pro Track, kopieren oder neu erzeugen."
 depends_on = ["anlz-writer"]
-notes = "Lebt in usb_one_library.py + anlz_sidecar.py. rbxport: CDJ-3000 leitet USBANLZ-Ordner aus Hash des USB-Pfads ab (wir: aus content id) - docs/reference/rbxport/export.md §4."
+notes = "Lebt in usb_one_library.py + anlz_sidecar.py. Quellen: 1) Rekordbox-ANLZ aus AnalysisDataPath (Live), 2) LMS-ANLZ-Cache im User-Cache-Ordner (alte .lms_anlz neben der Audiodatei nur lesend), 3) frische Analyse in den Cache - nie in den Musikordner (B7, fix/kernloop-0.1-bugs). rbxport: CDJ-3000 leitet USBANLZ-Ordner aus Hash des USB-Pfads ab (wir: aus content id) - docs/reference/rbxport/export.md §4."
 
 [[feature]]
 id = "usb-anlz-export-fixes"
@@ -119,9 +119,9 @@ group = "Export-Formate"
 name = "Cover auf den Stick"
 status = "partial"
 desc = "Eingebettetes Cover oder cover.jpg nach PIONEER/Artwork (klein + mittel)."
-paths = ["app/usb_artwork.py"]
+paths = ["app/usb_artwork.py", "tests/test_usb_artwork.py"]
 todo = ["_bucket_for: id 1 -> 00001 (Referenz-Stick), nicht 00000"]
-notes = "rbxport nutzt id//20+1; docs/reference/rbxport/export.md §5."
+notes = "rbxport nutzt id//20+1; docs/reference/rbxport/export.md §5. Pillow==13.0.0 jetzt in requirements.txt + backend.spec (Build bricht ohne ab); vorher blieb PIONEER/Artwork leer (B8, fix/kernloop-0.1-bugs)."
 
 [[feature]]
 id = "usb-folder-relocation"

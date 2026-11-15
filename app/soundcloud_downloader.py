@@ -1615,10 +1615,11 @@ class SoundCloudDownloader:
             return None
 
     def _write_companion_anlz(self, file_path: Path, result: dict) -> None:
-        """Write DAT/EXT/2EX sidecars next to the audio file. See
-        app/anlz_sidecar.py for the layout contract — kept unified across
-        every track-import path so USB-sync's OneLibraryUsbWriter has a
-        single place to look.
+        """Write DAT/EXT/2EX into the LMS ANLZ cache (never next to the audio file).
+
+        See app/anlz_sidecar.py for the layout. In live mode the import already put
+        the trio into Rekordbox's share; this copy is the USB export's fallback when
+        that attach failed.
         """
         from .anlz_sidecar import write_companion_anlz as _write
 

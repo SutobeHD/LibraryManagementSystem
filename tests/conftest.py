@@ -139,6 +139,21 @@ def auth_token(
     return {"Authorization": f"Bearer {TEST_SESSION_TOKEN}"}
 
 
+@pytest.fixture(autouse=True)
+def anlz_cache_sandbox(
+    monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory
+) -> Path:
+    """Point the LMS ANLZ cache at the session's temp dir, never the user's cache.
+
+    Keys are hashes of each test's own tmp paths, so one shared dir isolates enough.
+    """
+    from app import anlz_sidecar
+
+    root = tmp_path_factory.getbasetemp() / "anlz_cache"
+    monkeypatch.setattr(anlz_sidecar, "anlz_cache_root", lambda: root)
+    return root
+
+
 @pytest.fixture
 def empty_library(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     """Swap ``app.main.db`` for a library that knows no tracks.
