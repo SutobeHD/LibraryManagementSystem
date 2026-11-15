@@ -151,6 +151,29 @@ svg text { fill: var(--text); dominant-baseline: central; }
 .pulse { animation: pulse 1.8s ease-in-out infinite; }
 @keyframes pulse { 0%, 100% { opacity: .9; } 50% { opacity: .25; } }
 .xl { fill: none; stroke-width: 1.6; pointer-events: none; }
+
+.rm-strip { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; margin-bottom: 16px; }
+.rm-mini { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; cursor: pointer; text-align: left; }
+.rm-mini:hover { background: var(--surface-2); }
+.rm-mini.cur, .rm-rel.cur { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.rm-mini .v { font-weight: 700; font-size: 15px; font-variant-numeric: tabular-nums; }
+.rm-mini .nm { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rm-mini .num { font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.rm-rel { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; margin-bottom: 14px; scroll-margin-top: 8px; }
+.rm-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.rm-head h3 { margin: 0; font-size: 16px; }
+.rm-head .ver { font-variant-numeric: tabular-nums; }
+.rm-goal { margin: 6px 0 2px; color: var(--muted); max-width: 900px; }
+.pill { display: inline-block; font-size: 10.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  padding: 1px 8px; border-radius: 999px; border: 1px solid currentColor; white-space: nowrap; }
+.rm-need { margin: 8px 0 0; padding: 8px 10px; border-radius: 8px; background: var(--surface-2); font-size: 12.5px; }
+.rm-need b { font-weight: 600; }
+.rm-grp { margin-top: 10px; }
+.rm-grp .t { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--faint); margin-bottom: 4px; }
+.rel a .br { font-size: 10px; font-weight: 700; padding: 0 5px; border-radius: 4px; color: var(--st-unmerged); border: 1px solid currentColor; }
+.rm-key { display: flex; flex-wrap: wrap; gap: 4px 14px; color: var(--muted); font-size: 12px; margin: 0 0 12px; }
+.rm-key span { display: inline-flex; align-items: center; gap: 6px; }
+.rm-key i { display: inline-block; width: 18px; height: 8px; border-radius: 3px; }
 @media (max-width: 760px) {
   main { flex-direction: column; }
   aside { width: auto; max-width: none; height: 42%; border-left: 0; border-top: 1px solid var(--border); }
@@ -167,6 +190,7 @@ svg text { fill: var(--text); dominant-baseline: central; }
   <div class="spacer"></div>
   <div class="tabs" id="tabs">
     <button data-view="map" class="on">Mindmap</button>
+    <button data-view="roadmap">Roadmap</button>
     <button data-view="list">Liste</button>
     <button data-view="sites">Baustellen<span class="n" id="siteCount"></span></button>
   </div>
@@ -191,6 +215,7 @@ svg text { fill: var(--text); dominant-baseline: central; }
       </defs>
       <g id="vp"></g>
     </svg>
+    <div class="view" id="roadmapView"></div>
     <div class="view" id="listView"></div>
     <div class="view" id="sitesView"></div>
     <div class="zoom" id="zoomCtl">
@@ -228,6 +253,15 @@ const $ = id => document.getElementById(id);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
 const stColor = st => `var(--st-${st})`;
 const phColor = ph => `var(--ph-${ph})`;
+const RELEASES = DATA.releases || [];
+const REL = Object.fromEntries(RELEASES.map(r => [r.id, r]));
+const REL_STATE = Object.fromEntries((DATA.release_states || []).map(s => [s.id, s]));
+const UNVERSIONED = new Set(DATA.unversioned_areas || []);
+const RM_ORDER = ["getestet", "testen", "fertig", "angefangen", "geplant", "idee", "verworfen"];
+const relLabel = r => r.stage === "later" ? `Später – ${r.name}` : `${r.id} ${r.stage_label} – ${r.name}`;
+const relOf = f => f.release && REL[f.release] ? relLabel(REL[f.release]) : UNVERSIONED.has(f.area) ? "nicht versioniert" : "ungeplant";
+const stageColor = st => ({ alpha: "var(--ph-angefangen)", beta: "var(--ph-geplant)", rc: "var(--ph-getestet)", release: "var(--ph-getestet)" }[st] || "var(--faint)");
+const stateColor = st => ({ erreicht: "var(--ph-getestet)", testbar: "var(--accent)" }[st] || "var(--muted)");
 
 function store(key, val) {
   try {
@@ -638,6 +672,9 @@ function renderPanel() {
       <div class="cmd"><code>python scripts/feature_map.py --who &lt;id|pfad&gt;</code></div>
       <h3>Was steht zum Testen an?</h3>
       <div class="cmd"><code>python scripts/feature_map.py --list --phase testen</code></div>
+      ${RELEASES.length ? `<h3>Versionen</h3>
+      <p>Tab <b>Roadmap</b>: welche Features zu welcher Version geh&ouml;ren und wie weit jede ist.${DATA.current_release && REL[DATA.current_release] ? ` Aktuell: <b>${esc(relLabel(REL[DATA.current_release]))}</b>.` : ""}</p>
+      <div class="cmd"><code>python scripts/feature_map.py --roadmap</code></div>` : ""}
       ${PHASES.length ? `<h3>Tags (Phase)</h3>
       ${PHASES.map(s => `<p>${phaseBadge(s.id)} <span class="crumb">${esc(s.hint)}</span></p>`).join("")}
       <p class="crumb">Idee bis Angefangen und Verworfen ergeben sich aus dem Status. Fertig / Testen / Getestet kommen aus dem Feld <span class="mono">test</span>.</p>` : ""}
@@ -676,6 +713,7 @@ function renderPanel() {
       <h2>${esc(f.name)}</h2>
       <p>${f.phase ? phaseBadge(f.phase) + " " : ""}${statusBadge(f.status)} <span class="mono crumb">${esc(f.id)}</span></p>
       ${f.phase === "getestet" && f.tested ? `<p class="crumb">getestet am ${esc(f.tested)}</p>` : ""}
+      ${RELEASES.length ? `<p class="crumb">Version: <b style="color:var(--text)">${esc(relOf(f))}</b></p>` : ""}
       ${f.desc ? `<p>${esc(f.desc)}</p>` : ""}
       ${live.length >= 2 ? `<div class="warn"><b>Achtung:</b> ${live.length} Baustellen ber&uuml;hren dieses Feature gleichzeitig &ndash; vor &Auml;nderungen abstimmen.</div>` : ""}
       ${sec("Aktive Arbeit", actHtml)}
@@ -721,13 +759,15 @@ function renderList() {
     : key === "phase" ? PHASES.findIndex(s => s.id === f.phase) * 1e5 - Number((f.tested || "0").replace(/-/g, "")) / 1e3
     : key === "area" ? (DATA.areas.findIndex(a => a.id === f.area) * 1000 + AREA[f.area].groups.indexOf(f.group))
     : key === "active" ? -(f.activity || []).length
+    : key === "release" ? (f.release && REL[f.release] ? RELEASES.indexOf(REL[f.release]) : RELEASES.length + (UNVERSIONED.has(f.area) ? 1 : 0))
     : (f[key] || "").toString().toLowerCase();
   rows.sort((a, b) => { const x = val(a), y = val(b); return (x > y ? 1 : x < y ? -1 : a.name.localeCompare(b.name)) * dir; });
   const th = (k, label) => `<th data-sort="${k}">${label}${S.sortKey === k ? (S.sortDir > 0 ? " ▴" : " ▾") : ""}</th>`;
-  $("listView").innerHTML = `<table><thead><tr>${PHASES.length ? th("phase", "Tag") : ""}${th("status", "Status")}${th("name", "Feature")}${th("area", "Bereich &rsaquo; Gruppe")}${th("active", "Aktiv")}${th("research", "Research")}${th("notes", "Notiz / offen")}</tr></thead><tbody>
+  $("listView").innerHTML = `<table><thead><tr>${PHASES.length ? th("phase", "Tag") : ""}${th("status", "Status")}${RELEASES.length ? th("release", "Version") : ""}${th("name", "Feature")}${th("area", "Bereich &rsaquo; Gruppe")}${th("active", "Aktiv")}${th("research", "Research")}${th("notes", "Notiz / offen")}</tr></thead><tbody>
     ${rows.map(f => `<tr class="row" data-f="${esc(f.id)}">
       ${PHASES.length ? `<td style="white-space:nowrap"><span class="sdot" style="background:${phColor(f.phase)}"></span>${esc(phaseText(f))}</td>` : ""}
       <td style="white-space:nowrap"><span class="sdot" style="background:${stColor(f.status)}"></span>${esc(STATUS[f.status].label)}</td>
+      ${RELEASES.length ? `<td class="muted" style="white-space:nowrap">${f.release && REL[f.release] ? esc(REL[f.release].stage === "later" ? "Später" : `${f.release} ${REL[f.release].stage_label}`) : esc(UNVERSIONED.has(f.area) ? "–" : "ungeplant")}</td>` : ""}
       <td><b>${esc(f.name)}</b><div class="mono crumb">${esc(f.id)}</div></td>
       <td class="muted">${esc(AREA[f.area].name)} &rsaquo; ${esc(f.group)}</td>
       <td>${(f.activity || []).map(a => `<div class="mono${a.stale ? " crumb" : ""}">${esc(a.site)}</div>`).join("")}</td>
@@ -740,6 +780,84 @@ $("listView").addEventListener("click", e => {
   if (th) { const k = th.dataset.sort; S.sortDir = S.sortKey === k ? -S.sortDir : 1; S.sortKey = k; renderList(); return; }
   const tr = e.target.closest("[data-f]");
   if (tr) { S.selected = "f:" + tr.dataset.f; reveal(S.selected); renderPanel(); }
+});
+
+// ── roadmap view ───────────────────────────────────────────────────────
+function rmChip(f) {
+  const where = f.status === "unmerged" ? (f.pr ? `PR #${f.pr}` : (f.branch || "Branch")) : "";
+  const tip = `${f.id} · ${phaseText(f)} / ${STATUS[f.status].label}${where ? " · " + where : ""}`;
+  return `<a data-f="${esc(f.id)}" title="${esc(tip)}"><span class="dot" style="background:${fColor(f)}"></span>${esc(f.name)}${where ? ` <span class="br">${esc(where)}</span>` : ""}</a>`;
+}
+function rmBar(r) {
+  const b = r.bar || {}, t = Math.max(r.total, 1);
+  const seg = [["getestet", "var(--ph-getestet)", "getestet"], ["main", "var(--ph-testen)", "auf main, Test offen"], ["branch", "var(--st-unmerged)", "noch auf Branch"]];
+  return `<div class="bar">${seg.filter(([k]) => b[k]).map(([k, c, l]) => `<span style="width:${100 * b[k] / t}%;background:${c}" title="${b[k]} ${l}"></span>`).join("")}</div>`;
+}
+function rmNeed(r) {
+  if (r.stage === "later" || r.state !== "offen") return "";
+  if (!r.total) return `<div class="rm-need">Meilenstein ohne eigene Features: erreicht, wenn alle Versionen davor erreicht sind.</div>`;
+  const parts = Object.entries(r.by_branch || {}).map(([k, ids]) => `<b>${esc(k)}</b> mergen (${ids.length})`);
+  if ((r.unbuilt || []).length) parts.push(`<b>bauen:</b> ${r.unbuilt.filter(i => F[i]).map(i => esc(F[i].name)).join(", ")}`);
+  return `<div class="rm-need">Bis testbar: ${parts.join(" &middot; ")}</div>`;
+}
+function rmGroups(ids) {
+  const feats = ids.map(i => F[i]).filter(f => f && passes(f));
+  return RM_ORDER.map(p => {
+    const rows = feats.filter(f => f.phase === p);
+    return rows.length ? `<div class="rm-grp"><div class="t">${esc((PHASE[p] || { label: p }).label)} (${rows.length})</div><div class="rel">${rows.map(rmChip).join("")}</div></div>` : "";
+  }).join("");
+}
+function renderRoadmap() {
+  const V = $("roadmapView");
+  if (!RELEASES.length) {
+    V.innerHTML = `<p class="crumb">Keine Roadmap &ndash; <span class="mono">docs/features/_roadmap.toml</span> anlegen.</p>`;
+    return;
+  }
+  const cur = DATA.current_release;
+  const stageText = r => r.stage === "later" ? "nach 1.0" : r.stage_label;
+  const strip = RELEASES.map(r => `<button class="rm-mini${r.id === cur ? " cur" : ""}" data-rel="${esc(r.id)}" title="${esc(r.goal)}">
+      <div class="v">${r.stage === "later" ? "Später" : esc(r.id)} <span class="pill" style="color:${stageColor(r.stage)}">${esc(stageText(r))}</span></div>
+      <div class="nm">${esc(r.name)}</div>
+      ${rmBar(r)}
+      <div class="num">${r.stage === "later" ? `${r.total} Features` : `${r.tested}/${r.total} getestet &middot; <span style="color:${stateColor(r.state)}">${esc((REL_STATE[r.state] || { label: r.state }).label)}</span>`}</div>
+    </button>`).join("");
+  const sections = RELEASES.map(r => {
+    const st = REL_STATE[r.state] || { label: r.state, hint: "" };
+    const body = rmGroups(r.features || []);
+    return `<section class="rm-rel${r.id === cur ? " cur" : ""}" id="rel-${esc(r.id)}">
+      <div class="rm-head">
+        <h3><span class="ver">${r.stage === "later" ? "Später" : esc(r.id)}</span> &middot; ${esc(r.name)}</h3>
+        <span class="pill" style="color:${stageColor(r.stage)}">${esc(stageText(r))}</span>
+        ${r.stage !== "later" ? `<span class="pill" style="color:${stateColor(r.state)}" title="${esc(st.hint)}">${esc(st.label)}</span>` : ""}
+        ${r.id === cur ? `<span class="pill" style="color:var(--accent)">aktuell</span>` : ""}
+      </div>
+      ${r.goal ? `<p class="rm-goal">${esc(r.goal)}</p>` : ""}
+      ${r.total ? `${rmBar(r)}<div class="crumb">${RM_ORDER.filter(p => (r.phases || {})[p]).map(p => `${r.phases[p]} ${esc((PHASE[p] || { label: p }).label)}`).join(" &middot; ")}${r.on_branch ? ` &middot; <span style="color:var(--st-unmerged)">${r.on_branch} noch auf Branch</span>` : ""}</div>` : ""}
+      ${rmNeed(r)}
+      ${body || (r.total ? `<p class="crumb">Der Filter blendet alle ${r.total} Features aus.</p>` : "")}
+    </section>`;
+  }).join("");
+  const unplanned = Object.values(F).filter(f => !f.release && f.status !== "dropped" && !UNVERSIONED.has(f.area));
+  const unver = Object.values(F).filter(f => !f.release && f.status !== "dropped" && UNVERSIONED.has(f.area));
+  const unverNames = [...UNVERSIONED].map(a => AREA[a] ? AREA[a].name : a).join(", ");
+  V.innerHTML = `<div class="rm-key">
+      <span><i style="background:var(--ph-getestet)"></i>getestet</span>
+      <span><i style="background:var(--ph-testen)"></i>auf main, Test offen</span>
+      <span><i style="background:var(--st-unmerged)"></i>noch auf Branch</span>
+      <span><i style="background:var(--surface-2);outline:1px solid var(--border)"></i>nicht gebaut</span>
+      <span>Testbar = alles auf ${esc(DATA.base)} &middot; Erreicht = alles getestet</span>
+    </div>
+    <div class="rm-strip">${strip}</div>
+    ${sections}
+    ${unplanned.length ? `<section class="rm-rel" id="rel-ungeplant"><div class="rm-head"><h3>Ungeplant (${unplanned.length})</h3></div>
+      <p class="rm-goal">Noch keiner Version zugeordnet &ndash; in <span class="mono">docs/features/_roadmap.toml</span> eintragen.</p>${rmGroups(unplanned.map(f => f.id))}</section>` : ""}
+    ${unver.length ? `<section class="rm-rel"><details><summary>Nicht versioniert: ${esc(unverNames)} (${unver.length} Features, kein Teil der App)</summary>${rmGroups(unver.map(f => f.id))}</details></section>` : ""}`;
+}
+$("roadmapView").addEventListener("click", e => {
+  const m = e.target.closest("[data-rel]");
+  if (m) { const el = document.getElementById("rel-" + m.dataset.rel); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); return; }
+  const a = e.target.closest("[data-f]");
+  if (a) { S.selected = "f:" + a.dataset.f; reveal(S.selected); renderPanel(); }
 });
 
 // ── sites view ─────────────────────────────────────────────────────────
@@ -816,6 +934,7 @@ $("chips").addEventListener("click", e => {
 function setView(v) {
   S.view = v;
   document.querySelectorAll("#tabs button").forEach(b => b.classList.toggle("on", b.dataset.view === v));
+  $("roadmapView").classList.toggle("on", v === "roadmap");
   $("listView").classList.toggle("on", v === "list");
   $("sitesView").classList.toggle("on", v === "sites");
   $("map").style.visibility = v === "map" ? "visible" : "hidden";
@@ -826,6 +945,7 @@ function setView(v) {
 document.querySelectorAll("#tabs button").forEach(b => { b.onclick = () => setView(b.dataset.view); });
 function refresh() {
   if (S.view === "map") renderMap();
+  if (S.view === "roadmap") renderRoadmap();
   if (S.view === "list") renderList();
   if (S.view === "sites") renderSites();
 }

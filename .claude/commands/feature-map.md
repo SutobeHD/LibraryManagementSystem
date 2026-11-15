@@ -1,6 +1,6 @@
 ---
 description: Feature map — who builds what where; open the mindmap or look up one feature before touching it
-argument-hint: "[<id|path|text>]   empty = construction sites + mindmap"
+argument-hint: "[<id|path|text> | roadmap [<version>] | testen]   empty = construction sites + mindmap"
 allowed-tools: Bash
 ---
 
@@ -27,5 +27,12 @@ Show the feature map (`docs/features/*.toml` + live git overlay). Rules: `.claud
    python scripts/feature_map.py --mark getestet <id> [<id> ...]
    ```
    Commit a `--mark` change right away (`docs(docs): mark <id> tested in the feature map`).
+
+4. **`roadmap [<version>]`** as argument — versions plan (0.1 Alpha … 1.0, Später) with progress:
+   ```bash
+   python scripts/feature_map.py --roadmap                  # all versions
+   python scripts/feature_map.py --roadmap --release 0.1    # one version, features by tag
+   ```
+   Print it verbatim. Then one line: what makes the current version testbar next (which PR to merge, what to build).
 
 Keep it terse — status glance, not a report.

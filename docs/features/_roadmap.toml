@@ -1,0 +1,323 @@
+# Versionsplan: welches Feature gehört (fertig + getestet) zu welcher Version.
+# Schema + Workflow: .claude/rules/feature-map.md, Abschnitt "Roadmap".
+# Ansicht: python scripts/feature_map.py --roadmap [--release <id>]  |  Mindmap -> Tab "Roadmap"
+#
+# Eine Version ist
+#   testbar   = alle ihre Features liegen auf main (Vorhanden / Teilweise)
+#   erreicht  = alle ihre Features sind getestet (test = "getestet")
+# Jedes Feature steht in höchstens einer Version. Verworfene nie.
+# Features ohne Version = "Ungeplant" (außer Bereichen in unversioned_areas).
+# Reihenfolge der [[release]]-Blöcke = Reihenfolge der Versionen.
+#
+# Stufen: alpha = Features kommen noch dazu, darf wackeln
+#         beta  = Feature-Freeze: nur noch Stabilität, Tempo, Sicherheit, Feinschliff
+#         rc / release = Release-Kandidat / öffentliche Version
+#         later = nach 1.0, bewusst zurückgestellt
+
+# Entwickler-Werkzeuge sind kein Teil der App: brauchen keine Version.
+unversioned_areas = ["devtools"]
+
+[[release]]
+id = "0.1"
+stage = "alpha"
+name = "Kern-Loop"
+goal = "Track rein (Import oder SoundCloud-Download) -> analysieren -> in der Library ordnen -> auf den USB-Stick -> am CDJ-3000 spielen. Läuft als installierte Windows-App."
+features = [
+  # App-Hülle + Plattform
+  "tauri-sidecar-supervisor",
+  "pyinstaller-backend-bundle",
+  "tauri-capabilities",
+  "config-platform-paths",
+  "system-lifecycle-routes",
+  "workspace-topbar-nav",
+  "frameless-window",
+  "boot-splash",
+  "melodex-design-system",
+  "toast-notifications",
+  "confirm-prompt-modals",
+  "list-context-menus",
+  "context-menu-system",
+  "settings-panel",
+  "settings-backend-store",
+  # Sicherheit (unsichtbar, muss aber da sein)
+  "bearer-session-auth",
+  "safe-compare",
+  "rate-limiter",
+  "cors-lockdown",
+  "audio-path-sandbox",
+  "log-path-redaction",
+  "sc-log-credential-scrub",
+  # Library
+  "track-table",
+  "collection-view",
+  "category-browser",
+  "playlist-tree-crud",
+  "playlist-track-ops",
+  "inline-rating-color",
+  "import-manager",
+  "folder-watcher",
+  # Metadaten
+  "native-tag-read",
+  "name-normalisation",
+  "track-metadata-update",
+  "track-write-safety",
+  "file-tag-writeback",
+  "artwork-serve-embed",
+  # Analyse
+  "analysis-engine",
+  "analysis-settings",
+  "analysis-cache",
+  "analysis-on-import",
+  "analysis-api-manual",
+  "auto-cues-phrases",
+  "waveform-generation",
+  "analysis-real-world-validation",
+  # Abspielen
+  "browser-audio-player",
+  "audio-stream-route",
+  "multiband-waveform-data",
+  # Rekordbox
+  "live-master-db",
+  "db-write-lock",
+  "rekordbox-running-guard",
+  "rekordbox-write-backups",
+  "standalone-library-mode",
+  "rekordbox-xml-bridge",
+  "anlz-safe-reader",
+  "anlz-writer",
+  # SoundCloud: Login + Download
+  "sc-oauth-pkce",
+  "sc-session-status",
+  "sc-persistent-login",
+  "sc-refresh-interceptor",
+  "sc-api-client",
+  "sc-url-download",
+  "sc-downloader",
+  "sc-download-pipeline",
+  "download-format-setting",
+  "download-registry",
+  "download-manager-view",
+  "import-progress-banner",
+  "ffmpeg-resolver",
+  # USB-Stick
+  "usb-device-detect",
+  "usb-profiles",
+  "usb-drive-tools",
+  "usb-sync-engine",
+  "usb-onelibrary-export",
+  "usb-onelibrary-track-limit",
+  "usb-legacy-pdb",
+  "usb-anlz-export",
+  "usb-anlz-export-fixes",
+  "usb-artwork",
+]
+
+[[release]]
+id = "0.2"
+stage = "alpha"
+name = "Library-Pflege"
+goal = "Library aufräumen und bewerten: Ranking, Genres, Tags, Duplikate, Qualität, Format-Konvertierung, Metadaten-Fixes. Dazu die Stick-Extras."
+features = [
+  # Bewerten + Tags
+  "ranking-mode",
+  "ranking-genre-tree",
+  "mytag-management",
+  "genre-atlas-hints",
+  "smart-playlists",
+  "auto-label-playlists",
+  # Qualität + Duplikate
+  "library-health-filters",
+  "duplicate-finder",
+  "quality-tiers-audit",
+  "insights-dashboard",
+  "import-quality-panel",
+  "missing-file-relink",
+  # Format-Konvertierung
+  "format-converter",
+  "format-converter-filetype-fix",
+  "format-converter-mp3-cbr",
+  # Metadaten bereinigen
+  "metadata-fixer",
+  "clean-titles",
+  "batch-rename-comment",
+  "xml-cleaner",
+  # USB-Extras
+  "usb-metadata-sync",
+  "usb-playcount-sync",
+  "usb-mysettings",
+]
+
+[[release]]
+id = "0.3"
+stage = "alpha"
+name = "Artist Hub & SoundCloud-Sync"
+goal = "Lieblings-Artists verfolgen: Katalog, Fehlt-Liste, Discovery, Merge, Rekordbox-Artists-Ordner. SoundCloud-Playlists und Likes mit der Library abgleichen."
+features = [
+  # Artist Hub
+  "artist-hub",
+  "artist-store-sidecar",
+  "artist-favourites",
+  "artist-merge",
+  "artist-identity-roles",
+  "track-attribution",
+  "artist-sc-link",
+  "artist-catalogue-diff",
+  "artist-download-missing",
+  "artist-discovery",
+  "artist-background-sync",
+  "artist-links-musicbrainz",
+  "artist-projection-rekordbox",
+  "sc-download-recognizer",
+  "usb-folder-relocation",
+  # Abgleich + Erkennung
+  "external-track-match",
+  "variant-detector",
+  "popularity-classifier",
+  # SoundCloud-Sync
+  "sc-playlist-sync",
+  "sc-playlist-export",
+  "sc-playlist-download",
+  "sc-collection-sync",
+  "sc-aggressive-mode",
+]
+
+[[release]]
+id = "0.4"
+stage = "alpha"
+name = "Editor, Cues & Beatgrid"
+goal = "Tracks im Editor bearbeiten: Cues, Loops, Beatgrid setzen und echt nach Rekordbox und auf den Stick schreiben. DJ-Edits im Studio schneiden und exportieren."
+features = [
+  # Editor
+  "wavesurfer-waveform-editor",
+  "track-editor-panels",
+  "keyboard-shortcuts",
+  # Cues + Beatgrid
+  "cues-beatgrid-io",
+  "rekordbox-cue-beatgrid-write",
+  "hot-cue-16-limits",
+  "anlz-memory-cue-patch",
+  "phrase-cue-generator",
+  "pyrekordbox-upgrade",
+  "phrase-db-writer",
+  "usb-export-manual-cues",
+  "track-lock-flag",
+  # Studio / DAW
+  "dj-edit-daw",
+  "daw-state-reducer",
+  "daw-timeline-canvas",
+  "daw-cue-loop-grid-edit",
+  "daw-export",
+  "rbep-projects",
+]
+
+[[release]]
+id = "0.5"
+stage = "beta"
+name = "Stabil, schnell, sicher"
+goal = "Feature-Freeze. Keine neuen Funktionen mehr: Tempo bei großer Library, Lücken schließen, Sicherheits-Updates, Analyse-Genauigkeit, Feinschliff der Oberfläche."
+features = [
+  # Tempo
+  "performance-overhaul",
+  "perf-backend-quickwins",
+  "perf-frontend-virtualization",
+  "perf-library-view-quickwins",
+  "perf-shell-mount-polling",
+  "perf-daw-playhead-store",
+  "perf-ranking-waveform",
+  "perf-backend-event-loop",
+  "perf-database-cache-xml",
+  "perf-sc-fuzzy-index",
+  "perf-usb-lookups",
+  "perf-build-profile",
+  "playlist-tracks-light",
+  # Robustheit
+  "db-write-lock-retrofit",
+  "anlz-parser-simplify",
+  "metadata-merge-consolidation",
+  "xml-standalone-leftovers",
+  # Sicherheit + Qualitäts-Gates
+  "dependency-hardening-audit",
+  "dependency-security-bumps",
+  "quality-gate-sweep",
+  "ci-pipeline",
+  "ci-node-test-suites",
+  # Analyse-Genauigkeit
+  "analysis-accuracy-harness",
+  "bpm-octave-disambiguation",
+  # Oberfläche
+  "toast-notification-ux",
+  "sc-ui-polish",
+  "appearance-settings",
+  "rekordbox-skin",
+  "shared-portal-tooltip",
+]
+
+[[release]]
+id = "0.6"
+stage = "beta"
+name = "Plattformen & Auslieferung"
+goal = "Installer für Windows, macOS und Linux aus der Release-Pipeline. Kompletter Workflow ohne Rekordbox (Linux: SoundCloud -> Analyse -> CDJ-Stick)."
+features = [
+  "cross-platform-release",
+  "linux-macos-support",
+  "linux-dj-workflow",
+  "rekordbox-free-workflow-toggles",
+]
+
+[[release]]
+id = "1.0"
+stage = "release"
+name = "Öffentliche Version"
+goal = "Alle Versionen davor erreicht, alles in der echten App mit echten Daten und echtem CDJ getestet. Erste öffentliche Version."
+features = []
+
+[[release]]
+id = "later"
+stage = "later"
+name = "Nach 1.0"
+goal = "Bewusst zurückgestellt. Kandidaten für 1.x - bei Bedarf in eine Version davor ziehen."
+features = [
+  # Entdecken
+  "recommender-rules-baseline",
+  "recommender-similar-tracks",
+  "recommender-taste",
+  "extended-remix-finder",
+  "artist-hub-followups",
+  "library-folder-projections",
+  # Downloads
+  "unified-downloader",
+  "download-gate-assistant",
+  "safe-download-sources-survey",
+  "sc-bulk-track-resolver",
+  "sc-playlist-write",
+  "quality-settings-lossless-tagging",
+  "quality-upgrade-finder",
+  # Library
+  "tag-shelf-filter",
+  "m3u-import-export",
+  "hardwerk-format-copies",
+  "variable-bpm-tempo-markers",
+  # Genres
+  "genre-normalization",
+  "genre-atlas",
+  "genre-definition-schema",
+  # Analyse
+  "analysis-engine-ideas",
+  # Native Audio (Rust)
+  "rust-native-playback",
+  "audio-output-device-picker",
+  "rust-3band-analysis",
+  "rust-offline-render",
+  "rust-acoustic-fingerprint",
+  "rust-audio-wip-stash",
+  "non-destructive-editor",
+  "waveform-overhaul",
+  # Oberfläche
+  "modular-shell",
+  "rekordbox-only-theme",
+  # Hardware + Geräte
+  "recording-booth",
+  "mobile-companion",
+  "paired-device-tokens",
+  "docker-deploy",
+]

@@ -13,7 +13,8 @@ Usage:
     python scripts/feature_map.py --brief              # short digest (SessionStart hook)
     python scripts/feature_map.py --who <id|path|text> # before touching X: owner, deps, active work
     python scripts/feature_map.py --active             # every open construction site + overlaps
-    python scripts/feature_map.py --list [--status S] [--phase P] [--area A]
+    python scripts/feature_map.py --list [--status S] [--phase P] [--area A] [--release R]
+    python scripts/feature_map.py --roadmap [--release R]  # versions plan + progress per version
     python scripts/feature_map.py --mark <testen|getestet|fertig> <id> [<id> ...]
     python scripts/feature_map.py --check              # validate registry (CI) — exit 1 on errors
     python scripts/feature_map.py --coverage           # source files no feature owns
@@ -25,6 +26,10 @@ Design:
 - Registry status is authoritative; the git overlay only annotates it.
 - Phase (Idee > Geplant > Angefangen > Fertig > Testen > Getestet, + Verworfen)
   is derived: from `status`, and for finished code from the optional `test` key.
+- Roadmap: docs/features/_roadmap.toml lists versions (0.1 Alpha ... 1.0, later)
+  and their feature ids. One file, so planning never conflicts with the area
+  TOMLs other branches edit. A version is "testbar" once all its features are
+  on main and "erreicht" once all are tested.
 - Stacked branches: a commit is attributed to the most established branch that
   contains it (open PR first, then fewest commits ahead), so a branch forked
   from PR #58 shows only its own work, not all of #58.
@@ -52,6 +57,7 @@ import tomllib
 REPO = Path(__file__).resolve().parent.parent
 FEATURE_DIR = REPO / "docs" / "features"
 META_FILE = FEATURE_DIR / "_meta.toml"
+ROADMAP_FILE = FEATURE_DIR / "_roadmap.toml"
 TEMPLATE = REPO / "scripts" / "feature_map_template.html"
 DEFAULT_HTML = REPO / "tmp" / "feature-map.html"
 RESEARCH_DIR = REPO / "docs" / "research"
@@ -138,6 +144,24 @@ FEATURE_KEYS = {
     "notes",
 }
 
+# Roadmap: versions in docs/features/_roadmap.toml, in file order.
+RELEASE_STAGES: dict[str, str] = {
+    "alpha": "Alpha",
+    "beta": "Beta",
+    "rc": "Release Candidate",
+    "release": "Release",
+    "later": "Später",
+}
+RELEASE_KEYS = {"id", "stage", "name", "goal", "features"}
+RELEASE_STATES: dict[str, tuple[str, str]] = {
+    "erreicht": ("Erreicht", "alle Features getestet"),
+    "testbar": ("Testbar", "alle Features auf main - jetzt durchtesten"),
+    "offen": ("Im Aufbau", "Features fehlen auf main"),
+}
+UNPLANNED = "ungeplant"
+# Roadmap reads best from done to not started.
+ROADMAP_PHASE_ORDER = ("getestet", "testen", "fertig", "angefangen", "geplant", "idee", "verworfen")
+
 ID_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 RESEARCH_FILE_RE = re.compile(r"^([a-z]+)_(.+?)(?:_\d{4}-\d{2}-\d{2})?\.md$")
 
@@ -170,6 +194,7 @@ class Feature:
     source: str = ""
     # derived
     phase: str = ""
+    release: str = ""
     research_state: str = ""
     research_path: str = ""
     dependents: list[str] = field(default_factory=list)
@@ -189,12 +214,38 @@ class Area:
 
 
 @dataclass
+class Release:
+    id: str
+    stage: str
+    name: str
+    goal: str
+    features: list[str] = field(default_factory=list)
+
+    def label(self) -> str:
+        if self.stage == "later":
+            return f"Später - {self.name}"
+        return f"{self.id} {RELEASE_STAGES.get(self.stage, self.stage)} - {self.name}"
+
+
+@dataclass
 class Registry:
     meta: dict
     areas: list[Area]
     features: dict[str, Feature]
     errors: list[str]
     warnings: list[str]
+    releases: list[Release] = field(default_factory=list)
+    unversioned_areas: list[str] = field(default_factory=list)
+
+    def release(self, rid: str) -> Release | None:
+        return next((r for r in self.releases if r.id == rid), None)
+
+    def unplanned(self) -> list[Feature]:
+        return [
+            f
+            for f in self.features.values()
+            if not f.release and f.status != "dropped" and f.area not in self.unversioned_areas
+        ]
 
 
 def _as_list(value: object) -> list[str]:
@@ -302,7 +353,123 @@ def load_registry() -> Registry:
 
     reg = Registry(meta=meta, areas=areas, features=features, errors=errors, warnings=warnings)
     _link(reg)
+    _load_roadmap(reg)
     return reg
+
+
+def _load_roadmap(reg: Registry) -> None:
+    if not ROADMAP_FILE.exists():
+        return
+    rel = ROADMAP_FILE.relative_to(REPO).as_posix()
+    try:
+        data = tomllib.loads(ROADMAP_FILE.read_text(encoding="utf-8"))
+    except tomllib.TOMLDecodeError as e:
+        reg.errors.append(f"{rel}: TOML parse error: {e}")
+        return
+    area_ids = {a.id for a in reg.areas}
+    reg.unversioned_areas = _as_list(data.get("unversioned_areas"))
+    for a in reg.unversioned_areas:
+        if a not in area_ids:
+            reg.errors.append(f"{rel}: unversioned_areas -> unknown area {a!r}")
+    for i, raw in enumerate(data.get("release", [])):
+        where = f"{rel} release #{i + 1}"
+        unknown = set(raw) - RELEASE_KEYS
+        if unknown:
+            reg.errors.append(f"{where}: unknown keys {sorted(unknown)}")
+        rid = str(raw.get("id", ""))
+        if not rid or rid == UNPLANNED:
+            reg.errors.append(f"{where}: id {rid!r} missing or reserved")
+            continue
+        if reg.release(rid):
+            reg.errors.append(f"{where}: duplicate release id {rid!r}")
+            continue
+        stage = raw.get("stage", "")
+        if stage not in RELEASE_STAGES:
+            reg.errors.append(f"{rel} {rid}: stage {stage!r} not in {list(RELEASE_STAGES)}")
+        r = Release(id=rid, stage=stage, name=raw.get("name", rid), goal=raw.get("goal", ""))
+        for fid in _as_list(raw.get("features")):
+            f = reg.features.get(fid)
+            if f is None:
+                reg.errors.append(f"{rel} {rid}: unknown feature id {fid!r}")
+                continue
+            if f.release:
+                reg.errors.append(f"{rel} {rid}: {fid!r} already planned for {f.release!r}")
+                continue
+            if f.status == "dropped":
+                reg.warnings.append(f"{rel} {rid}: {fid!r} is dropped - take it out of the plan")
+            f.release = rid
+            r.features.append(fid)
+        reg.releases.append(r)
+    order = {r.id: i for i, r in enumerate(reg.releases)}
+    for f in reg.features.values():
+        if not f.release:
+            continue
+        for d in f.depends_on:
+            dep = reg.features.get(d)
+            if dep is None or dep.status == "dropped" or dep.area in reg.unversioned_areas:
+                continue
+            if not dep.release:
+                reg.warnings.append(
+                    f"{rel} {f.id} ({f.release}) needs {d!r}, which is in no release"
+                )
+            elif order[dep.release] > order[f.release]:
+                reg.warnings.append(
+                    f"{rel} {f.id} ({f.release}) needs {d!r}, planned later ({dep.release})"
+                )
+
+
+def release_summary(reg: Registry, r: Release) -> dict:
+    """Progress of one release: phase counts, merge blockers, unbuilt features, state."""
+    feats = [reg.features[i] for i in r.features]
+    phases: dict[str, int] = {}
+    for f in feats:
+        phases[f.phase] = phases.get(f.phase, 0) + 1
+    by_branch: dict[str, list[str]] = {}
+    for f in feats:
+        if f.status == "unmerged":
+            key = f"PR #{f.pr}" if f.pr else (f.branch or "Branch unbekannt")
+            by_branch.setdefault(key, []).append(f.id)
+    unbuilt = [f.id for f in feats if f.status not in FINISHED_STATUSES and f.status != "dropped"]
+    on_main = sum(1 for f in feats if f.status in LIVE_STATUSES)
+    tested = phases.get("getestet", 0)
+    if not feats:
+        # Milestone without own features (1.0): reached once everything before it is.
+        before = reg.releases[: reg.releases.index(r)] if r in reg.releases else []
+        done = all(
+            release_summary(reg, p)["state"] == "erreicht" for p in before if p.stage != "later"
+        )
+        state = "erreicht" if done else "offen"
+    elif tested == len(feats):
+        state = "erreicht"
+    elif on_main == len(feats):
+        state = "testbar"
+    else:
+        state = "offen"
+    return {
+        "total": len(feats),
+        "phases": phases,
+        "tested": tested,
+        "on_main": on_main,
+        "on_branch": sum(len(v) for v in by_branch.values()),
+        "by_branch": dict(sorted(by_branch.items(), key=lambda kv: -len(kv[1]))),
+        "unbuilt": unbuilt,
+        # Disjoint bar segments: tested wins over where the code sits.
+        "bar": {
+            "getestet": tested,
+            "main": sum(1 for f in feats if f.status in LIVE_STATUSES and f.phase != "getestet"),
+            "branch": sum(1 for f in feats if f.status == "unmerged" and f.phase != "getestet"),
+            "offen": len(unbuilt),
+        },
+        "state": state,
+    }
+
+
+def current_release(reg: Registry) -> Release | None:
+    """First non-'later' release that is not reached yet."""
+    for r in reg.releases:
+        if r.stage != "later" and release_summary(reg, r)["state"] != "erreicht":
+            return r
+    return None
 
 
 def _research_index() -> dict[str, tuple[str, str]]:
@@ -889,6 +1056,8 @@ def cmd_brief(reg: Registry, sites: list[Site], overlaps: dict[str, list[str]]) 
     if overlaps:
         items = [f"{fid} <- {' + '.join(names)}" for fid, names in list(overlaps.items())[:6]]
         print("Überschneidungen: " + "; ".join(items))
+    if reg.releases:
+        print(_roadmap_line(reg))
     if reg.errors:
         print(f"Registry-Fehler: {len(reg.errors)} (python scripts/feature_map.py --check)")
     print(
@@ -920,12 +1089,126 @@ def cmd_active(reg: Registry, sites: list[Site], overlaps: dict[str, list[str]])
             print(f"  {fid}: {' + '.join(names)}")
 
 
+def _release_of(reg: Registry, f: Feature) -> str:
+    r = reg.release(f.release) if f.release else None
+    if r:
+        return r.label()
+    return "nicht versioniert" if f.area in reg.unversioned_areas else "ungeplant"
+
+
+def _roadmap_line(reg: Registry) -> str:
+    cur = current_release(reg)
+    unplanned = len(reg.unplanned())
+    tail = f" | {unplanned} ungeplant" if unplanned else ""
+    if cur is None:
+        return f"Roadmap: alle Versionen erreicht{tail} (--roadmap)"
+    s = release_summary(reg, cur)
+    bits = [f"{s['tested']}/{s['total']} getestet"]
+    if s["on_branch"]:
+        bits.append(f"{s['on_branch']} noch auf Branch")
+    if s["unbuilt"]:
+        bits.append(f"{len(s['unbuilt'])} nicht gebaut")
+    state = RELEASE_STATES[s["state"]][0]
+    return f"Roadmap: aktuell {cur.label()} [{state}] - {', '.join(bits)}{tail} (--roadmap)"
+
+
+def _bar(s: dict, width: int = 24) -> str:
+    total = max(s["total"], 1)
+    b = s["bar"]
+    cells = [round(width * b[k] / total) for k in ("getestet", "main", "branch")]
+    cells.append(max(width - sum(cells), 0))
+    return "".join(ch * n for ch, n in zip("█▓▒░", cells, strict=True))[:width]
+
+
+def _release_block(reg: Registry, r: Release, cur: Release | None, detail: bool) -> None:
+    s = release_summary(reg, r)
+    mark = ">" if cur is r else " "
+    if r.stage == "later":
+        print(f"{mark} {r.label()}  ({s['total']} Features)")
+    else:
+        state = RELEASE_STATES[s["state"]][0].upper()
+        print(f"{mark} {r.label():<44} {_bar(s)}  {s['tested']}/{s['total']} getestet  {state}")
+    if r.goal:
+        print(f"    Ziel: {r.goal}")
+    if not s["total"]:
+        if r.stage != "later":
+            print(
+                "    Meilenstein ohne eigene Features: erreicht, wenn alle Versionen davor erreicht sind."
+            )
+        print()
+        return
+    order = list(ROADMAP_PHASE_ORDER)
+    counts = " · ".join(
+        f"{n} {PHASES[p][0]}"
+        for p, n in sorted(s["phases"].items(), key=lambda kv: order.index(kv[0]))
+    )
+    branch = f"  | {s['on_branch']} noch auf Branch" if s["on_branch"] else ""
+    print(f"    {counts}{branch}")
+    if r.stage != "later" and s["state"] == "offen":
+        need = [f"{key} mergen ({len(ids)})" for key, ids in s["by_branch"].items()]
+        if s["unbuilt"]:
+            need.append(f"bauen: {', '.join(s['unbuilt'])}")
+        print(f"    Bis testbar: {'; '.join(need)}")
+    if detail:
+        feats = [reg.features[i] for i in r.features]
+        for p in order:
+            rows = [f for f in feats if f.phase == p]
+            if not rows:
+                continue
+            print(f"    {PHASES[p][0]} ({len(rows)})")
+            for f in rows:
+                where = ""
+                if f.status == "unmerged":
+                    where = f"  [Branch {f'PR #{f.pr}' if f.pr else f.branch}]"
+                elif f.status == "partial":
+                    where = "  [Teilweise]"
+                print(f"      {f.id:<40} {f.name}{where}")
+    print()
+
+
+def cmd_roadmap(reg: Registry, release: str | None) -> int:
+    if not reg.releases:
+        print(f"Keine Roadmap - {ROADMAP_FILE.relative_to(REPO).as_posix()} anlegen.")
+        return 1
+    cur = current_release(reg)
+    unplanned = reg.unplanned()
+    if release:
+        if release == UNPLANNED:
+            print(f"Ungeplant ({len(unplanned)}) - in {ROADMAP_FILE.name} einer Version zuordnen:")
+            for f in unplanned:
+                print(f"  {f.id:<40} [{_phase_label(f)}] {f.name}")
+            return 0
+        r = reg.release(release)
+        if r is None:
+            ids = ", ".join([x.id for x in reg.releases] + [UNPLANNED])
+            print(f"Version {release!r} unbekannt - vorhanden: {ids}")
+            return 1
+        _release_block(reg, r, cur, detail=True)
+        return 0
+    print(
+        f"Roadmap - {reg.meta.get('title', '')}  "
+        "(█ getestet  ▓ auf main  ▒ auf Branch  ░ nicht gebaut; > = aktuelle Version)\n"
+    )
+    for r in reg.releases:
+        _release_block(reg, r, cur, detail=False)
+    if unplanned:
+        print(f"Ungeplant: {len(unplanned)} Features -> --roadmap --release {UNPLANNED}")
+    if reg.unversioned_areas:
+        names = [a.name for a in reg.areas if a.id in reg.unversioned_areas]
+        n = sum(1 for f in reg.features.values() if f.area in reg.unversioned_areas)
+        print(f"Nicht versioniert (Werkzeuge): {', '.join(names)} ({n} Features)")
+    print("Details einer Version: python scripts/feature_map.py --roadmap --release <id>")
+    return 0
+
+
 def _feature_block(reg: Registry, f: Feature) -> None:
     area = next((a.name for a in reg.areas if a.id == f.area), f.area)
     status = STATUSES.get(f.status, (f.status,))[0]
     print(f"{f.id} - {f.name}  [{_phase_label(f)} / {status}]  {area} > {f.group}")
     if f.desc:
         print(f"  {f.desc}")
+    if reg.releases:
+        print(f"  Version:  {_release_of(reg, f)}")
     if f.paths:
         print(f"  Dateien:  {', '.join(f.paths)}")
     if f.routes:
@@ -1008,7 +1291,13 @@ def cmd_who(reg: Registry, mapper: Mapper, query: str) -> int:
     return 0
 
 
-def cmd_list(reg: Registry, status: str | None, phase: str | None, area: str | None) -> None:
+def cmd_list(
+    reg: Registry,
+    status: str | None,
+    phase: str | None,
+    area: str | None,
+    release: str | None = None,
+) -> None:
     for a in reg.areas:
         if area and a.id != area:
             continue
@@ -1018,6 +1307,7 @@ def cmd_list(reg: Registry, status: str | None, phase: str | None, area: str | N
             if f.area == a.id
             and (not status or f.status == status)
             and (not phase or f.phase == phase)
+            and (not release or (f.release or UNPLANNED) == release)
         ]
         if not rows:
             continue
@@ -1050,7 +1340,8 @@ def cmd_check(reg: Registry, tracked: list[str]) -> int:
     for e in errors:
         print(f"ERROR: {e}")
     print(
-        f"{len(reg.features)} features, {len(reg.areas)} areas, {len(errors)} errors, {len(warnings)} warnings"
+        f"{len(reg.features)} features, {len(reg.areas)} areas, {len(reg.releases)} releases, "
+        f"{len(reg.unplanned())} unplanned, {len(errors)} errors, {len(warnings)} warnings"
     )
     return 1 if errors else 0
 
@@ -1189,6 +1480,23 @@ def build_model(
             for s in sites
         ],
         "overlaps": overlaps,
+        "releases": [
+            {
+                "id": r.id,
+                "stage": r.stage,
+                "stage_label": RELEASE_STAGES.get(r.stage, r.stage),
+                "name": r.name,
+                "goal": r.goal,
+                "features": r.features,
+                **release_summary(reg, r),
+            }
+            for r in reg.releases
+        ],
+        "release_states": [
+            {"id": k, "label": v[0], "hint": v[1]} for k, v in RELEASE_STATES.items()
+        ],
+        "current_release": (cur.id if (cur := current_release(reg)) else ""),
+        "unversioned_areas": reg.unversioned_areas,
         "errors": reg.errors,
         "warnings": reg.warnings,
     }
@@ -1223,6 +1531,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     mode.add_argument("--json", action="store_true", help="dump model as JSON")
     mode.add_argument(
+        "--roadmap",
+        action="store_true",
+        help="versions plan + progress (docs/features/_roadmap.toml)",
+    )
+    mode.add_argument(
         "--mark",
         nargs="+",
         metavar="WERT_ODER_ID",
@@ -1234,6 +1547,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--status", choices=list(STATUSES), help="filter for --list")
     ap.add_argument("--phase", choices=list(PHASES), help="filter for --list")
     ap.add_argument("--area", help="filter for --list")
+    ap.add_argument(
+        "--release",
+        metavar="ID",
+        help=f"one version for --roadmap / filter for --list ('{UNPLANNED}' = no version)",
+    )
     ap.add_argument("--no-git", action="store_true", help="skip the git overlay")
     ap.add_argument(
         "--no-gh", action="store_true", help="skip the gh PR lookup (cached PRs still used)"
@@ -1263,6 +1581,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.coverage:
         cmd_coverage(reg, mapper, tracked_files())
         return 0
+    if args.roadmap:
+        return cmd_roadmap(reg, args.release)
 
     sites: list[Site] = []
     overlaps: dict[str, list[str]] = {}
@@ -1278,7 +1598,7 @@ def main(argv: list[str] | None = None) -> int:
         cmd_active(reg, sites, overlaps)
         return 0
     if args.list:
-        cmd_list(reg, args.status, args.phase, args.area)
+        cmd_list(reg, args.status, args.phase, args.area, args.release)
         return 0
 
     compute_shares(reg, tracked_files())
