@@ -19,7 +19,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "library-management-system"
-version = "1.0.0"
+version = "0.1.0"
 description = "Music Library Manager — Rekordbox editor with native audio engine"
 requires-python = ">=3.10"
 
