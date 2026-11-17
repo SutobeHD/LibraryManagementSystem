@@ -5786,6 +5786,83 @@ Label-free tuning of the high-band onset picker.
 
 W2b cross-check against the app's own whole-track numbers (audio_w8.jsonl, bass.share_60/120).
 
+### `scripts/dev/sound_component_research/melody/analyze_melody.py`
+
+Probes 2 + 3 (W8): note events -> 16-step top-voice sequences on the Rekordbox grid ->
+
+- `bar_steps()` — Step edges (window time, s) for the full bars inside the 30 s window.
+- `step_matrix()` — notes [[start, end, midi, amp, bend]] -> int16 (n_bars, 16), REST where nothing sounds.
+- `window_loop()` — P (n_bars, 16) -> (loop (16 L,), support share).
+- `fingerprint()`
+- `best_transposition()` — -> (distance, t): pitch classes of b shifted up by t semitones fit a best (any beat rotation).
+- `loop_matrix()` — F (m, n) fingerprints -> symmetric int32 (m, m) loop distances.
+- `rank_of()` — Average rank (1 = best) of `target` among all candidates except `exclude`.
+- `metrics()`
+- `main()`
+
+### `scripts/dev/sound_component_research/melody/analyze_w6.py`
+
+Probe 4 (W6 "how melodic" = lead, not pad): scalar candidates from basic-pitch notes on the
+
+- `scalars()`
+- `auc()`
+- `auc_ci()`
+- `cv_lr()`
+- `main()`
+
+### `scripts/dev/sound_component_research/melody/build_pairs.py`
+
+Probe 1 (W8 weak ground truth): original <-> remix / edit pairs from title stems.
+
+- `camelot()` — '8A' -> (pitch class of the tonic, mode).
+- `key_shift()` — Semitones a -> b (-5..6), after mapping minor to its relative major.
+- `tail_of()` — Everything that extract_title_stem removes: bracket groups + trailing dash part.
+- `split_title()` — The library holds some titles as 'Artist - Title'; return the real title part.
+- `version_class()` — -> (class, remixer tokens).
+- `artist_tokens()`
+- `same_audio()`
+- `main()`
+
+### `scripts/dev/sound_component_research/melody/build_samples.py`
+
+Sample sets + Rekordbox beat grids + analysis windows for the melody probes.
+
+- `user_tags()`
+- `pick_windows()` — 4 window starts (s), each on a downbeat.
+- `main()`
+
+### `scripts/dev/sound_component_research/melody/extract.py`
+
+Probe 2 extraction: 4 x 30 s windows -> htdemucs (GPU, shifts 0, overlap 0.1) -> basic-pitch
+
+- `transcribe()` — -> [[start_s, end_s, midi, amp*100, bend_range]], onset 0.5 / frame 0.3 / min length 5 frames (58 m…
+- `clap_embed()`
+
+### `scripts/dev/sound_component_research/melody/fewshot_clap.py`
+
+Probe 5 (W3 mechanism proxy): K-shot classes on CLAP (`laion/clap-htsat-unfused`) window
+
+- `norm()`
+- `score_tracks()` — Wtr (n, 12, 512) train windows, Wte (m, 12, 512).
+- `main()`
+
+### `scripts/dev/sound_component_research/melody/mcommon.py`
+
+Shared helpers for the melody probes (torch env `tmp/sc-bench/venv`).
+
+- `load_meta()` — ids -> {path, ...} from the library snapshot (paths never leave this process).
+- `load_samples()`
+- `load_notes()` — All extraction records with notes (every notes*.jsonl part file).
+- `read_window()` — -> float32 (2, n) at 44.1 kHz, n = length * SR (zero-padded).
+- `gpu_lock_acquire()` — tmp/gpu.lock = 'a GPU batch is running'.
+- `gpu_lock_release()`
+- `get_demucs()`
+- `separate_batch()` — wav_np float32 (B, 2, n) -> float32 (B, stems, 2, n); shifts 0, overlap 0.1.
+
+### `scripts/dev/sound_component_research/melody/time_windows.py`
+
+Probe 6 timing: htdemucs on the whole track vs on 4 x 30 s windows (GPU, shifts 0, overlap 0.1).
+
 ### `scripts/dev/sound_component_research/models/bench_basicpitch.py`
 
 basic-pitch (ONNX backend, CPU) on the `other` stem 30 s window.

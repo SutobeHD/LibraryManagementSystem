@@ -414,6 +414,14 @@
 | `scripts/dev/sound_component_research/baseline/synthetic_truth.py` | Synthetic sanity check for the pickers / classifiers / decay estimators (known truth). |
 | `scripts/dev/sound_component_research/baseline/tune_hats.py` | Label-free tuning of the high-band onset picker. |
 | `scripts/dev/sound_component_research/baseline/w8_compare.py` | W2b cross-check against the app's own whole-track numbers (audio_w8.jsonl, bass.share_60/120). |
+| `scripts/dev/sound_component_research/melody/analyze_melody.py` | Probes 2 + 3 (W8): note events -> 16-step top-voice sequences on the Rekordbox grid -> |
+| `scripts/dev/sound_component_research/melody/analyze_w6.py` | Probe 4 (W6 "how melodic" = lead, not pad): scalar candidates from basic-pitch notes on the |
+| `scripts/dev/sound_component_research/melody/build_pairs.py` | Probe 1 (W8 weak ground truth): original <-> remix / edit pairs from title stems. |
+| `scripts/dev/sound_component_research/melody/build_samples.py` | Sample sets + Rekordbox beat grids + analysis windows for the melody probes. |
+| `scripts/dev/sound_component_research/melody/extract.py` | Probe 2 extraction: 4 x 30 s windows -> htdemucs (GPU, shifts 0, overlap 0.1) -> basic-pitch |
+| `scripts/dev/sound_component_research/melody/fewshot_clap.py` | Probe 5 (W3 mechanism proxy): K-shot classes on CLAP (`laion/clap-htsat-unfused`) window |
+| `scripts/dev/sound_component_research/melody/mcommon.py` | Shared helpers for the melody probes (torch env `tmp/sc-bench/venv`). |
+| `scripts/dev/sound_component_research/melody/time_windows.py` | Probe 6 timing: htdemucs on the whole track vs on 4 x 30 s windows (GPU, shifts 0, overlap 0.1). |
 | `scripts/dev/sound_component_research/models/bench_basicpitch.py` | basic-pitch (ONNX backend, CPU) on the `other` stem 30 s window. |
 | `scripts/dev/sound_component_research/models/bench_clap.py` | LAION-CLAP via transformers: embedding throughput + zero-shot sanity (mix vs `other` stem). |
 | `scripts/dev/sound_component_research/models/bench_demucs.py` | Demucs separation timing. |
