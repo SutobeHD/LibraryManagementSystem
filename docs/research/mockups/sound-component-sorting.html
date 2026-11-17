@@ -101,7 +101,7 @@
 
   <div class="pagehead">
     <h1>Sort by sound components — wireframe</h1>
-    <div class="sub">Planned UI for <b>Option A</b> of <code>docs/research/implement/review_sound-component-sorting.md</code>: bass, hats and song-structure values plus "sort by similarity", all without a new dependency. Track names are placeholders. Numbers in cells are illustrative; the ranges and costs in the notes are measured on the real library.</div>
+    <div class="sub">Planned UI for <b>Option A</b> of the research doc <code>sound-component-sorting</code> (plan revision 4): bass, hats and song-structure values plus "sort by similarity", all without a new dependency. Track names are placeholders. Numbers in cells are illustrative; the ranges and costs in the notes are measured on the real library.</div>
   </div>
 
   <!-- ===================================================== 1 -->
@@ -111,7 +111,7 @@
     <div class="app">
       <div class="titlebar"><span class="name">Music Library Manager</span></div>
       <div class="wstabs"><span class="ws active">Library</span><span class="ws">Audio Import</span><span class="ws">Ranking</span><span class="ws">Editor</span><span class="ws">USB</span><span class="ws">SoundCloud</span><span class="ws">Utilities</span></div>
-      <div class="viewport">
+      <div class="viewport" style="overflow-x:auto">
         <div class="toolbar">
           <div class="search">Search 4 765 tracks…</div>
           <span class="chip">Aufbau-Familie: alle ▾</span>
@@ -145,7 +145,7 @@
             <td><span class="struct"><span class="I" style="width:5%"></span><span class="C" style="width:20%"></span><span class="U" style="width:6%"></span><span class="C" style="width:20%"></span><span class="U" style="width:6%"></span><span class="C" style="width:20%"></span><span class="U" style="width:6%"></span><span class="C" style="width:12%"></span><span class="O" style="width:5%"></span></span></td></tr>
         </table>
         <div class="legend"><span><i class="I"></i>Intro</span><span><i class="U"></i>Up / Build</span><span><i class="D"></i>Down / Break</span><span><i class="C"></i>Chorus / Main</span><span><i class="O"></i>Outro</span><span><i class="V"></i>Verse</span><span><i class="B"></i>Bridge</span></div>
-        <div class="note"><b>Measured column set:</b> values come from each track's main sections (Rekordbox phrases). Sub share, bass between kicks and bass note are stable across sections (0.94-0.98), so are 16th share (0.92) and hats energy (0.87). Off-beat hats are marked <b>grob</b> (0.84). On-beat hats are left out: that position measures clap and kick, not hats. Intro, entry and drop count come from Rekordbox's own phrase analysis and stay 87-93 % equal across copies of the same audio. Tracks Rekordbox has no phrases for (21 of 4765) show "—" in the structure columns.</div>
+        <div class="note"><b>Measured column set:</b> values come from each track's main sections (Rekordbox phrases). Sub share, bass between kicks and bass note are stable across sections (0.94-0.98), so are 16th share (0.92) and hats energy (0.86). Off-beat hats are marked <b>grob</b> (0.84); two more optional columns, hats per beat and "Offbeat lang ausklingend", carry the same <span class="coarse">grob</span> marker (0.80 / 0.82). On-beat hats are left out: that position measures clap and kick, not hats. Intro, entry and drop count come from Rekordbox's own phrase analysis and stay 87-93 % equal across copies of the same audio. Tracks Rekordbox has no phrases for (21 of 4765) show "—" in the structure columns.</div>
       </div>
     </div>
   </div>
@@ -212,7 +212,7 @@
         </div>
       </div>
     </div>
-    <div class="note" style="margin-top:10px"><b>Measured on 60 fresh tracks:</b> bass sound + line finds the same track again at rank 1 in 88 % of cases and within the top 10 in 97 %; hat sound 83 % / 95 %; hat pattern is coarser (43 % / 85 %). Before this view ships the numbers are checked once more across different sections of each track and, if you supply them, on your own "same bass" / "same hats" pairs (unconfirmed results carry an "unbestätigt" marker).</div>
+    <div class="note" style="margin-top:10px"><b>Measured on 60 fresh tracks:</b> bass sound + line finds the same track again at rank 1 in 88 % of cases and within the top 10 in 97 %; hat sound 83 % / 95 % — a control that ignores the hat hits still reaches 68 % / 82 %, so a good part of this is the track's general top-end sound; hat pattern is coarser (43 % / 85 %). Before this view ships the numbers are checked once more across different sections of each track and, if you supply them, on your own "same bass" / "same hats" pairs (unconfirmed results carry an "unbestätigt" marker).</div>
   </div>
 
   <!-- ===================================================== 4 -->
@@ -285,8 +285,10 @@
       Notes and sound fingerprints would need one small extra library (16 MB) and about 3 CPU hours for the whole library; no 2 GB GPU package. The next step here is your example tracks, not more code.
       <h3 style="margin-top:12px">Dropped after measurement — please confirm</h3>
       <ul>
-        <li><b>On-beat hats:</b> on the beat the high band is mostly clap and kick, so the value says nothing about hats.</li>
-        <li><b>One combined "same hats" score:</b> hat sound and hat pattern are independent, so they are two separate entries.</li>
+        <li><b>On-beat hats:</b> on the beat the high band is mostly clap and kick, so the value says nothing about hats. It can be shipped under an honest name ("Onbeat-Höhen") if you want it.</li>
+        <li><b>One combined "same hats" score:</b> hat sound and hat pattern are independent, so they are two separate entries. The pattern entry is the rougher one.</li>
+        <li><b>"Open hats":</b> the value also rises with rides, noise and long synth sounds, so the column is called "Offbeat lang ausklingend" and marked grob.</li>
+        <li><b>Tonality column:</b> stable, but it cannot tell a lead from a pad.</li>
       </ul>
     </div>
   </div>
