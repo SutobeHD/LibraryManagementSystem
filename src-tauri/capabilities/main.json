@@ -11,12 +11,12 @@
             "identifier": "shell:allow-spawn",
             "allow": [
                 {
-                    "name": "binaries/rb-backend",
+                    "name": "binaries/RB_Backend",
                     "sidecar": true
                 }
             ]
         },
-        "shell:allow-execute",
+        "shell:allow-open",
         "dialog:default",
         "dialog:allow-open",
         "dialog:allow-save",

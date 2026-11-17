@@ -9,11 +9,22 @@ use audio::commands::{
 use audio::engine::AudioController;
 use audio::fingerprint::{fingerprint_batch, fingerprint_track};
 use serde::Deserialize;
-use soundcloud_client::Track;
+use soundcloud_client::{ScTokenSet, Track};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::{Emitter, Manager, State};
+#[cfg(not(debug_assertions))]
+use tauri_plugin_shell::{process::CommandEvent, ShellExt};
+
+/// Release-build sidecar program name. Must match `bundle.externalBin`
+/// (`binaries/RB_Backend`) in `tauri.conf.json`, the `shell:allow-spawn`
+/// scope in `capabilities/main.json`, and `name=` in `backend.spec` —
+/// `tauri-plugin-shell` resolves it to `<exe_dir>/RB_Backend.exe`, so any
+/// drift panics the installed app at boot with `os error 2`. Guarded by
+/// `sidecar_name_tests` below.
+#[cfg_attr(debug_assertions, allow(dead_code))]
+const SIDECAR_NAME: &str = "RB_Backend";
 
 /// Shared boot-time session token captured from the Python sidecar's stdout.
 ///
@@ -79,11 +90,16 @@ fn session_token_file_path() -> Option<PathBuf> {
 /// Two sources, in order:
 /// 1. **stdout capture** — when Tauri itself spawned the sidecar (`spawn_child`
 ///    / `shell.sidecar`), the reader thread captured the ``LMS_TOKEN=`` banner.
-/// 2. **file fallback** — when ``beforeDevCommand`` (``npm run dev:full``)
-///    spawned the backend, Tauri never owns its stdout (port-busy => spawn
-///    skipped), so the in-memory token stays empty. The sidecar ALSO writes
-///    the token to ``.session-token`` at boot regardless of who spawned it;
-///    read it from there.
+/// 2. **file fallback (debug builds only)** — when ``beforeDevCommand``
+///    (``npm run dev:full``) spawned the backend, Tauri never owns its stdout
+///    (port-busy => spawn skipped), so the in-memory token stays empty. The
+///    sidecar ALSO writes the token to ``.session-token`` at boot regardless
+///    of who spawned it; read it from there.
+///
+///    Release builds always spawn the sidecar themselves, and the frozen
+///    sidecar needs seconds to boot. Until it overwrites the file, the file
+///    still holds the PREVIOUS run's token; the frontend caches the first
+///    token it gets, so every gated request then failed with 401.
 ///
 /// # Errors
 /// - ``"token-not-ready"`` if neither source has the token yet. Callers MUST
@@ -103,6 +119,9 @@ fn get_session_token(state: State<SessionToken>) -> Result<String, String> {
         }
     }
     // Source 2: file fallback (externally-spawned sidecar — dev:full path).
+    if !cfg!(debug_assertions) {
+        return Err("token-not-ready".to_string());
+    }
     if let Some(path) = session_token_file_path() {
         if let Ok(contents) = std::fs::read_to_string(&path) {
             let tok = contents.trim();
@@ -479,7 +498,7 @@ fn open_auth_window(
 ///
 /// Emits three `{stage: "auth", message: ...}` progress events on
 /// `progress_event` as the flow advances (opening page → waiting →
-/// exchanging code) and returns the access token on success. Callers
+/// exchanging code) and returns the issued token set on success. Callers
 /// that need a terminal "done" event must emit it themselves after this
 /// returns — login and export use different final-stage payloads.
 ///
@@ -495,7 +514,7 @@ async fn ensure_oauth_token(
     app: &tauri::AppHandle,
     progress_event: &str,
     surface: AuthSurface,
-) -> Result<String, String> {
+) -> Result<ScTokenSet, String> {
     // Step 1: Generate auth URL with PKCE
     let (auth_url, code_verifier) =
         soundcloud_client::get_auth_url().map_err(|e| format!("Configuration error: {}", e))?;
@@ -560,18 +579,23 @@ async fn ensure_oauth_token(
             "stage": "auth", "message": "Exchanging code for token..."
         }),
     );
-    let token = soundcloud_client::exchange_code_for_token(&code, &code_verifier)
+    let tokens = soundcloud_client::exchange_code_for_token(&code, &code_verifier)
         .await
         .map_err(|e| format!("Token exchange failed: {}", e))?;
 
-    Ok(token)
+    Ok(tokens)
 }
 
-/// Run the full SoundCloud OAuth 2.1 + PKCE flow and return the access token.
+/// Run the full SoundCloud OAuth 2.1 + PKCE flow and return the issued token set.
 ///
 /// `mode` picks the consent surface: `"browser"` (or `"external"`) uses the OS
 /// browser, anything else — including an omitted value — keeps the in-app
 /// window. The frontend passes the user's `sc_auth_mode` setting here.
+///
+/// Returns `{access_token, refresh_token, expires_in}`. The caller hands all
+/// three to the Python sidecar (`POST /api/soundcloud/auth-token`), which stores
+/// them in the OS keyring and owns renewal from then on — that is what makes the
+/// login survive a restart. Nothing here is logged.
 ///
 /// Delegates to `ensure_oauth_token` for the actual handshake, then emits a
 /// final `{stage: "done", message: "Authorization successful."}` on
@@ -579,15 +603,23 @@ async fn ensure_oauth_token(
 /// SC endpoints.
 ///
 /// # Errors
-/// Propagates every variant from `ensure_oauth_token`.
+/// Propagates every variant from `ensure_oauth_token`: "Configuration error"
+/// (missing client credentials), "Callback listener error" (redirect port
+/// taken), "Could not open login window" / "Could not open browser",
+/// "Login window was closed..." (user abort), "Task join error" / "Callback
+/// error" (local listener failure), "Token exchange failed" (SoundCloud
+/// rejected the auth code).
 #[tauri::command]
 async fn login_to_soundcloud(
     app: tauri::AppHandle,
     mode: Option<String>,
-) -> Result<String, String> {
-    let token = ensure_oauth_token(&app, "sc-login-progress", AuthSurface::from_opt(mode)).await?;
+) -> Result<ScTokenSet, String> {
+    let tokens = ensure_oauth_token(&app, "sc-login-progress", AuthSurface::from_opt(mode)).await?;
 
-    log::info!("[SoundCloud] ✓ Authorization successful.");
+    log::info!(
+        "[SoundCloud] ✓ Authorization successful (refreshable: {}).",
+        tokens.refresh_token.is_some()
+    );
     let _ = app.emit(
         "sc-login-progress",
         serde_json::json!({
@@ -595,7 +627,7 @@ async fn login_to_soundcloud(
         }),
     );
 
-    Ok(token)
+    Ok(tokens)
 }
 
 #[derive(Deserialize)]
@@ -636,14 +668,19 @@ async fn export_to_soundcloud(
         })
         .collect();
 
-    let token = ensure_oauth_token(&app, "sc-export-progress", AuthSurface::from_opt(mode)).await?;
+    let tokens =
+        ensure_oauth_token(&app, "sc-export-progress", AuthSurface::from_opt(mode)).await?;
     log::info!("[SoundCloud] ✓ Access token received.");
 
     // Step 4: Search tracks and create playlist
-    let result =
-        soundcloud_client::search_and_create_playlist(&token, &playlist_name, sc_tracks, Some(app))
-            .await
-            .map_err(|e| format!("Playlist creation failed: {}", e))?;
+    let result = soundcloud_client::search_and_create_playlist(
+        &tokens.access_token,
+        &playlist_name,
+        sc_tracks,
+        Some(app),
+    )
+    .await
+    .map_err(|e| format!("Playlist creation failed: {}", e))?;
 
     if result.failed_tracks.is_empty() {
         Ok(format!(
@@ -710,7 +747,7 @@ fn main() {
             {
                 let shell = app.shell();
                 let sidecar_command = shell
-                    .sidecar("rb-backend")
+                    .sidecar(SIDECAR_NAME)
                     .map_err(|e| format!("failed to create sidecar command: {}", e))?;
 
                 let (mut rx, child) = sidecar_command
@@ -721,34 +758,29 @@ fn main() {
                 tauri::async_runtime::spawn(async move {
                     // Keep the child alive in this scope
                     let _child = child;
-                    loop {
-                        match rx.recv().await {
-                            Some(event) => {
-                                match event {
-                                    CommandEvent::Stdout(line) => {
-                                        let text = String::from_utf8_lossy(&line);
-                                        let trimmed = text.trim();
-                                        // Detect-and-drop the LMS_TOKEN= banner BEFORE
-                                        // forwarding the line to log::info!, so the
-                                        // token value can't reach Tauri's log file.
-                                        if try_capture_token(trimmed, &token_for_loop) {
-                                            continue;
-                                        }
-                                        log::info!("backend: {}", trimmed);
-                                    }
-                                    CommandEvent::Stderr(line) => {
-                                        log::warn!(
-                                            "backend-error: {}",
-                                            String::from_utf8_lossy(&line).trim()
-                                        );
-                                    }
-                                    CommandEvent::Error(err) => {
-                                        log::error!("backend-critical: {}", err);
-                                    }
-                                    _ => {}
+                    while let Some(event) = rx.recv().await {
+                        match event {
+                            CommandEvent::Stdout(line) => {
+                                let text = String::from_utf8_lossy(&line);
+                                let trimmed = text.trim();
+                                // Detect-and-drop the LMS_TOKEN= banner BEFORE
+                                // forwarding the line to log::info!, so the
+                                // token value can't reach Tauri's log file.
+                                if try_capture_token(trimmed, &token_for_loop) {
+                                    continue;
                                 }
+                                log::info!("backend: {}", trimmed);
                             }
-                            None => break,
+                            CommandEvent::Stderr(line) => {
+                                log::warn!(
+                                    "backend-error: {}",
+                                    String::from_utf8_lossy(&line).trim()
+                                );
+                            }
+                            CommandEvent::Error(err) => {
+                                log::error!("backend-critical: {}", err);
+                            }
+                            _ => {}
                         }
                     }
                 });
@@ -796,4 +828,58 @@ fn main() {
                 }
             }
         });
+}
+
+#[cfg(test)]
+mod sidecar_name_tests {
+    use super::SIDECAR_NAME;
+
+    const TAURI_CONF: &str = include_str!("../tauri.conf.json");
+    const CAPABILITY: &str = include_str!("../capabilities/main.json");
+    const BACKEND_SPEC: &str = include_str!("../../backend.spec");
+
+    fn expected_bin_path() -> String {
+        format!("binaries/{SIDECAR_NAME}")
+    }
+
+    #[test]
+    fn external_bin_matches_sidecar_name() {
+        let conf: serde_json::Value = serde_json::from_str(TAURI_CONF).expect("tauri.conf.json");
+        let bins: Vec<&str> = conf["bundle"]["externalBin"]
+            .as_array()
+            .expect("bundle.externalBin array")
+            .iter()
+            .filter_map(|v| v.as_str())
+            .collect();
+        assert_eq!(bins, vec![expected_bin_path().as_str()]);
+    }
+
+    #[test]
+    fn capability_spawn_scope_matches_sidecar_name() {
+        let cap: serde_json::Value =
+            serde_json::from_str(CAPABILITY).expect("capabilities/main.json");
+        let spawn = cap["permissions"]
+            .as_array()
+            .expect("permissions array")
+            .iter()
+            .find(|p| p["identifier"] == "shell:allow-spawn")
+            .expect("shell:allow-spawn permission");
+        let scoped: Vec<&str> = spawn["allow"]
+            .as_array()
+            .expect("allow array")
+            .iter()
+            .filter(|e| e["sidecar"] == true)
+            .filter_map(|e| e["name"].as_str())
+            .collect();
+        assert_eq!(scoped, vec![expected_bin_path().as_str()]);
+    }
+
+    #[test]
+    fn pyinstaller_spec_builds_sidecar_name() {
+        let needle = format!("name='{SIDECAR_NAME}'");
+        assert!(
+            BACKEND_SPEC.contains(&needle),
+            "backend.spec must build {needle} so the binary matches externalBin"
+        );
+    }
 }

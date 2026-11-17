@@ -21,6 +21,7 @@ from contextlib import contextmanager, suppress
 from datetime import datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
+from typing import Any
 
 if sys.platform == "win32":
     _windll = ctypes.windll
@@ -980,6 +981,100 @@ class UsbProfileManager:
 # --- Smart Sync Engine ---
 
 
+def _is_streaming_pseudo_path(path_str: str) -> bool:
+    """True for `soundcloud:tracks:123` and friends — a URI, not a file.
+
+    Windows drive letters (`C:/`, `C:\\`) must never match.
+    """
+    if ":" not in path_str[:12] or path_str[1:3] in (":\\", ":/"):
+        return False
+    return path_str.split(":", 1)[0].lower() in (
+        "soundcloud",
+        "spotify",
+        "tidal",
+        "beatport",
+        "http",
+        "https",
+    )
+
+
+class _NameLookup:
+    """`id -> name` for one rbox entity table, fetched with ONE bulk query.
+
+    Replaces a `get_<entity>_by_id()` round-trip per track. Returns `""` for
+    a falsy or unknown id, matching `getattr(db.get_x_by_id(i), "name", "") or ""`.
+    If the bulk getter raises (one bad row anywhere in the table), falls back
+    to memoised per-id lookups so a single corrupt orphan row cannot blank
+    every artist/album name of an export.
+    """
+
+    def __init__(self, db: Any, bulk: str, single: str) -> None:
+        self._db = db
+        self._single = single
+        self._fallback = False
+        self._names: dict[str, str] = {}
+        try:
+            self._names = {
+                str(row.id): getattr(row, "name", "") or "" for row in getattr(db, bulk)()
+            }
+        except Exception as exc:
+            logger.warning("usb_manager: bulk %s() failed, per-id fallback (%s)", bulk, exc)
+            self._fallback = True
+
+    def __call__(self, ident: Any) -> str:
+        key = str(ident or "")
+        if not key:
+            return ""
+        if key in self._names or not self._fallback:
+            return self._names.get(key, "")
+        try:
+            name = getattr(getattr(self._db, self._single)(key), "name", "") or ""
+        except Exception as exc:
+            logger.debug("usb_manager: %s(%s) failed (%s)", self._single, key, exc)
+            name = ""
+        self._names[key] = name
+        return name
+
+
+def _diff_name_key(track: dict) -> tuple[str, str]:
+    """`(title, artist)` lower-cased — the fallback identity `calculate_diff` matches on.
+
+    A missing value (USB `LEFT JOIN` miss → `None`) counts as empty. The old
+    per-pair loop called `.lower()` on it and raised AttributeError.
+    """
+
+    def _norm(value: Any) -> str:
+        return "" if value is None else str(value).lower()
+
+    return (_norm(track.get("Title", "")), _norm(track.get("ArtistName", "")))
+
+
+def _match_updates(
+    local_tracks: dict[str, dict],
+    local_hashes: dict[str, str],
+    usb_tracks: dict[str, dict],
+    usb_hashes: dict[str, str],
+) -> list[dict]:
+    """Local tracks with no hash match on the stick, paired with the first USB
+    track (stick order) of the same title + artist.
+
+    One index pass over the stick instead of a scan per missing local track
+    (was O(to_add x usb_count)).
+    """
+    usb_by_name: dict[tuple[str, str], dict] = {}
+    for usb_track in usb_tracks.values():
+        usb_by_name.setdefault(_diff_name_key(usb_track), usb_track)
+    to_update = []
+    for h, local_id in local_hashes.items():
+        if h in usb_hashes:
+            continue
+        lt = local_tracks[local_id]
+        ut = usb_by_name.get(_diff_name_key(lt))
+        if ut is not None:
+            to_update.append({"local": lt, "usb": ut})
+    return to_update
+
+
 class UsbSyncEngine:
     """
     Smart sync engine that performs diff-based synchronization
@@ -1096,28 +1191,41 @@ class UsbSyncEngine:
             logger.error(f"Failed to read usb tracks: {e}")
         return tracks
 
-    def _read_local_tracks(self) -> dict[str, dict]:
-        """Read tracks directly from pyrekordbox MasterDb."""
+    def _open_local_db(self) -> Any | None:
+        """Open the local master.db once; `None` (logged) when it can't be opened.
+
+        Every open re-derives the SQLCipher key (~0.2 s measured on the rbox
+        OneLibrary template), so callers open once per batch and pass the
+        handle down. rbox handles are pyo3 `unsendable`: touching one from a
+        thread other than the opener aborts the process — never hand it to an
+        executor or another thread.
+        """
         import rbox
 
-        tracks = {}
         try:
-            db = rbox.MasterDb(str(self.local_path))
+            return rbox.MasterDb(str(self.local_path))
+        except Exception as e:
+            logger.error(f"Failed to open local master.db via rbox: {e}")
+            return None
+
+    def _read_local_tracks(self, db: Any | None = None) -> dict[str, dict]:
+        """Read tracks directly from the local rbox MasterDb.
+
+        `db`: an already-open handle (see `_open_local_db`); opened here if omitted.
+        """
+        tracks: dict[str, dict] = {}
+        if db is None:
+            db = self._open_local_db()
+            if db is None:
+                return tracks
+        try:
+            # rbox has no `get_artist()` — the old per-row call raised
+            # AttributeError every time, so ArtistName was always "".
+            artist_name_of = _NameLookup(db, "get_artists", "get_artist_by_id")
             for c in db.get_contents():
                 tid = str(c.id)
-                a_name = ""
                 artist_id = getattr(c, "artist_id", None)
-                if artist_id:
-                    try:
-                        a = db.get_artist(artist_id)
-                        if a:
-                            a_name = getattr(a, "name", "")
-                    except Exception as e:
-                        logger.debug(
-                            "usb_manager: rbox.get_artist(%s) failed (%s)",
-                            artist_id,
-                            e,
-                        )
+                a_name = artist_name_of(artist_id)
 
                 r = {
                     "ID": tid,
@@ -1157,12 +1265,13 @@ class UsbSyncEngine:
             logger.error(f"Failed to read USB playlists: {e}")
         return playlists
 
-    def _read_local_playlists(self) -> dict[str, dict]:
-        import rbox
-
-        playlists = {}
+    def _read_local_playlists(self, db: Any | None = None) -> dict[str, dict]:
+        playlists: dict[str, dict] = {}
+        if db is None:
+            db = self._open_local_db()
+            if db is None:
+                return playlists
         try:
-            db = rbox.MasterDb(str(self.local_path))
             for p in db.get_playlists():
                 pid = str(p.id)
                 playlists[pid] = {
@@ -1176,7 +1285,9 @@ class UsbSyncEngine:
         return playlists
 
     def calculate_diff(self, playlist_ids: list[str] | None = None) -> dict:
-        local_tracks = self._read_local_tracks()
+        # One master.db open for both readers (was one per reader).
+        local_db = self._open_local_db()
+        local_tracks = self._read_local_tracks(local_db) if local_db is not None else {}
         usb_tracks = self._read_usb_tracks()
 
         local_hashes = {t["_hash"]: tid for tid, t in local_tracks.items()}
@@ -1184,19 +1295,10 @@ class UsbSyncEngine:
 
         to_add = [local_tracks[local_hashes[h]] for h in local_hashes if h not in usb_hashes]
         to_remove = [usb_tracks[usb_hashes[h]] for h in usb_hashes if h not in local_hashes]
-        to_update = []
-        for h, local_id in local_hashes.items():
-            if h not in usb_hashes:
-                lt = local_tracks[local_id]
-                for _uid, ut in usb_tracks.items():
-                    if (
-                        lt.get("Title", "").lower() == ut.get("Title", "").lower()
-                        and lt.get("ArtistName", "").lower() == ut.get("ArtistName", "").lower()
-                    ):
-                        to_update.append({"local": lt, "usb": ut})
-                        break
+        to_update = _match_updates(local_tracks, local_hashes, usb_tracks, usb_hashes)
 
-        local_pl = self._read_local_playlists()
+        local_pl = self._read_local_playlists(local_db) if local_db is not None else {}
+        del local_db
         usb_pl = self._read_usb_playlists()
 
         if playlist_ids:
@@ -1449,6 +1551,56 @@ class UsbSyncEngine:
 
         return dest
 
+    def _relocate_planned(
+        self, planned: list[tuple[Path | None, Path]]
+    ) -> Generator[dict, None, None]:
+        """Run the relocation pass over `(local source, USB destination)` pairs.
+
+        Yields one progress event only when something actually happened — the
+        counts come from the pass itself, never from an assumption.
+        """
+        from .usb_one_library import relocate_audio_files
+
+        if not planned:
+            return
+        report = relocate_audio_files(
+            self.usb_root, planned, contents_dir=self.usb_root / "Contents"
+        )
+        if any(report[k] for k in ("relocated", "copied", "collisions", "errors")):
+            yield {
+                "stage": "relocate",
+                "message": (
+                    f"Moved {report['relocated']} file(s) in place "
+                    f"({report['copied']} copied, {report['collisions']} collision(s), "
+                    f"{report['errors']} error(s))"
+                ),
+                "progress": 1,
+                "report": report,
+            }
+
+    def _relocate_before_copy(self, tracks: list[dict]) -> Generator[dict, None, None]:
+        """Relocation pass for the LibrarySource track dicts (XML-mode legacy sync)."""
+        planned: list[tuple[Path | None, Path]] = []
+        for t in tracks:
+            raw = t.get("path") or ""
+            if not raw:
+                continue
+            local = Path(raw)
+            try:
+                if not local.exists():
+                    continue
+            except OSError:
+                continue
+            planned.append(
+                (
+                    local,
+                    self._get_safe_dest_path(
+                        t.get("artist", "") or "", t.get("title", "") or "", local.name
+                    ),
+                )
+            )
+        yield from self._relocate_planned(planned)
+
     def _copy_file_stream(self, src: Path, dest: Path) -> Generator[dict, None, None]:
         """Req 18 & 19: Chunk-based streaming & Deduplication."""
         dest.parent.mkdir(parents=True, exist_ok=True)
@@ -1598,32 +1750,45 @@ class UsbSyncEngine:
 
             collection = ET.SubElement(root, "COLLECTION", Entries=str(len(tracks_to_export)))
 
+            # One bulk query per table instead of two by-id queries per track.
+            artist_name_of = _NameLookup(db, "get_artists", "get_artist_by_id")
+            album_name_of = _NameLookup(db, "get_albums", "get_album_by_id")
+
+            # An artist merge only changes where a track belongs. Move what is
+            # already on the stick before the copy loop calls it missing.
+            relocation_plan: list[tuple[Path | None, Path]] = []
+            for t in tracks_to_export:
+                raw_path = getattr(t, "folder_path", "") or ""
+                if _is_streaming_pseudo_path(raw_path):
+                    continue
+                try:
+                    local_candidate = Path(raw_path).resolve(strict=False)
+                except (OSError, ValueError):
+                    local_candidate = Path(raw_path)
+                try:
+                    if not local_candidate.exists():
+                        continue
+                except OSError:
+                    continue
+                relocation_plan.append(
+                    (
+                        local_candidate,
+                        self._get_safe_dest_path(
+                            artist_name_of(getattr(t, "artist_id", None)),
+                            getattr(t, "title", "") or "",
+                            getattr(t, "file_name_l", "") or os.path.basename(raw_path),
+                        ),
+                    )
+                )
+            yield from self._relocate_planned(relocation_plan)
+
             skipped_streaming = 0
             skipped_missing = 0
             copied_ok = 0
 
             for i, t in enumerate(tracks_to_export):
-                # rbox API uses *_by_id suffix for single-entity lookups.
-                # Previous code called db.get_artist / db.get_album which don't
-                # exist — they raised AttributeError that got silently swallowed
-                # by `except: pass`, producing empty artist/album folder names
-                # on USB ("UnknownArtist/UnknownAlbum" for every track).
-                artist_name = ""
-                if getattr(t, "artist_id", None):
-                    try:
-                        artist_name = (
-                            getattr(db.get_artist_by_id(str(t.artist_id)), "name", "") or ""
-                        )
-                    except Exception as e:
-                        logger.debug(f"artist lookup failed for id={t.artist_id}: {e}")
-
-                album_name = ""
-                if getattr(t, "album_id", None):
-                    try:
-                        album_name = getattr(db.get_album_by_id(str(t.album_id)), "name", "") or ""
-                    except Exception as e:
-                        logger.debug(f"album lookup failed for id={t.album_id}: {e}")
-
+                artist_name = artist_name_of(getattr(t, "artist_id", None))
+                album_name = album_name_of(getattr(t, "album_id", None))
                 title = getattr(t, "title", "") or ""
 
                 # rbox's DjmdContent.folder_path is actually the FULL FILE PATH
@@ -1855,6 +2020,11 @@ class UsbSyncEngine:
             t for t in all_tracks if not target_track_ids or t["id"] in target_track_ids
         ]
         logger.info(f"[USB-Legacy-XML] {len(tracks_to_export)} tracks to process")
+
+        # An artist merge changes only the destination path of an already
+        # exported track. Move those first, so the copy loop below sees them
+        # in place instead of re-copying gigabytes of unchanged audio.
+        yield from self._relocate_before_copy(tracks_to_export)
 
         root = ET.Element("DJ_PLAYLISTS", Version="1.0.0")
         collection = ET.SubElement(root, "COLLECTION", Entries=str(len(tracks_to_export)))

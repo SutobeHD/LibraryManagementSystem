@@ -1,10 +1,20 @@
-import argparse
+"""Batch comment edits over the live library (``POST /api/tools/batch-comment``).
 
-# Setup logging
+Runs inside the sidecar on the live library's own rbox connection. It used to be a CLI
+the route launched as ``[sys.executable, batch_worker.py, ...]``; in the PyInstaller
+build ``sys.executable`` is the sidecar exe, which ignores argv, so every run booted a
+second backend instead of this script.
+"""
+
 import logging
+from collections.abc import Callable
+from typing import Any
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("BatchWorker")
+logger = logging.getLogger(__name__)
+
+
+class UnknownPlaylistError(LookupError):
+    """The batch's ``source_id`` names no playlist in master.db."""
 
 
 def compute_new_comment(action: str, original: str, find_text: str, replace_text: str) -> str:
@@ -32,61 +42,62 @@ def compute_new_comment(action: str, original: str, find_text: str, replace_text
     return original
 
 
-def run_batch_update(db_path, source_id, action, find_text, replace_text):
-    from rbox import MasterDb  # lazy: keeps the module importable without rbox
+def apply_batch_comment(
+    master_db: Any,
+    source_id: str,
+    action: str,
+    find_text: str,
+    replace_text: str,
+    on_changed: Callable[[str, str], None] | None = None,
+) -> int:
+    """Apply one comment action to every track of ``LIB`` or one playlist.
 
-    logger.info(f"Connecting to DB: {db_path}")
-    try:
-        db = MasterDb(db_path)
-    except Exception as e:
-        logger.error(f"Failed to connect to DB: {e}")
-        return
+    Each track's re-read and write sit inside ``db_lock``: ``update_content`` writes the
+    whole row, so a row read outside the lock clobbers a concurrent rating / artist /
+    analysis edit. The lock is taken per track, not around the loop, so a library-wide
+    run never pins every other ``master.db`` writer for its whole duration.
 
-    # 1. Resolve tracks
-    target_ids = []
+    Args:
+        master_db: The live library's open ``rbox.MasterDb`` (this thread's connection).
+        source_id: ``"LIB"`` for the whole library, else a playlist id.
+        on_changed: Called as ``(track_id, new_comment)`` under the lock after each
+            write, so the caller can refresh its in-memory track cache.
+
+    Returns:
+        How many tracks' comments changed.
+
+    Raises:
+        UnknownPlaylistError: ``source_id`` is neither ``LIB`` nor a playlist id. Used
+            to read as an empty playlist and answer "0 updated" as a success.
+    """
+    from .database import db_lock
+
     if source_id == "LIB":
-        tracks = db.get_contents()
-        target_ids = [t.id for t in tracks]
+        target_ids = [str(c.id) for c in master_db.get_contents()]
     else:
-        try:
-            # Need to handle playlist ID types if necessary, but string usually works
-            items = db.get_playlist_contents(source_id)
-            target_ids = [item.id for item in items]
-        except Exception as e:
-            logger.error(f"Failed to get playlist contents: {e}")
-            return
-
-    logger.info(f"Targeting {len(target_ids)} tracks.")
+        if master_db.get_playlist_by_id(source_id) is None:
+            raise UnknownPlaylistError(source_id)
+        target_ids = [str(c.id) for c in master_db.get_playlist_contents(source_id)]
+    logger.info("batch comment: %d target tracks", len(target_ids))
 
     count = 0
     for tid in target_ids:
         try:
-            item = db.get_content_by_id(int(tid))
-            if not item:
-                continue
-
-            original_comment = getattr(item, "commnt", "") or ""
-            new_comment = compute_new_comment(action, original_comment, find_text, replace_text)
-
-            if new_comment != original_comment:
+            with db_lock():
+                # str, not int: rbox's MasterDb.get_content_by_id takes the id as a string.
+                item = master_db.get_content_by_id(tid)
+                if not item:
+                    continue
+                original = getattr(item, "commnt", "") or ""
+                new_comment = compute_new_comment(action, original, find_text, replace_text)
+                if new_comment == original:
+                    continue
                 item.commnt = new_comment
-                db.update_content(item)
-                count += 1
+                master_db.update_content(item)
+                if on_changed is not None:
+                    on_changed(tid, new_comment)
+            count += 1
         except Exception as e:
-            logger.warning(f"Error updating track {tid}: {e}")
-            continue
-
-    logger.info(f"Updated {count} tracks.")
-    print(f"COUNT:{count}")
-
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--db", required=True)
-    parser.add_argument("--source", required=True)
-    parser.add_argument("--action", required=True)
-    parser.add_argument("--find", default="")
-    parser.add_argument("--replace", default="")
-    args = parser.parse_args()
-
-    run_batch_update(args.db, args.source, args.action, args.find, args.replace)
+            logger.warning("batch comment: track %s not updated: %s", tid, e)
+    logger.info("batch comment: updated %d tracks", count)
+    return count

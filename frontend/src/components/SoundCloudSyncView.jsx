@@ -24,7 +24,8 @@ import {
     LogIn,
     FolderOpen,
 } from 'lucide-react';
-import api, { scLogin } from '../api/api';
+import api, { scAuthTokenBody, scLogin } from '../api/api';
+import { useTaskPolling, SC_TASKS_ENDPOINT } from '../hooks/useTaskPolling';
 import toast from 'react-hot-toast';
 import { listen } from '@tauri-apps/api/event';
 import MatchInspectorModal from './MatchInspectorModal';
@@ -47,23 +48,9 @@ const formatTotalDuration = (ms) => {
 };
 
 const DownloadQueueWidget = () => {
-    const [tasks, setTasks] = useState({});
+    const { data: tasks } = useTaskPolling(SC_TASKS_ENDPOINT);
 
-    useEffect(() => {
-        const fetchTasks = async () => {
-            try {
-                const res = await api.get('/api/soundcloud/tasks');
-                setTasks(res.data);
-            } catch (e) {
-                // Ignore errors
-            }
-        };
-        fetchTasks();
-        const interval = setInterval(fetchTasks, 2000);
-        return () => clearInterval(interval);
-    }, []);
-
-    const activeTasks = Object.values(tasks);
+    const activeTasks = Object.values(tasks || {});
     if (activeTasks.length === 0) return null;
 
     return (
@@ -392,10 +379,12 @@ const SoundCloudSyncView = () => {
         try {
             // Criterion 1 & 4: scLogin() is desktop-only and picks the
             // consent surface from sc_auth_mode (in-app window by default).
-            const token = await scLogin();
+            const tokens = await scLogin();
 
             setLoginMessage('Saving credentials securely...');
-            await api.post('/api/soundcloud/auth-token', { token });
+            // Access + refresh token + lifetime — the backend keyring owns them from
+            // here and renews the session silently.
+            await api.post('/api/soundcloud/auth-token', scAuthTokenBody(tokens));
             toast.success('SoundCloud Login erfolgreich!');
             setAuthRequired(false);
             // Tell the workspace-bar account chip to re-pull /me.
