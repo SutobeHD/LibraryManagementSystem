@@ -11,9 +11,11 @@ id = "tauri-sidecar-supervisor"
 group = "Desktop-Runtime"
 name = "Sidecar-Supervisor"
 status = "shipped"
+test = "getestet"
+tested = "2026-09-04"
 desc = "Startet die Python-Sidecar, fängt das Token aus stdout ab und filtert es, Kill bei Exit, Dev-Autospawn."
 related = ["bearer-session-auth", "pyinstaller-backend-bundle"]
-notes = "Code in src-tauri/src/main.rs (Hub)."
+notes = "Code in src-tauri/src/main.rs (Hub). Test: testen - 2026-11-14 Release-Sidecar-Name auf RB_Backend vereinheitlicht (SIDECAR_NAME, war rb-backend -> Release-EXE panicte os error 2; Branch fix/release-sidecar-cors). Release-Build kompilierte auf main gar nicht (Release-only-Imports von f92de03 als unused entfernt) - Fix 59d0c34 aus PR #60 übernommen. get_session_token las im Release vor Sidecar-Boot den Token des Vorlaufs aus .session-token -> Frontend cachte ihn -> 401 auf allen Mutationen; Datei-Fallback jetzt nur Debug. Installierte App (MSI/NSIS) vom User prüfen."
 
 [[feature]]
 id = "pyinstaller-backend-bundle"
@@ -22,7 +24,7 @@ name = "Backend-Bundle (PyInstaller)"
 status = "shipped"
 desc = "backend_entry + backend.spec -> RB_Backend-Binary als Tauri externalBin."
 paths = ["backend_entry.py", "backend.spec"]
-notes = "Sidecar-Name RB_Backend vs. rb-backend uneinheitlich (Linux-Doc)."
+notes = "Sidecar-Name überall RB_Backend (backend.spec, externalBin, Capability, main.rs SIDECAR_NAME); cargo test sidecar_name_tests hält das synchron."
 
 [[feature]]
 id = "tauri-capabilities"
@@ -72,7 +74,7 @@ name = "CORS-Lockdown"
 status = "shipped"
 research = "security-cors-allow-credentials-tightening"
 desc = "Nur localhost/tauri-Origins, explizite Methoden, allow_credentials=False, kein Auth-Cookie."
-notes = "Code in app/main.py. Cookie-Auth-PRs immer ablehnen."
+notes = "Code in app/main.py (CORS_ALLOWED_ORIGINS). Cookie-Auth-PRs immer ablehnen. Test: testen - 2026-11-14 http://tauri.localhost ergänzt (Windows-Origin der Release-App, useHttpsScheme default false; fehlte -> jeder Preflight OPTIONS 400). Tests in tests/test_auth.py TestCaseM2. Installierte App vom User prüfen."
 
 [[feature]]
 id = "audio-path-sandbox"
@@ -129,12 +131,13 @@ paths = ["app/logging_utils.py", "tests/test_logging_redaction.py"]
 id = "sc-log-credential-scrub"
 group = "Logging"
 name = "SC-Credentials aus Logs"
-status = "unmerged"
-branch = "claude/dreamy-planck-w7771v"
-pr = 60
+status = "shipped"
+test = "getestet"
+tested = "2026-11-07"
 desc = "client_id/oauth_token aus jeder geloggten URL, jedem Param-Dict und jeder Exception entfernt."
 paths = ["tests/test_soundcloud_log_redaction.py"]
 related = ["sc-api-client", "log-path-redaction"]
+notes = "2026-11-07: Backend-Log nach 401-Pfad frei von Credentials. 2026-11-07 Erfolgspfad (Login, Token speichern, /me, Playlists, Artist-Katalog mit ~60 SC-Calls): tauri-dev-Log + logs/app.log ohne Access-/Refresh-Token, OAuth-Code, Bearer, client_secret. Nur OAuth-state geloggt (todo bei sc-oauth-pkce)."
 
 # ── Infra ─────────────────────────────────────────────────────────────────
 
@@ -185,21 +188,20 @@ id = "perf-backend-quickwins"
 group = "Performance"
 parent = "performance-overhaul"
 name = "Backend-Perf Quick Wins"
-status = "unmerged"
-branch = "claude/dreamy-planck-w7771v"
-pr = 60
+status = "partial"
+test = "testen"
 desc = "Mappings-Cache, memoisiertes resolve() im Import-Dedup, Light-Projektion für GET /api/library/tracks."
 paths = ["tests/test_import_dedup.py", "tests/test_library_tracks_light.py"]
-notes = "In PR #60 enthalten. Frontend-Umstellung auf den Light-Fetch liegt uncommittet im Worktree feat/light-library-tracks."
+todo = ["PR #75 (Light-Liste) am 2026-11-15 in PR #60 gemergt. Offen: PR #77 (feat/editor-rekordbox-beatgrid, Editoren laden das Grid pro Track), zielt noch auf feat/light-library-tracks - auf PR #60 umstellen. Live nachgemessen 2026-11-08 (tauri dev, eigener Stack, nach Beatgrid-Loader): Liste 3,19 MB in 0,2-2,8 s, keine Ansicht fragt die volle Liste an, 178 Health-Pings max. 1,08 s (Boot), sonst < 0,25 s, keine abgebrochenen API-Requests; Ranking + Editor holen das Grid per /api/track/{id}/beatgrid (Editor: 155 BPM + Grid-Linien)", "War: Frontend fragt light=true nirgends ab (9 Aufrufer von /api/library/tracks). Sobald der Beatgrid-Loader fertig ist (~37 s nach Boot), hängt jedes Track-Dict sein volles beatGrid an: Antwort 140 MB, 20 s bis zum ersten Byte, das ganze Backend steht so lange (Health-Ping 19,7 s). Alle App-Requests in dem Fenster laufen ins 10-s-axios-Timeout und werden abgebrochen (Polls, library/mode, SC-Token-Übergabe)", "Backend: Light-Projektion als Default für die Listenansicht, beatGrid nur pro Track laden"]
+notes = "In PR #60 enthalten, Frontend-Nutzung seit PR #75 (2026-11-15 in #60 gemergt): fetchLibraryTracks() in api.js, alle Listen-Aufrufer umgestellt. Gemessen 2026-11-07, 4760 Tracks: voll 140,7 MB / 17,7-19,2 s (fast komplett beatGrid, ca. 417 Beats pro Track), light 3,2 MB / 0,19-0,29 s. Editoren lasen die schweren Felder nie aus der Liste."
 
 [[feature]]
 id = "perf-frontend-virtualization"
 group = "Performance"
 parent = "performance-overhaul"
 name = "TrackTable-Virtualisierung"
-status = "unmerged"
-branch = "claude/dreamy-planck-w7771v"
-pr = 60
+status = "shipped"
+test = "testen"
 desc = "Gefensterte TrackTable (hand-rolled useVirtualRows, 0 Deps), memoisierte TrackRow, Row-Edits in State statt Props-Mutation."
 paths = ["frontend/src/hooks/useVirtualRows.js", "frontend/src/hooks/useVirtualRows.test.js"]
 related = ["track-table"]
@@ -210,21 +212,17 @@ id = "perf-library-view-quickwins"
 group = "Performance"
 parent = "performance-overhaul"
 name = "Library-View Quick Wins"
-status = "unmerged"
-branch = "claude/dreamy-planck-w7771v"
-pr = 60
+status = "shipped"
 desc = "Ein Library-Fetch pro Mount, Toast-Context memoisiert, toter dj_stats-Aufruf weg, DAW-Browser auf 200 Zeilen, Suche deferred (PlaylistBrowser, MetadataView, UtilitiesView)."
 related = ["track-table", "collection-view"]
-notes = "PR #66. Kleiner Merge-Overlap mit den uncommitteten Light-Fetch-Edits in feat/light-library-tracks erwartet."
+notes = "PR #66. Overlap mit PR #75 beim Merge aufgelöst (2d40d66): DawBrowser behält 200-Zeilen-Grenze + Title/Artist-Suche und lädt die leichte Liste; InsightsView ohne dj_stats, ebenfalls leichte Liste."
 
 [[feature]]
 id = "perf-shell-mount-polling"
 group = "Performance"
 parent = "performance-overhaul"
 name = "Shell-Mounting + Poller-Backoff"
-status = "unmerged"
-branch = "claude/dreamy-planck-w7771v"
-pr = 60
+status = "shipped"
 desc = "Views mounten erst beim Tab-Öffnen; ein geteilter Task-Poller (useTaskPolling) mit Idle-Backoff 1,5 s auf 10 s. Idle-Last 3,5 req/s auf 2 req/10 s."
 paths = ["frontend/src/hooks/useTaskPolling.js", "frontend/src/hooks/useTaskPolling.test.js"]
 related = ["workspace-topbar-nav"]
@@ -235,9 +233,7 @@ id = "perf-daw-playhead-store"
 group = "Performance"
 parent = "performance-overhaul"
 name = "DAW-Playhead-Store"
-status = "unmerged"
-branch = "claude/dreamy-planck-w7771v"
-pr = 60
+status = "shipped"
 desc = "Playhead + Dead-Reckoning in externem Store statt Reducer; DAW-Kinder rendern bei Wiedergabe nicht mehr (139 auf 0 Renders je 5 s)."
 paths = ["frontend/src/audio/dawState/playheadStore.js", "frontend/src/audio/dawState/playheadStore.test.js", "frontend/src/components/daw/usePlayheadClock.js"]
 notes = "PR #64."
@@ -247,9 +243,7 @@ id = "perf-ranking-waveform"
 group = "Performance"
 parent = "performance-overhaul"
 name = "Ranking-Waveform-Pipeline"
-status = "unmerged"
-branch = "claude/dreamy-planck-w7771v"
-pr = 60
+status = "shipped"
 desc = "Ranking pro Track: 1 Decode statt 11, 0 OfflineAudioContext statt 6, 1 Stream statt 3; RankingView ohne Doppel-Fetch und Settings-Waterfall."
 related = ["multiband-waveform-data", "ranking-mode"]
 notes = "PR #72. Browser-Check gegen Mock-Backend; echter /api/audio/waveform-Pfad in der App ungeprüft."
@@ -259,9 +253,7 @@ id = "perf-backend-event-loop"
 group = "Performance"
 parent = "performance-overhaul"
 name = "Backend Event-Loop + Duplikat-Scan"
-status = "unmerged"
-branch = "claude/dreamy-planck-w7771v"
-pr = 60
+status = "shipped"
 desc = "Waveform off-loop + Disk-Cache, Stream-Generatoren sync (1 MiB), librosa lazy beim Boot, clean_xml off-loop, Duplikat-Scan parallel + O(n), Shutdown-Flush vor os._exit, Phrase-Batch mit einem MasterDb-Open."
 paths = ["tests/test_waveform_cache.py", "tests/test_stream_chunking.py", "tests/test_librosa_lazy_import.py", "tests/test_xml_clean_offloop.py", "tests/test_duplicate_grouping.py", "tests/test_shutdown_flush.py", "tests/test_phrase_anlz_dirs.py"]
 related = ["duplicate-finder", "phrase-cue-generator"]
@@ -272,9 +264,7 @@ id = "perf-database-cache-xml"
 group = "Performance"
 parent = "performance-overhaul"
 name = "database.py Settings-Cache + XML-Save"
-status = "unmerged"
-branch = "claude/dreamy-planck-w7771v"
-pr = 60
+status = "shipped"
 desc = "hide_streaming per settings.json-mtime gecacht, gefilterte Track-Sicht memoisiert; XML-Saves gebündelt (2 s Debounce, 10 s max, Flush bei save/load/exit)."
 paths = ["tests/test_database_save_cache.py"]
 notes = "PR #67. 100 XML-Mutationen 318 s auf 3,4 s; Ausgabe byte-identisch. Kein manueller App-Test im XML-Modus."
@@ -284,9 +274,7 @@ id = "perf-sc-fuzzy-index"
 group = "Performance"
 parent = "performance-overhaul"
 name = "SoundCloud Fuzzy-Match Index"
-status = "unmerged"
-branch = "claude/dreamy-planck-w7771v"
-pr = 60
+status = "shipped"
 desc = "Lokale Library einmal pro Sync indexiert (bit-parallele LCS-Schranke statt SequenceMatcher über alles); 20k x 500 in 0,69 s statt ~335 s, Ergebnisse identisch. numpy lazy, damit app.main ohne numpy bootet."
 paths = ["tests/test_sc_fuzzy_index.py", "tests/test_sc_lazy_numpy.py"]
 notes = "PRs #68 + #73."
@@ -296,9 +284,7 @@ id = "perf-usb-lookups"
 group = "Performance"
 parent = "performance-overhaul"
 name = "USB-Export N+1 Lookups"
-status = "unmerged"
-branch = "claude/dreamy-planck-w7771v"
-pr = 60
+status = "shipped"
 desc = "Artist/Album-Maps einmal pro Export, ein MasterDb-Open pro Diff, Diff per Index; 8498 Einzelabfragen auf 0, Export byte-identisch."
 paths = ["tests/test_usb_lookup_batching.py"]
 related = ["usb-sync-engine"]
@@ -309,12 +295,22 @@ id = "perf-build-profile"
 group = "Performance"
 parent = "performance-overhaul"
 name = "Cargo Release-Profil + Release-Build-Fix"
-status = "unmerged"
-branch = "claude/dreamy-planck-w7771v"
-pr = 60
+status = "shipped"
 desc = "Cargo [profile.release] thin-LTO, codegen-units=1, strip (EXE 18,7 MB); html2canvas entfernt; cfg-gated Shell-Imports wiederhergestellt + Release-Clippy in CI."
 related = ["pyinstaller-backend-bundle"]
 notes = "PRs #62 + #69. Release-Build mit gebündeltem Sidecar nicht geprüft."
+
+[[feature]]
+id = "playlist-tracks-light"
+group = "Performance"
+parent = "performance-overhaul"
+name = "Playlist-Tracks ohne Beatgrids"
+status = "idea"
+desc = "Playlist-, Smart-Playlist- und Artist-Tracklisten ohne beatGrid/Cues ausliefern wie die leichte Collection-Liste."
+routes = ["/api/playlist/{pid}/tracks"]
+related = ["perf-backend-quickwins", "collection-view"]
+todo = ["/api/playlist/{pid}/tracks liefert volle beatGrids: ~31 kB pro Track (31 Tracks = 0,96 MB), 1000er-Playlist ~30 MB -> Backend blockiert wieder Sekunden", "Smart-Playlist-evaluate und /api/artists/{id}/local-tracks auf dasselbe prüfen"]
+notes = "Gefunden 2026-11-07 beim Nachmessen von feat/light-library-tracks: dort ist nur /api/library/tracks leicht (light=true)."
 
 # ── Mobile ────────────────────────────────────────────────────────────────
 
@@ -345,11 +341,11 @@ id = "ci-node-test-suites"
 group = "Release & CI"
 parent = "ci-pipeline"
 name = "node:test-Suites in der CI"
-status = "unmerged"
-branch = "claude/dreamy-planck-w7771v"
-pr = 60
+status = "shipped"
+test = "getestet"
+tested = "2026-11-07"
 desc = "Frontend-Unit-Tests blockierend in der CI (Plain-Suites, dawReducer, Artist-Hook)."
-notes = "Auf main laufen Frontend-Tests in der CI gar nicht."
+notes = "Auf main laufen Frontend-Tests in der CI gar nicht. 2026-11-07 CI-Lauf 42383467162 (Stand PR #60/#61): 3 Suites, 124 Tests grün, ohne continue-on-error."
 
 [[feature]]
 id = "cross-platform-release"
@@ -368,6 +364,7 @@ id = "linux-macos-support"
 group = "Linux/macOS"
 name = "Linux/macOS-Support"
 status = "partial"
+test = "testen"
 desc = "CI baut deb/rpm + dmg, platformdirs-Pfade, xdg-open/open-Zweige."
 related = ["config-platform-paths", "usb-device-detect"]
 notes = "AppImage übersprungen, macOS ungetestet, Rekordbox-Root + USB-Detektor Windows-zentriert."

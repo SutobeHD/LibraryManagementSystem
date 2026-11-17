@@ -105,7 +105,7 @@ RB_Editor_Pro/
 ### 1. Library Loading
 ```
 User opens app
-  → Frontend: GET /api/library/tracks
+  → Frontend: GET /api/library/tracks?light=true  (fetchLibraryTracks — no beatGrid/Cues/positionMarks/phrases)
   → app/database.py: RekordboxXMLDB.get_tracks()
     → Parse Pioneer Rekordbox XML (or SQLite in Live Mode)
   → Returns: [{id, title, artist, bpm, key, path, ...}]
@@ -328,7 +328,7 @@ Source of truth: `app/auth.py`. Draftplan: `docs/research/implement/draftplan_se
     sys.stdout.write("LMS_TOKEN=<value>\n")           ← first stdout line
     %APPDATA%/MusicLibraryManager/.session-token      ← persisted (user-data dir)
         │
-        ├── Tauri prod (shell.sidecar("rb-backend"))
+        ├── Tauri prod (shell.sidecar(SIDECAR_NAME = "RB_Backend"))
         │     src-tauri/src/main.rs:472 CommandEvent::Stdout
         │     → capture_token_line() strips "LMS_TOKEN=" prefix
         │     → stores in tauri::State<SessionToken> (Arc<Mutex<String>>)

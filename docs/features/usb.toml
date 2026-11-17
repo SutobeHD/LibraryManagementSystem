@@ -15,6 +15,7 @@ desc = "Nur Wechsel-Sticks, Rekordbox-Stick erkennen, Speicherbalken, Kompatibil
 paths = ["frontend/src/components/usb/UsbDeviceList.jsx", "frontend/src/components/UsbView.jsx"]
 routes = ["/api/usb/devices"]
 related = ["linux-dj-workflow"]
+todo = ["USB-Ansicht öffnen: GET /api/usb/devices 4,6 s, /api/usb/profiles 7,5 s (gemessen 2026-11-08 auf dem Stand vor PR #70)"]
 notes = "Windows-only (PowerShell Get-Disk)."
 
 [[feature]]
@@ -49,6 +50,7 @@ paths = ["app/usb_manager.py", "frontend/src/components/usb/UsbSyncPanel.jsx", "
 routes = ["/api/usb/sync", "/api/usb/sync/all", "/api/usb/diff", "/api/usb/history"]
 depends_on = ["usb-profiles", "usb-onelibrary-export"]
 related = ["performance-overhaul"]
+todo = ["App-Start ohne Stick: POST /api/usb/initialize für fehlendes E:\\ läuft wiederholt in 500 (WinError 3) - fehlendes Laufwerk sauber als 'nicht verbunden' melden"]
 notes = "Blockierender POST mit Fake-Progress (offen). Scan/Diff-N+1 seit PR #70 (in #60) behoben. Altfund: exportLibrary.db wird mit plain sqlite3 gelesen, Stick-Seite der Diff leer, Datei bei jedem Sync-Start gelöscht."
 
 [[feature]]
@@ -89,16 +91,15 @@ name = "ANLZ auf den Stick"
 status = "shipped"
 desc = "USBANLZ/<bucket>/ANLZ0000.DAT/EXT/2EX pro Track, kopieren oder neu erzeugen."
 depends_on = ["anlz-writer"]
-notes = "Lebt in usb_one_library.py + anlz_sidecar.py. rbxport: CDJ-3000 leitet USBANLZ-Ordner aus Hash des USB-Pfads ab (wir: aus content id) - docs/reference/rbxport/export.md §4."
+notes = "Lebt in usb_one_library.py + anlz_sidecar.py. Quellen: 1) Rekordbox-ANLZ aus AnalysisDataPath (Live), 2) LMS-ANLZ-Cache im User-Cache-Ordner (alte .lms_anlz neben der Audiodatei nur lesend), 3) frische Analyse in den Cache - nie in den Musikordner (B7, fix/kernloop-0.1-bugs). rbxport: CDJ-3000 leitet USBANLZ-Ordner aus Hash des USB-Pfads ab (wir: aus content id) - docs/reference/rbxport/export.md §4."
 
 [[feature]]
 id = "usb-anlz-export-fixes"
 group = "Export-Formate"
 parent = "usb-anlz-export"
 name = "ANLZ-Export-Fixes (PPTH/PSSI)"
-status = "unmerged"
-branch = "claude/dreamy-planck-w7771v"
-pr = 60
+status = "shipped"
+test = "testen"
 desc = "Stick-PPTH + maskiertes PSSI, explizite Suffixe, Stale-Cleanup, djmdCue kind/comment korrekt lesen."
 paths = ["app/anlz_usb_export.py", "tests/test_anlz_usb_export*.py", "tests/test_live_cue_loading.py"]
 related = ["usb-export-manual-cues"]
@@ -119,17 +120,16 @@ group = "Export-Formate"
 name = "Cover auf den Stick"
 status = "partial"
 desc = "Eingebettetes Cover oder cover.jpg nach PIONEER/Artwork (klein + mittel)."
-paths = ["app/usb_artwork.py"]
+paths = ["app/usb_artwork.py", "tests/test_usb_artwork.py"]
 todo = ["_bucket_for: id 1 -> 00001 (Referenz-Stick), nicht 00000"]
-notes = "rbxport nutzt id//20+1; docs/reference/rbxport/export.md §5."
+notes = "rbxport nutzt id//20+1; docs/reference/rbxport/export.md §5. Pillow==13.0.0 jetzt in requirements.txt + backend.spec (Build bricht ohne ab); vorher blieb PIONEER/Artwork leer (B8, fix/kernloop-0.1-bugs)."
 
 [[feature]]
 id = "usb-folder-relocation"
 group = "Export-Formate"
 name = "Stick-Dateien verschieben statt kopieren"
-status = "unmerged"
-branch = "claude/dreamy-planck-w7771v"
-pr = 60
+status = "shipped"
+test = "testen"
 desc = "Nach Artist-Rename die Datei auf dem Stick verschieben (Case-Rename in 2 Schritten, Content-Hash als Beweis)."
 paths = ["tests/test_usb_relocate.py"]
 depends_on = ["usb-onelibrary-export"]
@@ -160,6 +160,7 @@ id = "usb-mysettings"
 group = "Sync & Extras"
 name = "CDJ/DJM-Hardware-Settings"
 status = "shipped"
+test = "testen"
 desc = "MYSETTING/MYSETTING2/DJMMYSETTING.DAT, 42 Felder, Reset auf Defaults."
 paths = ["app/usb_mysettings.py", "frontend/src/components/UsbSettingsView.jsx"]
 routes = ["/api/usb/mysettings"]

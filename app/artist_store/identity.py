@@ -206,7 +206,7 @@ def auto_queue_eligible(role: str, confidence: str, matched_on: str = "") -> boo
     ``uncertain``, ``featured`` and ``remixed_by_other`` are review-only whatever their
     confidence; ``low`` is review-only whatever the role.
 
-    One extra gate on top of role × confidence: a match resting ONLY on the uploader's
+    One extra gate on top of role x confidence: a match resting ONLY on the uploader's
     display name never auto-queues. Display names are not unique on SoundCloud, so a
     tribute page, an impostor, or a genuinely different act of the same name would
     otherwise spend the user's bandwidth and disk unattended on a pure name collision.

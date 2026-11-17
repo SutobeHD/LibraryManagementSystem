@@ -1158,6 +1158,7 @@ class BeatAnalyzer:
                         "bpm": result["bpm"],
                         "key": result["key"],
                         "camelot": result.get("camelot", ""),
+                        "key_id": result.get("key_id", 0),
                         "phrases": phrases_legacy,
                         "lufs": result.get("lufs", -100.0),
                         "peak": result.get("peak", 0.0),
@@ -1402,6 +1403,7 @@ class ImportManager:
                     "bpm": analysis_result.get("bpm", 0),
                     "key": analysis_result.get("key", ""),
                     "camelot": analysis_result.get("camelot", ""),
+                    "key_id": analysis_result.get("key_id", 0),
                     "phrases": analysis_result.get("phrases", []),
                     "lufs": analysis_result.get("lufs", 0),
                     "peak": analysis_result.get("peak", 0),
@@ -1508,6 +1510,7 @@ class ImportManager:
                 "ISRC": tags.get("isrc") or "",
                 "BPM": analysis["bpm"],
                 "Key": analysis["key"],
+                "KeyID": analysis.get("key_id", 0),
                 "Camelot": analysis["camelot"],
                 "phrases": analysis.get("phrases", []),
                 "Loudness": analysis.get("lufs", 0),
@@ -1580,9 +1583,11 @@ class ImportManager:
                 else:
                     logger.info(f"Track {tid} already in 'Import' playlist.")
 
-            # 5. Write ANLZ sidecar (DAT/EXT/2EX) so USB-sync can copy it onto
-            # the stick — gives CDJ-3000 cues, beatgrid and waveform data.
-            # Best-effort: never fail an import because of this.
+            # 5. ANLZ files (DAT/EXT/2EX): beat grid, waveform and cues for Rekordbox and
+            # the CDJ. Live library: into Rekordbox's share at the row's own path, which
+            # also records AnalysisDataPath + analysed, so Rekordbox, analyze-full and
+            # the USB export treat the track like one Rekordbox analysed. Otherwise:
+            # the LMS ANLZ cache. Best-effort: never fail an import because of this.
             try:
                 from .anlz_sidecar import write_companion_anlz
 
@@ -1599,9 +1604,21 @@ class ImportManager:
                         )
                 except Exception:
                     pass
-                write_companion_anlz(file_path, full_result, depth=depth)
+                if getattr(db, "mode", None) == "live":
+                    if full_result is None:
+                        from .analysis_engine import run_full_analysis
+
+                        full_result = run_full_analysis(str(file_path), depth=depth) or {}
+                    # analysed=105 makes Rekordbox trust the files and never re-analyse:
+                    # a failed or empty analysis must not get that far.
+                    if full_result.get("status") == "ok" and full_result.get("beats"):
+                        db.attach_import_anlz(str(tid), full_result)
+                    else:
+                        logger.warning(f"ANLZ not attached for {file_path}: no usable analysis")
+                else:
+                    write_companion_anlz(file_path, full_result, depth=depth)
             except Exception as anlz_err:
-                logger.debug(f"ANLZ sidecar skipped for {file_path}: {anlz_err}")
+                logger.warning(f"ANLZ write skipped for {file_path}: {anlz_err}")
 
             return tid, analysis
         except Exception as e:

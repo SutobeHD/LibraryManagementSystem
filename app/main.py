@@ -34,6 +34,7 @@ from fastapi import (
     Response,
     UploadFile,
 )
+from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -283,18 +284,25 @@ def safe_error_message(e: Exception) -> str:
 
 
 # --- SECURITY: CORS locked to localhost only ---
+# Tauri 2 webview origins: `tauri://localhost` (macOS/Linux),
+# `http://tauri.localhost` (Windows default, `useHttpsScheme` false — the
+# installed app is locked out without it), `https://tauri.localhost`
+# (Windows with `useHttpsScheme: true`).
+CORS_ALLOWED_ORIGINS: tuple[str, ...] = (
+    "http://localhost:1420",
+    "http://127.0.0.1:1420",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+    "tauri://localhost",
+    "http://tauri.localhost",
+    "https://tauri.localhost",
+)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:1420",
-        "http://127.0.0.1:1420",
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://localhost:8000",
-        "http://127.0.0.1:8000",
-        "tauri://localhost",
-        "https://tauri.localhost",
-    ],
+    allow_origins=list(CORS_ALLOWED_ORIGINS),
     allow_credentials=False,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "X-Session-Token", "Authorization"],
@@ -1222,21 +1230,45 @@ def track_genre_suggestions(tid: str, limit: _GenreHintLimit = 8) -> dict[str, A
     return result
 
 
+def _json_default(o: Any) -> Any:
+    """``json.dumps`` fallback for the odd non-JSON value in a track dict (Path, date...)."""
+    return jsonable_encoder(o)
+
+
+def _encode_track_list(tracks: list[dict[str, Any]]) -> bytes:
+    """JSON array of ``tracks``, encoded like Starlette's ``JSONResponse``.
+
+    One ``json.dumps`` per track, not one for the list: the C encoder holds the GIL
+    for a whole call, and the full list is ~145 MB once the beat grids are loaded.
+    Short calls let the event-loop thread run in between.
+    """
+    parts = [
+        json.dumps(
+            t, default=_json_default, ensure_ascii=False, allow_nan=False, separators=(",", ":")
+        )
+        for t in tracks
+    ]
+    return ("[" + ",".join(parts) + "]").encode("utf-8")
+
+
 @app.get("/api/library/tracks")
-def get_library_tracks(light: bool = False):
+def get_library_tracks(light: bool = False) -> Response:
     """Every track of the loaded library (hide_streaming applied).
 
     ``light=true`` leaves out beatGrid, Cues, positionMarks and phrases.
+
+    Returns a ready ``Response`` encoded here, in the threadpool. For a returned list
+    FastAPI runs ``jsonable_encoder`` and ``json.dumps`` on the event loop; for the full
+    list that froze every other request (health, task polls) for ~18 s.
     """
     try:
         tracks = db.get_all_tracks()
         logger.info(f"Returning {len(tracks)} tracks for library view")
-        if light:
-            return [_light_track(t) for t in tracks]
-        return tracks
+        payload = [_light_track(t) for t in tracks] if light else tracks
+        return Response(content=_encode_track_list(payload), media_type="application/json")
     except Exception as e:
         logger.error(f"Failed to fetch library tracks: {e}")
-        return []
+        return Response(content=b"[]", media_type="application/json")
 
 
 @app.get("/api/insights/low_quality")
@@ -5876,6 +5908,10 @@ _ANALYZE_FULL_ERRORS: dict[str, tuple[int, str]] = {
         "master.db records no analysis path for this track. Analyse it once in Rekordbox first.",
     ),
     "audio_missing": (409, "The track's audio file is missing on disk"),
+    "db_update_failed": (
+        500,
+        "The analysis files were written, but updating master.db failed. Check logs.",
+    ),
 }
 
 

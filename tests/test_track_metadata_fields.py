@@ -202,13 +202,16 @@ def test_live_writes_every_allowed_field(live, conn) -> None:
     assert live.tracks["1"]["ColorID"] == 2
 
 
-def test_live_add_track_does_not_send_bpm(live, conn) -> None:
+def test_live_add_track_sends_bpm_and_key_outside_the_metadata_update(live, conn) -> None:
+    # BPM / key are not user-editable fields, so update_track_metadata never gets them
+    # (it refuses the whole update for one); add_track writes them itself (B4).
     conn.create_content.return_value = SimpleNamespace(id="1")
     tid = live.add_track({"path": "C:/a.mp3", "Title": "T", "BPM": 128.0, "Key": "Am"})
     assert tid == "1"
     assert conn.item.title == "T"
-    assert "update_content" in _writes(conn)
-    assert live.tracks["1"]["BPM"] == 128.0  # cached as before, never sent to master.db
+    assert conn.item.bpm == 12800
+    conn.update_content_key.assert_called_once_with("1", "Am")
+    assert live.tracks["1"]["BPM"] == 128.0
 
 
 def test_live_add_track_skips_missing_tags(live, conn) -> None:

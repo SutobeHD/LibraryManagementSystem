@@ -49,7 +49,8 @@ class TestRemoveTrackFromPlaylist:
 
         assert live.remove_track_from_playlist("pl-9", "track-bbb") is True
 
-        live.db.get_playlist_songs.assert_called_once_with("pl-9")
+        # Read once to find the row, once more to refresh the playlists_tracks cache.
+        assert {c.args for c in live.db.get_playlist_songs.call_args_list} == {("pl-9",)}
         # The whole point: one positional arg, and it is the ROW id — not the
         # playlist id and not the content id.
         live.db.delete_playlist_song.assert_called_once_with("row-2")
@@ -80,12 +81,24 @@ class TestRemoveTrackFromPlaylist:
 
         assert live.remove_track_from_playlist("pl-9", "track-aaa") is False
 
-    def test_reorder_round_trips_through_the_fixed_primitive(self, live) -> None:
+    def test_reorder_moves_the_row_instead_of_remove_and_re_add(self, live) -> None:
+        # Remove + re-add always put the track at the end (B11); the row is moved now.
+        live.db.get_playlist_songs.return_value = [
+            _song("row-1", "track-aaa", 1),
+            _song("row-2", "track-bbb", 2),
+        ]
+
+        assert live.reorder_playlist_track("pl-9", "track-bbb", 0) is True
+        live.db.move_playlist_song.assert_called_once_with("row-2", 1)
+        live.db.delete_playlist_song.assert_not_called()
+        live.db.create_playlist_song.assert_not_called()
+
+    def test_reorder_onto_its_own_place_writes_nothing(self, live) -> None:
         live.db.get_playlist_songs.return_value = [_song("row-1", "track-aaa")]
 
         assert live.reorder_playlist_track("pl-9", "track-aaa", 0) is True
-        live.db.delete_playlist_song.assert_called_once_with("row-1")
-        live.db.create_playlist_song.assert_called_once_with("pl-9", "track-aaa")
+        live.db.move_playlist_song.assert_not_called()
+        live.db.delete_playlist_song.assert_not_called()
 
 
 class TestPlaylistNode:
