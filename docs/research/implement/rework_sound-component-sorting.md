@@ -386,6 +386,39 @@ Measurement outputs live in gitignored `tmp/` folders (named per Finding); every
 - **Synthesis:** analyse **main sections chosen from Rekordbox phrases**, not an arbitrary window. With that: off-beat share returns (coarse), 16th share is solid, on-beat stays out — now for a measured reason; hat pattern returns as its **own** similarity kind; W1 / W5 are confirmed on fresh tracks. Acceptance must use the cross-section split plus a control fingerprint. Fresh-track ids (reusable held-out set): 146945739, 10850880, 144679260, 206394916, 102989034, 76033269, 132912787, 159236034, 139373667, 121777280, 50062292, 122610912, 147542863, 242148098, 113553813, 152928519, 33067422, 104496341, 50328590, 59772524, 81647367, 61986485, 188003906, 252784818, 97457529, 249336698, 181143909, 111835855, 91487286, 42317032, 260758967, 229533752, 156399413, 177148477, 92090756, 76786144, 84942724, 127064202, 213065562, 246280891, 79220680, 96622913, 229127414, 188727416, 6567014, 207697921, 185845796, 245679953, 108326391, 92653158, 61394649, 53662195, 35789474, 70484757, 118693129, 173902299, 88975820, 202712084, 11894335, 118853167.
 - **Confidence:** high for stability + held-out retrieval (fresh tracks, frozen code); medium for the pattern axis (variants chosen on this set) and open / closed (not hat-specific).
 
+### 2026-11-17 — rework B: ONNX runtime with numpy 1.26 + licence / host table (answers A9; supersedes the model-tier cost and packaging lines of RQ1, RQ2, RQ9 and plan steps 14-15)
+- **Codebase:** probe scripts `scripts/dev/sound_component_research/onnx/` (exports, minimal pre / post-processing, parity + speed probes, DirectML diagnosis; pip freezes of the CPU, DirectML and export environments). No `app/` code.
+- **Measurement (`tmp/sc-onnx/`, isolated envs; times taken under foreign load — GPU utilisation < 15 % awaited before each GPU timing, so DirectML figures are lower bounds):**
+  - **Runtime:** `onnxruntime` 1.32.0 (wheel 15.9 MiB, 49 MB installed) imports and runs with numpy 1.26.4, scipy 1.11.4, librosa 0.10.1, numba 0.58.1. `onnxruntime-directml` 1.24.4 (23.9 MiB, 68 MB, carries the CPU provider) — the two packages write into the same folder and are **mutually exclusive**.
+
+  | Model | ONNX artefact | Parity vs the torch / official path | Speed (numpy 1.26, CPU 1 thread unless noted) |
+  |---|---|---|---|
+  | basic-pitch | `nmp.onnx` from the official wheel, 0.2 MB | activations max diff 0.0, notes identical, F1 1.0 (own 93-line pre / post, no `basic_pitch` import → no TensorFlow) | **0.33 CPU-s per 30 s** (the earlier 4.6 CPU-s was thread spin) → 4 windows × 4633 files ≈ **1.7 CPU-h** (estimate); DirectML 0.08 s |
+  | CLAP audio tower (`laion/clap-htsat-unfused`) | own `torch.onnx.export` (opset 17), 111 MiB fp32 / 56 MiB fp16 | 1 − cos ≤ 1.2e-7 over 184 windows; feature extractor re-done in 19 lines (max diff 1e-5 dB); output must be L2-normalised by the caller | 11 windows / s (0.08 CPU-s per 10 s window); DirectML 40-62 windows / s with static batch 8 |
+  | Open-Unmix `umxhq` | own export with a 12-line wrapper, STFT outside, 4 × 34 MiB | SI-SDR 115-130 dB | 3.2-3.7 s wall per 5-min track, 10-12 CPU-s, RSS 2.4-2.8 GB; DirectML 62-65 s (LSTM) → CPU only |
+  | htdemucs | own core export, STFT outside, 166 MiB | CPU SI-SDR 66-91 dB | CPU 57 s per 294 s track (752 CPU-s, RSS 6.1 GB); **DirectML output is wrong** (SI-SDR −8 … −56 dB; first diverging tensor = a dilated Conv; Conv1d → Conv2d rewrite does not help) |
+
+  - **Is `umxhq` good enough for melody?** `other` stem vs htdemucs as pseudo-reference on 6 tracks: note F1 0.00-0.30, pitch-class cosine 0.90 / 0.47 / 0.87 / 0.09 / 0.81 / 0.47 → agrees on 3 of 6; on 2 tracks no better than the unseparated mix. Nothing was listened to.
+  - **End to end on ONNX (separation → basic-pitch on 4 × 30 s), 4633 files, estimates:** `umxhq` CPU 1 thread 6 s per track → 7.9 CPU-h (≈ 1 h with 8 one-thread workers, scaling unmeasured, ≈ 25 GB RSS); htdemucs CPU on the window segments only 25.6 s per track → 444 CPU-h, RSS 7.1 GB.
+  - **Packaging:** `hook-onnxruntime.py` exists in pyinstaller-hooks-contrib; a one-file DLL-init failure is reported for ORT 1.22 (onnxruntime issue 25193, closed without a fix) → must be tested in a real build. CLAP and `umxhq` ONNX files exist at **no official publisher** → the app would have to host its own exports (redistribution).
+- **Licence + host table (primary sources opened; ✔ = cross-checked by the probe itself):**
+
+  | Artefact | Official host | Licence | Use in a distributed app | Verdict |
+  |---|---|---|---|---|
+  | onnxruntime 1.32.0 | PyPI | MIT | yes | clean |
+  | onnxruntime-directml 1.24.4 | PyPI | MIT (DirectML.dll terms inside the wheel not verified) | yes | flag — "sustained engineering" |
+  | basic-pitch code + `nmp.onnx` | github.com/spotify/basic-pitch, PyPI wheel | Apache-2.0 | yes | clean |
+  | LAION-CLAP code / `clap-htsat-unfused` ✔ / `larger_clap_music` ✔ | github.com/LAION-AI/CLAP, huggingface.co/laion | CC0 / apache-2.0 tags | yes | clean (ONNX = own export) |
+  | PANNs code / CNN14 weights | GitHub / zenodo 3987831 | MIT / CC BY 4.0 | yes, with attribution | clean |
+  | Open-Unmix code / `umxhq` ✔ | github.com/sigsep, zenodo 3370489 | MIT / record says "mit-license" | unclear — trained on MUSDB18-HQ | flag |
+  | `umxl` | zenodo 5069601 | CC BY-NC-SA 4.0 | no | blocked |
+  | Demucs code / htdemucs weights ✔ | github.com/adefossez/demucs, dl.fbaipublicfiles.com | MIT / none — maintainer (issue 327): "provided only for scientific purposes" | no | **blocked** |
+  | MUSDB18-HQ ✔ | zenodo 3338373 | non-commercial, "educational purposes only" | no | root cause for `umxhq` / htdemucs |
+  | torchcrepe + CREPE weights | PyPI / github.com/marl/crepe | MIT | yes | clean |
+- **Web:** https://pypi.org/project/onnxruntime/ ; https://pypi.org/project/onnxruntime-directml/ ; https://github.com/spotify/basic-pitch ; https://huggingface.co/laion/clap-htsat-unfused ; https://zenodo.org/records/3370489 ; https://zenodo.org/records/5069601 ; https://zenodo.org/records/3338373 ; https://github.com/facebookresearch/demucs/issues/327 ; https://github.com/microsoft/onnxruntime/issues/25193.
+- **Synthesis:** the torch-free runtime is real for note extraction and embeddings: `onnxruntime` CPU + `nmp.onnx` + a self-exported CLAP tower fit the numpy pin and cost little. **Separation is the bottleneck**: htdemucs is out for an app that is distributed (weights not licensed for it), slow on CPU and wrong on DirectML; `umxhq` is fast but only half-agrees with htdemucs and carries a licence flag. The melody tier therefore hinges on whether melody features work **without** separation or with `umxhq` — measured in rework C. Whether the app is "for my own use" or "to be distributed" decides if htdemucs may be used at all → user decision.
+- **Confidence:** high for runtime fit, parity and speed; medium for the `umxhq` quality verdict (6 tracks, pseudo-reference); the licence rows are quoted from primary sources, not legal advice.
+
 ## Adversarial Findings
 
 Stage 2 Adversarial-Agent (phase 2). Devil's-advocate — what could go wrong, what assumptions are weak, what dependencies betray us. ≤120 words. Append-only.

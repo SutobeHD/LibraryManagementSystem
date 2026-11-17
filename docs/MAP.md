@@ -424,6 +424,29 @@
 | `scripts/dev/sound_component_research/models/debug_clap2.py` | *(no module docstring)* |
 | `scripts/dev/sound_component_research/models/debug_clap3.py` | *(no module docstring)* |
 | `scripts/dev/sound_component_research/models/debug_crepe.py` | *(no module docstring)* |
+| `scripts/dev/sound_component_research/onnx/bp_dump_windows.py` | Dump the 30 s mix windows (22050 Hz mono) used by the earlier basic-pitch bench, so both envs read identical … |
+| `scripts/dev/sound_component_research/onnx/bp_min.py` | Minimal basic-pitch pre / post-processing without importing `basic_pitch` (no TensorFlow, no pretty_midi). |
+| `scripts/dev/sound_component_research/onnx/bp_probe.py` | basic-pitch nmp.onnx with the minimal pre/post (bp_min) vs the official package output. |
+| `scripts/dev/sound_component_research/onnx/bp_ref_official.py` | Reference: official basic_pitch 0.4.0 predict() (ONNX backend) on the dumped windows. |
+| `scripts/dev/sound_component_research/onnx/clap_dump_48k.py` | Dump the 48 kHz mono mix of the 6 tracks (temporary, tmp/ only) so torch env and onnx env embed identical sam… |
+| `scripts/dev/sound_component_research/onnx/clap_export.py` | Export the CLAP audio tower (+ projection) of laion/clap-htsat-unfused to ONNX and write torch reference |
+| `scripts/dev/sound_component_research/onnx/clap_fe_min.py` | CLAP log-mel features without transformers / torch: mirrors `ClapFeatureExtractor` for |
+| `scripts/dev/sound_component_research/onnx/clap_probe.py` | CLAP audio tower ONNX: feature parity (numpy/librosa vs HF extractor), embedding parity vs torch, speed. |
+| `scripts/dev/sound_component_research/onnx/dml_placement.py` | Count how many graph nodes DirectML takes vs CPU fallback (verbose session log parsed from stderr). |
+| `scripts/dev/sound_component_research/onnx/htd_conv1d_to_2d.py` | DirectML workaround attempt: rewrite every 1-D Conv / ConvTranspose of htdemucs_core.onnx as a 2-D op with a |
+| `scripts/dev/sound_component_research/onnx/htd_debug_outputs.py` | Add intermediate tensors as graph outputs (torch env has `onnx`): python htd_debug_outputs.py <models_dir>. |
+| `scripts/dev/sound_component_research/onnx/htd_dml_bisect.py` | First tensor where DirectML leaves the CPU result (needs htdemucs_core_debug.onnx from htd_debug_outputs.py). |
+| `scripts/dev/sound_component_research/onnx/htd_dml_diag.py` | Why does htdemucs_core.onnx diverge on DirectML? |
+| `scripts/dev/sound_component_research/onnx/htd_export.py` | htdemucs (official demucs 4.1.0 weights from dl.fbaipublicfiles.com) -> ONNX core network. |
+| `scripts/dev/sound_component_research/onnx/melody_e2e.py` | End-to-end melody path on onnxruntime only: separation (`other`) -> basic-pitch on 4 x 30 s windows. |
+| `scripts/dev/sound_component_research/onnx/microbench.py` | Best-case forward time of one ONNX graph: N runs on fixed random input, report min / median (the minimum is r… |
+| `scripts/dev/sound_component_research/onnx/oc_common.py` | Shared helpers for the ONNX probe (B0-1). |
+| `scripts/dev/sound_component_research/onnx/sep_dump_mix.py` | Dump the 44.1 kHz stereo mixes (temporary, tmp/ only) so torch env and onnx env separate identical samples. |
+| `scripts/dev/sound_component_research/onnx/sep_min.py` | Source separation on onnxruntime + numpy / librosa only (no torch): STFT / iSTFT + chunking outside the graph. |
+| `scripts/dev/sound_component_research/onnx/sep_probe.py` | Separation on ONNX: parity vs torch references (SI-SDR) + speed. |
+| `scripts/dev/sound_component_research/onnx/sep_quality.py` | Can licence-clean umxhq replace htdemucs for the melody path? |
+| `scripts/dev/sound_component_research/onnx/summ.py` | Summarise a results JSONL: median of numeric fields grouped by the config keys. |
+| `scripts/dev/sound_component_research/onnx/umx_export.py` | Open-Unmix umxhq: export the four spectrogram models to ONNX (STFT stays outside the graph) and write torch |
 | `scripts/dev/sound_component_research/sections/bench_decode.py` | Decode cost through an ffmpeg subprocess (what the app would use for m4a): whole track vs one |
 | `scripts/dev/sound_component_research/sections/eval_sections.py` | Evaluation of extract.py output: three stabilities per scalar, hat grid shares, hat pattern |
 | `scripts/dev/sound_component_research/sections/extract.py` | Section-aware window measurement for the sound-component rework (hats grid position, pattern |

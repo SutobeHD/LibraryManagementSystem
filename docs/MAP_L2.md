@@ -5850,6 +5850,147 @@ Shared helpers for the sc-bench measurement spike.
 
 *(no module docstring)*
 
+### `scripts/dev/sound_component_research/onnx/bp_dump_windows.py`
+
+Dump the 30 s mix windows (22050 Hz mono) used by the earlier basic-pitch bench, so both envs read identical input.
+
+### `scripts/dev/sound_component_research/onnx/bp_min.py`
+
+Minimal basic-pitch pre / post-processing without importing `basic_pitch` (no TensorFlow, no pretty_midi).
+
+- `windows()` — (n,) -> (n_win, N_SAMPLES, 1) float32, half-overlap zero-padded in front like the original.
+- `unwrap()`
+- `run_model()` — -> note (frames, 88), onset (frames, 88).
+- `frame_times()`
+- `to_notes()` — Polyphonic decode incl.
+- `predict()`
+
+### `scripts/dev/sound_component_research/onnx/bp_probe.py`
+
+basic-pitch nmp.onnx with the minimal pre/post (bp_min) vs the official package output.
+
+- `match()` — Greedy note match: same MIDI pitch, onset within tol s.
+
+### `scripts/dev/sound_component_research/onnx/bp_ref_official.py`
+
+Reference: official basic_pitch 0.4.0 predict() (ONNX backend) on the dumped windows.
+
+### `scripts/dev/sound_component_research/onnx/clap_dump_48k.py`
+
+Dump the 48 kHz mono mix of the 6 tracks (temporary, tmp/ only) so torch env and onnx env embed identical samples.
+
+### `scripts/dev/sound_component_research/onnx/clap_export.py`
+
+Export the CLAP audio tower (+ projection) of laion/clap-htsat-unfused to ONNX and write torch reference
+
+- `AudioTower`
+- `  AudioTower.forward()`
+
+### `scripts/dev/sound_component_research/onnx/clap_fe_min.py`
+
+CLAP log-mel features without transformers / torch: mirrors `ClapFeatureExtractor` for
+
+- `fit()`
+- `logmel()` — mono float (n,) @48 kHz -> (1001, 64) float32 dB.
+- `features()` — list of mono windows -> (n, 1, 1001, 64) float32 = ONNX `input_features`.
+
+### `scripts/dev/sound_component_research/onnx/clap_probe.py`
+
+CLAP audio tower ONNX: feature parity (numpy/librosa vs HF extractor), embedding parity vs torch, speed.
+
+- `cos()`
+- `run()`
+
+### `scripts/dev/sound_component_research/onnx/dml_placement.py`
+
+Count how many graph nodes DirectML takes vs CPU fallback (verbose session log parsed from stderr).
+
+### `scripts/dev/sound_component_research/onnx/htd_conv1d_to_2d.py`
+
+DirectML workaround attempt: rewrite every 1-D Conv / ConvTranspose of htdemucs_core.onnx as a 2-D op with a
+
+### `scripts/dev/sound_component_research/onnx/htd_debug_outputs.py`
+
+Add intermediate tensors as graph outputs (torch env has `onnx`): python htd_debug_outputs.py <models_dir>.
+
+### `scripts/dev/sound_component_research/onnx/htd_dml_bisect.py`
+
+First tensor where DirectML leaves the CPU result (needs htdemucs_core_debug.onnx from htd_debug_outputs.py).
+
+### `scripts/dev/sound_component_research/onnx/htd_dml_diag.py`
+
+Why does htdemucs_core.onnx diverge on DirectML?
+
+### `scripts/dev/sound_component_research/onnx/htd_export.py`
+
+htdemucs (official demucs 4.1.0 weights from dl.fbaipublicfiles.com) -> ONNX core network.
+
+- `get_demucs()`
+- `Core` — HTDemucs.forward without _spec / _magnitude / _mask / _ispec (body copied from demucs 4.1.0 htdemuc…
+- `  Core.forward()`
+
+### `scripts/dev/sound_component_research/onnx/melody_e2e.py`
+
+End-to-end melody path on onnxruntime only: separation (`other`) -> basic-pitch on 4 x 30 s windows.
+
+### `scripts/dev/sound_component_research/onnx/microbench.py`
+
+Best-case forward time of one ONNX graph: N runs on fixed random input, report min / median (the minimum is robust
+
+### `scripts/dev/sound_component_research/onnx/oc_common.py`
+
+Shared helpers for the ONNX probe (B0-1).
+
+- `load_tracks()`
+- `load_audio()` — -> float32 (2, n) at sr.
+- `PeakRSS`
+- `  PeakRSS.mb()`
+- `Timer`
+- `sys_load()` — System-wide CPU % (other agents run benchmarks concurrently) - recorded next to every timing.
+- `gpu_state()` — -> (util %, MiB used) from nvidia-smi, or (None, None).
+- `gpu_wait()` — Poll until GPU utilisation < limit (another agent shares the GPU).
+- `VramPeak` — Samples nvidia-smi used memory (whole GPU, MiB) in a thread; .delta = peak - baseline.
+- `  VramPeak.delta()`
+- `session()` — onnxruntime session.
+- `env_info()`
+- `emit()`
+- `si_sdr()` — Scale-invariant SDR in dB over flattened arrays.
+
+### `scripts/dev/sound_component_research/onnx/sep_dump_mix.py`
+
+Dump the 44.1 kHz stereo mixes (temporary, tmp/ only) so torch env and onnx env separate identical samples.
+
+### `scripts/dev/sound_component_research/onnx/sep_min.py`
+
+Source separation on onnxruntime + numpy / librosa only (no torch): STFT / iSTFT + chunking outside the graph.
+
+- `umx_other()` — -> (2, n) float32 `other` stem.
+- `htd_segment()` — seg float32 (2, SEG) -> (4, 2, SEG).
+- `htdemucs()` — -> (4, 2, n) float32 in HTD_SOURCES order.
+
+### `scripts/dev/sound_component_research/onnx/sep_probe.py`
+
+Separation on ONNX: parity vs torch references (SI-SDR) + speed.
+
+### `scripts/dev/sound_component_research/onnx/sep_quality.py`
+
+Can licence-clean umxhq replace htdemucs for the melody path?
+
+- `f1()`
+- `pc_hist()`
+- `cos()`
+
+### `scripts/dev/sound_component_research/onnx/summ.py`
+
+Summarise a results JSONL: median of numeric fields grouped by the config keys.
+
+### `scripts/dev/sound_component_research/onnx/umx_export.py`
+
+Open-Unmix umxhq: export the four spectrogram models to ONNX (STFT stays outside the graph) and write torch
+
+- `UmxWrap` — OpenUnmix.forward (openunmix 1.3.0) with trace-friendly reshapes: the stock forward reads
+- `  UmxWrap.forward()`
+
 ### `scripts/dev/sound_component_research/sections/bench_decode.py`
 
 Decode cost through an ffmpeg subprocess (what the app would use for m4a): whole track vs one
