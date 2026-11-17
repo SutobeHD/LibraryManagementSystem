@@ -12,6 +12,9 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "scripts"))
 
+# The reader parses with pyrekordbox, which CI does not install on Linux runners.
+pytest.importorskip("pyrekordbox", reason="ANLZ parser not installed")
+
 import library_measure_anlz as lma  # noqa: E402
 
 # --------------------------------------------------------------------------- tag builders
