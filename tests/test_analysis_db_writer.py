@@ -296,7 +296,7 @@ def test_track_without_an_analysis_data_path_is_refused_before_any_dsp(tmp_path,
     master = _RecordingMasterDb(str(share), {"9": None})
     writer = AnalysisDBWriter(_LiveDBWith({"9": {"BPM": 0, "path": _audio_file(tmp_path)}}, master))
     ran: list[str] = []
-    monkeypatch.setattr(writer, "_run_analysis", lambda p: ran.append(p) or dict(_ANALYSIS))
+    monkeypatch.setattr(writer, "_run_analysis", lambda p, depth: ran.append(p) or dict(_ANALYSIS))
 
     result = writer.analyze_and_save("9", force=True)
 
@@ -310,7 +310,7 @@ def test_track_without_an_analysis_data_path_is_refused_before_any_dsp(tmp_path,
 def test_failed_dat_write_leaves_master_db_untouched(tmp_path, monkeypatch):
     master = _RecordingMasterDb(str(tmp_path / "share"), {"9": _REL})
     writer = AnalysisDBWriter(_LiveDBWith({"9": {"BPM": 0, "path": _audio_file(tmp_path)}}, master))
-    monkeypatch.setattr(writer, "_run_analysis", lambda p: dict(_ANALYSIS))
+    monkeypatch.setattr(writer, "_run_analysis", lambda p, depth: dict(_ANALYSIS))
     # write_anlz_files swallows each file's failure; a missing "dat" key is the signal.
     monkeypatch.setattr("app.anlz_writer.write_anlz_files", lambda **kw: {"ext": "x.EXT"})
 
@@ -325,7 +325,7 @@ def test_writes_into_the_recorded_dir_then_flags_the_row(tmp_path, monkeypatch):
     share = tmp_path / "share"
     master = _RecordingMasterDb(str(share), {"9": _REL})
     writer = AnalysisDBWriter(_LiveDBWith({"9": {"BPM": 0, "path": _audio_file(tmp_path)}}, master))
-    monkeypatch.setattr(writer, "_run_analysis", lambda p: dict(_ANALYSIS))
+    monkeypatch.setattr(writer, "_run_analysis", lambda p, depth: dict(_ANALYSIS))
     seen: dict = {}
 
     def _fake_write(**kw):
@@ -389,7 +389,7 @@ def test_refused_db_write_is_an_error_result_and_leaves_the_cache(tmp_path, monk
 
     master = _RefusingMasterDb(str(tmp_path / "share"), {"9": _REL})
     writer = AnalysisDBWriter(_LiveDBWith({"9": {"BPM": 0, "path": _audio_file(tmp_path)}}, master))
-    monkeypatch.setattr(writer, "_run_analysis", lambda p: dict(_ANALYSIS))
+    monkeypatch.setattr(writer, "_run_analysis", lambda p, depth: dict(_ANALYSIS))
     monkeypatch.setattr(
         "app.anlz_writer.write_anlz_files",
         lambda **kw: {"dat": os.path.join(kw["anlz_dir"], "ANLZ0000.DAT")},
@@ -434,10 +434,10 @@ class _FakePool:
         self.outcome = outcome
         self.submitted: list[tuple] = []
 
-    def submit(self, fn, *args):
+    def submit(self, fn, *args, **kwargs):
         from concurrent.futures import Future
 
-        self.submitted.append((fn, args))
+        self.submitted.append((fn, args, kwargs))
         fut: Future = Future()
         if isinstance(self.outcome, BaseException):
             fut.set_exception(self.outcome)
@@ -456,7 +456,9 @@ def test_analysis_runs_in_the_worker_pool_not_the_sidecar(monkeypatch):
     out = AnalysisDBWriter(object())._run_analysis("x.mp3")
 
     assert out == {"bpm": 124.0}
-    assert pool.submitted == [(analysis_engine.run_full_analysis, ("x.mp3",))]
+    assert pool.submitted == [
+        (analysis_engine.run_full_analysis, ("x.mp3",), {"depth": "rekordbox"})
+    ]
 
 
 def test_a_crashed_worker_drops_the_pool_for_the_next_track(monkeypatch):
@@ -481,7 +483,7 @@ def test_rewrites_a_rekordbox_reanalysis_under_its_recorded_file_name(tmp_path, 
     rel = "/PIONEER/USBANLZ/72a/fb195-5909/ANLZ0001.DAT"
     master = _RecordingMasterDb(str(tmp_path / "share"), {"9": rel})
     writer = AnalysisDBWriter(_LiveDBWith({"9": {"BPM": 0, "path": _audio_file(tmp_path)}}, master))
-    monkeypatch.setattr(writer, "_run_analysis", lambda p: dict(_ANALYSIS))
+    monkeypatch.setattr(writer, "_run_analysis", lambda p, depth: dict(_ANALYSIS))
     seen: dict = {}
 
     def _fake_write(**kw):
@@ -502,7 +504,7 @@ def test_key_failure_after_the_row_write_keeps_the_cache_on_the_new_bpm(tmp_path
 
     master = _KeyRefusingMasterDb(str(tmp_path / "share"), {"9": _REL})
     writer = AnalysisDBWriter(_LiveDBWith({"9": {"BPM": 0, "path": _audio_file(tmp_path)}}, master))
-    monkeypatch.setattr(writer, "_run_analysis", lambda p: dict(_ANALYSIS))
+    monkeypatch.setattr(writer, "_run_analysis", lambda p, depth: dict(_ANALYSIS))
     monkeypatch.setattr(
         "app.anlz_writer.write_anlz_files",
         lambda **kw: {"dat": os.path.join(kw["anlz_dir"], "ANLZ0000.DAT")},
@@ -513,3 +515,36 @@ def test_key_failure_after_the_row_write_keeps_the_cache_on_the_new_bpm(tmp_path
     assert result["reason"] == "db_update_failed"
     assert master.writes == ["update_content(9, analysed=105)"]  # BPM landed
     assert writer.live_db.tracks["9"]["BPM"] == 124.0  # so the cache shows it
+
+
+# --- depth -------------------------------------------------------------------
+
+
+def test_the_worker_gets_the_requested_depth(monkeypatch):
+    from app import analysis_engine
+
+    pool = _FakePool({"bpm": 124.0})
+    monkeypatch.setattr(analysis_engine.AnalysisEngine, "get_executor", lambda: pool)
+
+    AnalysisDBWriter(object())._run_analysis("x.mp3", "high")
+
+    assert pool.submitted == [(analysis_engine.run_full_analysis, ("x.mp3",), {"depth": "high"})]
+
+
+def test_batch_depth_reaches_every_track_without_a_settings_read(tmp_path, monkeypatch):
+    """The route resolves depth once; the writer only threads it through."""
+    master = _RecordingMasterDb(str(tmp_path / "share"), {"9": _REL})
+    writer = AnalysisDBWriter(_LiveDBWith({"9": {"BPM": 0, "path": _audio_file(tmp_path)}}, master))
+    seen: list[str] = []
+    monkeypatch.setattr(
+        writer, "_run_analysis", lambda p, depth: seen.append(depth) or dict(_ANALYSIS)
+    )
+    monkeypatch.setattr("app.anlz_writer.write_anlz_files", lambda **kw: {"dat": "x.DAT"})
+    monkeypatch.setattr(
+        "app.services.SettingsManager.load", lambda: pytest.fail("settings read in the writer")
+    )
+
+    out = list(writer.analyze_batch(["9"], force=True, depth="high"))
+
+    assert [o["status"] for o in out] == ["ok"]
+    assert seen == ["high"]

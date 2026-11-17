@@ -31,6 +31,7 @@ from typing import Any
 
 import numpy as np
 
+from .analysis_cache import DEFAULT_DEPTH, validate_depth
 from .analysis_settings import get_settings
 
 warnings.filterwarnings("ignore", category=UserWarning)
@@ -2190,13 +2191,14 @@ class AnalysisEngine:
         auto_hot_cues: bool | None = None,
         auto_memory_cues: bool | None = None,
         memory_cue_grid: bool | None = None,
+        depth: str = DEFAULT_DEPTH,
     ) -> dict[str, Any]:
         """
         Submit an analysis job to the background worker pool.
 
         quick=True runs only BPM+key (Pass 1) for fast UI response.
         auto_hot_cues / auto_memory_cues / memory_cue_grid = None → use
-        settings defaults.
+        settings defaults. depth = "rekordbox" | "high" (see run_full_analysis).
         """
         executor = cls.get_executor()
         if quick:
@@ -2211,6 +2213,7 @@ class AnalysisEngine:
                 auto_hot_cues,
                 auto_memory_cues,
                 memory_cue_grid,
+                depth,
             )
         cls._tasks[task_id] = future
         return {"task_id": task_id, "status": "processing", "pass": "quick" if quick else "full"}
@@ -2230,9 +2233,11 @@ class AnalysisEngine:
         return {"status": "processing"}
 
     @classmethod
-    def analyze_sync(cls, file_path: str, duration_cap: float | None = None) -> dict[str, Any]:
+    def analyze_sync(
+        cls, file_path: str, duration_cap: float | None = None, depth: str = DEFAULT_DEPTH
+    ) -> dict[str, Any]:
         """Synchronous analysis (blocks until done). For scripts/CLI."""
-        return run_full_analysis(file_path, duration_cap)
+        return run_full_analysis(file_path, duration_cap, depth=depth)
 
     @classmethod
     def capabilities(cls) -> dict[str, Any]:
@@ -2320,6 +2325,97 @@ def run_quick_analysis(
         return _fallback_result(file_path, str(e))
 
 
+_EXTRAS_IMPORT_WARNED = False
+
+
+def _generate_cues(
+    phrases: list[dict[str, Any]],
+    beats: list[dict[str, Any]],
+    duration: float,
+    auto_hot_cues: bool | None,
+    auto_memory_cues: bool | None,
+    memory_cue_grid: bool | None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Hot + memory cues from phrases/beats; ``None`` toggles fall back to the live settings."""
+    s_live = get_settings()
+    do_hot = s_live.auto_hot_cues if auto_hot_cues is None else auto_hot_cues
+    do_mem = s_live.auto_memory_cues if auto_memory_cues is None else auto_memory_cues
+    use_grid = s_live.memory_cue_grid if memory_cue_grid is None else memory_cue_grid
+    hot_cues = generate_hot_cues(phrases, beats, duration) if do_hot else []
+    if not do_mem:
+        memory_cues: list[dict[str, Any]] = []
+    elif use_grid:
+        memory_cues = generate_grid_memory_cues(beats)
+    else:
+        memory_cues = generate_memory_cues(phrases, beats)
+    return hot_cues, memory_cues
+
+
+def _refresh_cached_cues(
+    result: dict[str, Any],
+    auto_hot_cues: bool | None,
+    auto_memory_cues: bool | None,
+    memory_cue_grid: bool | None,
+) -> None:
+    """Re-derive the cue lists of a cache hit with the caller's current toggles.
+
+    The cached lists reflect the toggles of the run that produced the entry, so a
+    later call with different toggles would otherwise silently get the old cues.
+    """
+    if "phrases" not in result or "beats" not in result:
+        return
+    try:
+        result["hot_cues"], result["memory_cues"] = _generate_cues(
+            result.get("phrases") or [],
+            result.get("beats") or [],
+            float(result.get("duration") or 0.0),
+            auto_hot_cues,
+            auto_memory_cues,
+            memory_cue_grid,
+        )
+    except Exception as e:
+        logger.warning(
+            "op=cache_cues file=%s err=%s -- keeping cached cues",
+            os.path.basename(str(result.get("file", ""))),
+            e,
+        )
+
+
+def _compute_extras(
+    y_native: np.ndarray,
+    sr_native: int,
+    y: np.ndarray,
+    sr: int,
+    *,
+    lufs: float,
+    first_signal_ms: float,
+    file_path: str,
+) -> dict[str, Any] | None:
+    """High-depth extras (app.analysis_extras). None when the module is missing or fails."""
+    global _EXTRAS_IMPORT_WARNED
+    try:
+        from .analysis_extras import compute_extras
+    except ImportError as e:
+        if not _EXTRAS_IMPORT_WARNED:
+            logger.warning("op=extras module=app.analysis_extras unavailable err=%s", e)
+            _EXTRAS_IMPORT_WARNED = True
+        return None
+    try:
+        return compute_extras(
+            y_native,
+            sr_native,
+            y,
+            sr,
+            lufs=lufs,
+            first_signal_ms=first_signal_ms,
+            file_path=file_path,
+            sample_rate_meta=sr_native,
+        )
+    except Exception as e:
+        logger.warning("op=extras file=%s err=%s", os.path.basename(file_path), e)
+        return None
+
+
 def run_full_analysis(
     file_path: str,
     duration_cap_arg: float | None = None,
@@ -2328,6 +2424,7 @@ def run_full_analysis(
     auto_hot_cues: bool | None = None,
     auto_memory_cues: bool | None = None,
     memory_cue_grid: bool | None = None,
+    depth: str = DEFAULT_DEPTH,
 ) -> dict[str, Any]:
     """
     Full analysis pipeline. Runs in a worker process.
@@ -2337,11 +2434,20 @@ def run_full_analysis(
     - waveform data (PWAV, PWV2, PWV3, PWV4, PWV5, PWV6, PWV7)
     - phrases (PSSI format)
     - tempo anchors (for dynamic grid / XML <TEMPO> tags)
-    - PVBR index, LUFS loudness
+    - PVBR index, LUFS loudness, ReplayGain, peak
+
+    depth:
+        "rekordbox" (default) → everything ANLZ / USB export needs plus
+                lufs / replay_gain / peak; ``stereo``, ``mood``, ``genre_hint``
+                and ``extras`` are None.
+        "high"   → additionally stereo image, mood / genre hint and the
+                Stage-E extras (``app.analysis_extras.compute_extras``).
+        Anything else raises ValueError. The result carries ``"depth"``.
 
     When use_cache is True (default), a successful prior run for the same
-    file (matching mtime + size + analyzer version) is returned without
-    re-analyzing. Pass use_cache=False to force re-analysis.
+    file (matching mtime + size + analyzer version) at a depth >= ``depth``
+    is returned without re-analyzing; its cue lists are re-derived with the
+    current cue toggles. Pass use_cache=False to force re-analysis.
 
     auto_hot_cues / auto_memory_cues:
         None  → use settings (default True for both)
@@ -2360,6 +2466,9 @@ def run_full_analysis(
     progress_callback(stage_name, percent_int) is invoked at stage boundaries.
     """
 
+    validate_depth(depth)
+    high = depth == "high"
+
     def emit(stage: str, pct: int):
         if progress_callback:
             with contextlib.suppress(Exception):
@@ -2370,9 +2479,10 @@ def run_full_analysis(
         try:
             from .analysis_cache import get_default_cache
 
-            cached = get_default_cache().get(file_path)
+            cached = get_default_cache().get(file_path, min_depth=depth)
             if cached is not None:
                 cached["cache_hit"] = True
+                _refresh_cached_cues(cached, auto_hot_cues, auto_memory_cues, memory_cue_grid)
                 emit("cache_hit", 100)
                 return cached
         except Exception as e:
@@ -2394,10 +2504,11 @@ def run_full_analysis(
         # Down-conversion to 44.1k mono happens below for beat/key analyses.
         y_native, sr_native = librosa.load(file_path, sr=None, mono=False, duration=duration_cap)
 
-        # Track stereo info before mono-down-mix
+        # Track stereo info before mono-down-mix (high depth only)
         stereo_features = None
         if y_native.ndim == 2 and y_native.shape[0] == 2:
-            stereo_features = compute_stereo_features(y_native, sr_native)
+            if high:
+                stereo_features = compute_stereo_features(y_native, sr_native)
             y_mono = librosa.to_mono(y_native)
         else:
             # Already mono (1D) or unexpected shape
@@ -2479,30 +2590,40 @@ def run_full_analysis(
             lufs = calculate_lufs(y, sr)
         replay_gain = calculate_replay_gain(lufs)
 
-        emit("mood", 94)
-        mood_features = detect_mood(y, sr, beat_result["bpm"], lufs)
-        genre_hint = hint_genre(
-            beat_result["bpm"], mood_features["brightness"], mood_features["texture"]
-        )
+        mood_features: dict[str, Any] | None = None
+        genre_hint: str | None = None
+        if high:
+            emit("mood", 94)
+            mood_features = detect_mood(y, sr, beat_result["bpm"], lufs)
+            genre_hint = hint_genre(
+                beat_result["bpm"], mood_features["brightness"], mood_features["texture"]
+            )
 
         emit("cues", 95)
-        # -- Auto-generate Hot + Memory Cues (respecting toggles) ---------
-        s_live = get_settings()
-        do_hot = s_live.auto_hot_cues if auto_hot_cues is None else auto_hot_cues
-        do_mem = s_live.auto_memory_cues if auto_memory_cues is None else auto_memory_cues
-        use_grid = s_live.memory_cue_grid if memory_cue_grid is None else memory_cue_grid
-        hot_cues = (
-            generate_hot_cues(phrase_result, beat_result["beats"], duration) if do_hot else []
+        hot_cues, memory_cues = _generate_cues(
+            phrase_result,
+            beat_result["beats"],
+            duration,
+            auto_hot_cues,
+            auto_memory_cues,
+            memory_cue_grid,
         )
-        if not do_mem:
-            memory_cues = []
-        elif use_grid:
-            memory_cues = generate_grid_memory_cues(beat_result["beats"])
-        else:
-            memory_cues = generate_memory_cues(phrase_result, beat_result["beats"])
 
         # Peak level
         peak = round(float(np.max(np.abs(y))), 4)
+
+        extras: dict[str, Any] | None = None
+        if high:
+            emit("extras", 96)
+            extras = _compute_extras(
+                y_native,
+                sr_native,
+                y,
+                sr,
+                lufs=lufs,
+                first_signal_ms=first_signal_t * 1000.0,
+                file_path=file_path,
+            )
         emit("finalize", 98)
 
         result = {
@@ -2546,14 +2667,17 @@ def run_full_analysis(
             "peak": peak,
             # -- Stereo Image --
             "stereo": stereo_features,
-            # -- Mood / Genre Hints --
+            # -- Mood / Genre Hints (high depth only) --
             "mood": mood_features,
             "genre_hint": genre_hint,
+            # -- Stage-E extras (high depth only) --
+            "extras": extras,
             # -- Status --
             "status": "ok",
             "error": None,
             "cache_hit": False,
             "pass": "full",
+            "depth": depth,
         }
 
         # -- Persist to cache (full-track analyses only) ------------------
@@ -2615,6 +2739,7 @@ def _fallback_result(file_path: str, error: str) -> dict[str, Any]:
             "spectral_rolloff": 0.0,
         },
         "genre_hint": "Unknown",
+        "extras": None,
         "status": "error",
         "error": error,
     }

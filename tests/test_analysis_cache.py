@@ -12,10 +12,18 @@ import os
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-from app.analysis_cache import AnalysisCache, _json_default  # noqa: E402
+from app.analysis_cache import (  # noqa: E402
+    ANALYSIS_VERSION,
+    DEPTH_RANK,
+    AnalysisCache,
+    _json_default,
+    validate_depth,
+)
 
 
 def _make(tmp_path):
@@ -29,7 +37,8 @@ def test_put_get_roundtrip(tmp_path):
     assert c.get(str(src)) is None  # cold miss
     c.put(str(src), {"bpm": 128.0, "key": "8A"})
     hit = c.get(str(src))
-    assert hit == {"bpm": 128.0, "key": "8A"}
+    # a depth-less result is stored at the lowest depth, and the hit carries it
+    assert hit == {"bpm": 128.0, "key": "8A", "depth": "rekordbox"}
 
 
 def test_get_miss_after_file_changes(tmp_path):
@@ -117,3 +126,133 @@ def test_json_default_handles_numpy():
     assert _json_default(np.array([1, 2])) == [1, 2]
     # round-trips through json.dumps with the default hook
     assert json.dumps({"a": np.int64(7)}, default=_json_default) == '{"a": 7}'
+
+
+# ---------------------------------------------------------------------------
+# Depth-aware entries (ANALYSIS_VERSION 4)
+# ---------------------------------------------------------------------------
+
+
+def _src(tmp_path, name="song.wav", size=2048):
+    f = tmp_path / name
+    f.write_bytes(b"\x00" * size)
+    return str(f)
+
+
+def test_version_bumped_to_4_for_depth_entries():
+    assert ANALYSIS_VERSION == 4
+    assert DEPTH_RANK == {"rekordbox": 0, "high": 1}
+
+
+def test_validate_depth_rejects_unknown_values():
+    assert validate_depth("rekordbox") == "rekordbox"
+    assert validate_depth("high") == "high"
+    for bad in ("fast", "standard", "", None):
+        with pytest.raises(ValueError):
+            validate_depth(bad)  # type: ignore[arg-type]
+
+
+def test_get_rejects_an_unknown_min_depth(tmp_path):
+    c = _make(tmp_path)
+    with pytest.raises(ValueError):
+        c.get(_src(tmp_path), min_depth="thorough")
+
+
+def test_high_entry_satisfies_both_depths(tmp_path):
+    src = _src(tmp_path)
+    c = _make(tmp_path)
+    c.put(src, {"bpm": 128.0, "depth": "high", "extras": {"e1": 1}})
+    assert c.get(src, min_depth="rekordbox")["depth"] == "high"
+    assert c.get(src, min_depth="high")["extras"] == {"e1": 1}
+    assert c._index[os.path.abspath(src)]["depth"] == "high"
+
+
+def test_rekordbox_entry_never_answers_a_high_request(tmp_path):
+    src = _src(tmp_path)
+    c = _make(tmp_path)
+    c.put(src, {"bpm": 128.0, "depth": "rekordbox"})
+    assert c.get(src, min_depth="rekordbox") is not None
+    assert c.get(src, min_depth="high") is None
+    assert c.get(src) is not None  # default min_depth is rekordbox
+
+
+def test_entry_without_depth_is_a_miss(tmp_path):
+    """A version-4 index entry that lost its depth (hand-edited) must not hit."""
+    src = _src(tmp_path)
+    c = _make(tmp_path)
+    c.put(src, {"bpm": 1.0, "depth": "high"})
+    key = os.path.abspath(src)
+    del c._index[key]["depth"]
+    c._save_index()
+    c2 = AnalysisCache(str(tmp_path / "cache"))
+    assert c2.get(src) is None
+
+
+def test_rekordbox_put_does_not_downgrade_a_valid_high_entry(tmp_path):
+    src = _src(tmp_path)
+    c = _make(tmp_path)
+    c.put(src, {"bpm": 128.0, "depth": "high", "mood": {"mood": "Dark"}})
+    c.put(src, {"bpm": 128.0, "depth": "rekordbox", "mood": None})
+    hit = c.get(src, min_depth="high")
+    assert hit is not None
+    assert hit["mood"] == {"mood": "Dark"}
+    assert c._index[os.path.abspath(src)]["depth"] == "high"
+
+
+def test_rekordbox_put_replaces_a_high_entry_once_the_file_changed(tmp_path):
+    src = _src(tmp_path)
+    c = _make(tmp_path)
+    c.put(src, {"bpm": 128.0, "depth": "high"})
+    Path(src).write_bytes(b"\x01" * 4096)  # new size -> the high entry is stale
+    c.put(src, {"bpm": 130.0, "depth": "rekordbox"})
+    assert c.get(src, min_depth="high") is None
+    assert c.get(src, min_depth="rekordbox")["bpm"] == 130.0
+
+
+def test_high_put_upgrades_a_rekordbox_entry(tmp_path):
+    src = _src(tmp_path)
+    c = _make(tmp_path)
+    c.put(src, {"bpm": 128.0, "depth": "rekordbox"})
+    c.put(src, {"bpm": 128.0, "depth": "high"})
+    assert c.get(src, min_depth="high")["depth"] == "high"
+
+
+def test_put_with_an_unknown_depth_is_not_cached(tmp_path):
+    src = _src(tmp_path)
+    c = _make(tmp_path)
+    c.put(src, {"bpm": 128.0, "depth": "fast"})
+    assert c.get(src) is None
+    assert os.path.abspath(src) not in c._index
+
+
+def test_old_version_entries_miss_regardless_of_depth(tmp_path):
+    src = _src(tmp_path)
+    c = _make(tmp_path)
+    c.put(src, {"bpm": 1.0, "depth": "high"})
+    c._index[os.path.abspath(src)]["version"] = 3
+    assert c.get(src) is None
+
+
+def test_payload_depth_is_checked_not_just_the_index(tmp_path):
+    """Cross-process: a worker with a stale index can rewrite the shared gz at a
+    shallower depth behind another worker's 'high' index entry."""
+    import gzip
+
+    src = _src(tmp_path)
+    c = _make(tmp_path)
+    c.put(src, {"bpm": 128.0, "depth": "high", "extras": {"e1": 1}})
+    cache_file = c.cache_dir / c._index[os.path.abspath(src)]["cache_id"]
+    with gzip.open(cache_file, "wt", encoding="utf-8") as f:
+        json.dump({"bpm": 128.0, "depth": "rekordbox", "extras": None}, f)
+    assert c.get(src, min_depth="high") is None
+    assert c.get(src, min_depth="rekordbox")["depth"] == "rekordbox"
+
+
+def test_unhashable_depth_values_on_disk_are_a_miss_not_a_crash(tmp_path):
+    src = _src(tmp_path)
+    c = _make(tmp_path)
+    c.put(src, {"bpm": 1.0, "depth": "high"})
+    c._index[os.path.abspath(src)]["depth"] = ["high"]
+    assert c.get(src) is None
+    c.put(src, {"bpm": 1.0, "depth": ["high"]})  # refused, no TypeError
+    assert c._index[os.path.abspath(src)]["depth"] == ["high"]  # untouched

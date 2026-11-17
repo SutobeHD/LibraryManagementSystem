@@ -16,6 +16,7 @@ import {
     Copy,
     Tag,
     UserPlus,
+    Activity,
 } from 'lucide-react';
 import api from '../api/api';
 import toast from 'react-hot-toast';
@@ -23,7 +24,8 @@ import { confirmModal } from './ConfirmModal';
 import { promptModal } from './PromptModal';
 import { assignArtistModal } from './artistHub/AssignArtistModal';
 import { log } from '../utils/log';
-import { TRACK_TABLE_TEXT_COL_MIN_PX } from '../config/constants';
+import { ANALYZE_FULL_TIMEOUT_MS, TRACK_TABLE_TEXT_COL_MIN_PX } from '../config/constants';
+import { askAnalysisDepth } from './analysisDepth';
 import { openExternal } from '../utils/openExternal';
 import { useVirtualRows } from '../hooks/useVirtualRows';
 
@@ -926,6 +928,34 @@ const TrackContextMenuPopup = ({
         }
         setContextMenu(null);
     };
+    const handleAnalyze = async () => {
+        setContextMenu(null);
+        const id = t.id || t.ID;
+        const depth = await askAnalysisDepth({
+            subject: `${t.Artist || '?'} - ${t.Title || '?'}`,
+        });
+        if (!depth) return;
+        const toastId = toast.loading(`Analysiere: ${t.Title || id}`);
+        try {
+            const res = await api.post(
+                `/api/track/${id}/analyze-full`,
+                { depth },
+                { timeout: ANALYZE_FULL_TIMEOUT_MS }
+            );
+            const data = res.data?.data || {};
+            const updates = {};
+            if (data.bpm) updates.BPM = data.bpm;
+            if (data.key) updates.Key = data.key;
+            if (Object.keys(updates).length) onPatched?.(t, updates);
+            toast.success(`Analyse fertig: ${data.bpm ?? '?'} BPM, ${data.key ?? '?'}`, {
+                id: toastId,
+            });
+        } catch (e) {
+            toast.error('Analyse fehlgeschlagen: ' + (e.response?.data?.detail || e.message), {
+                id: toastId,
+            });
+        }
+    };
 
     return (
         <div
@@ -962,6 +992,13 @@ const TrackContextMenuPopup = ({
                 className="w-full flex items-center gap-3 px-4 py-2 hover:bg-mx-hover text-[12px] text-ink-secondary hover:text-blue-400 transition-colors text-left"
             >
                 <Tag size={14} /> Metadaten (BPM/Key)
+            </button>
+            <button
+                onClick={handleAnalyze}
+                disabled={!trackPath}
+                className="w-full flex items-center gap-3 px-4 py-2 hover:bg-mx-hover text-[12px] text-ink-secondary hover:text-amber2 transition-colors text-left disabled:opacity-30"
+            >
+                <Activity size={14} /> Analysieren…
             </button>
             <button
                 onClick={handleReveal}

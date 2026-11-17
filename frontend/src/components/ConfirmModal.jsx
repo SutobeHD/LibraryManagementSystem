@@ -6,6 +6,7 @@ import { X, Check, AlertTriangle } from 'lucide-react';
 // instance fields every confirmModal() call from anywhere in the app.
 let pushRequest = null;
 const pendingQueue = [];
+let nextSeq = 0;
 
 /**
  * Promise-based replacement for window.confirm().
@@ -19,6 +20,9 @@ const pendingQueue = [];
  *   });
  *
  * Resolves to true on confirm, false on cancel / Escape / click-outside.
+ *
+ * With `options` ([{ id, label, sub }]) the dialog shows a radio list preselected
+ * to `defaultOption` and resolves to the chosen id instead of true.
  */
 export function confirmModal(opts = {}) {
     return new Promise((resolve) => {
@@ -28,6 +32,9 @@ export function confirmModal(opts = {}) {
             confirmLabel: opts.confirmLabel || 'Confirm',
             cancelLabel: opts.cancelLabel || 'Cancel',
             danger: !!opts.danger,
+            options: Array.isArray(opts.options) && opts.options.length ? opts.options : null,
+            defaultOption: opts.defaultOption ?? null,
+            seq: ++nextSeq,
             resolve,
         };
         if (pushRequest) {
@@ -41,11 +48,16 @@ export function confirmModal(opts = {}) {
 
 const ConfirmDialog = ({ request, onDone }) => {
     const confirmBtnRef = useRef(null);
+    const [choice, setChoice] = useState(
+        request.options?.some((o) => o.id === request.defaultOption)
+            ? request.defaultOption
+            : (request.options?.[0]?.id ?? null)
+    );
 
     const handleConfirm = useCallback(() => {
-        request.resolve(true);
+        request.resolve(request.options ? choice : true);
         onDone();
-    }, [request, onDone]);
+    }, [request, choice, onDone]);
 
     const handleCancel = useCallback(() => {
         request.resolve(false);
@@ -95,9 +107,50 @@ const ConfirmDialog = ({ request, onDone }) => {
                     </button>
                 </div>
                 {request.message && (
-                    <p className="text-sm text-ink-secondary mb-6 whitespace-pre-wrap leading-relaxed">
+                    <p
+                        className={`text-sm text-ink-secondary whitespace-pre-wrap leading-relaxed ${
+                            request.options ? 'mb-3' : 'mb-6'
+                        }`}
+                    >
                         {request.message}
                     </p>
+                )}
+                {request.options && (
+                    <div className="mb-6 space-y-1.5">
+                        {request.options.map((opt) => {
+                            const on = opt.id === choice;
+                            return (
+                                <label
+                                    key={opt.id}
+                                    className={`flex items-start gap-3 px-3 py-2 rounded-xl border cursor-pointer transition-colors ${
+                                        on
+                                            ? 'bg-amber2/10 border-amber2/50'
+                                            : 'bg-mx-card/40 border-white/5 hover:border-amber2/30'
+                                    }`}
+                                >
+                                    <input
+                                        type="radio"
+                                        name="confirm-modal-option"
+                                        checked={on}
+                                        onChange={() => setChoice(opt.id)}
+                                        className="accent-amber2 mt-1"
+                                    />
+                                    <span className="flex-1 min-w-0">
+                                        <span
+                                            className={`block text-sm font-bold ${on ? 'text-white' : 'text-ink-secondary'}`}
+                                        >
+                                            {opt.label}
+                                        </span>
+                                        {opt.sub && (
+                                            <span className="block text-xs text-ink-muted mt-0.5 leading-relaxed">
+                                                {opt.sub}
+                                            </span>
+                                        )}
+                                    </span>
+                                </label>
+                            );
+                        })}
+                    </div>
                 )}
                 <div className="flex justify-end gap-3">
                     <button
@@ -106,11 +159,7 @@ const ConfirmDialog = ({ request, onDone }) => {
                     >
                         {request.cancelLabel}
                     </button>
-                    <button
-                        ref={confirmBtnRef}
-                        onClick={handleConfirm}
-                        className={confirmClasses}
-                    >
+                    <button ref={confirmBtnRef} onClick={handleConfirm} className={confirmClasses}>
                         <Check size={16} /> {request.confirmLabel}
                     </button>
                 </div>
@@ -133,7 +182,9 @@ export const ConfirmModalRoot = () => {
         if (pendingQueue.length) {
             setQueue((q) => [...q, ...pendingQueue.splice(0)]);
         }
-        return () => { pushRequest = null; };
+        return () => {
+            pushRequest = null;
+        };
     }, []);
 
     if (queue.length === 0) return null;
@@ -142,7 +193,7 @@ export const ConfirmModalRoot = () => {
     const handleDone = () => setQueue((q) => q.slice(1));
 
     return ReactDOM.createPortal(
-        <ConfirmDialog request={current} onDone={handleDone} />,
+        <ConfirmDialog key={current.seq} request={current} onDone={handleDone} />,
         document.body
     );
 };

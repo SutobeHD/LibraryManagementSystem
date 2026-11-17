@@ -1520,9 +1520,13 @@ class SoundCloudDownloader:
                     self._update_task(task_id, status="Analyzing", progress=90)
 
                 from .analysis_engine import run_full_analysis
+                from .services import SettingsManager
 
-                logger.info("[SC-DL] Analyzing (full pipeline): %s", file_path.name)
-                result = run_full_analysis(str(file_path))
+                depth = SettingsManager.analysis_depth()
+                logger.info(
+                    "[SC-DL] Analyzing (full pipeline, depth=%s): %s", depth, file_path.name
+                )
+                result = run_full_analysis(str(file_path), depth=depth)
                 bpm = result.get("bpm")
                 key = result.get("key")
                 conf = result.get("key_confidence", result.get("confidence"))

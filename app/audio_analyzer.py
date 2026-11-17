@@ -19,6 +19,8 @@ from concurrent.futures import Future, ProcessPoolExecutor
 from types import ModuleType
 from typing import Any, ClassVar
 
+from .analysis_cache import DEFAULT_DEPTH
+
 logger = logging.getLogger(__name__)
 
 
@@ -91,9 +93,9 @@ class AudioAnalyzer:
     Background worker pool for audio analysis.
 
     Delegates to AnalysisEngine (v2.0) for high-accuracy results.
-    The `mode` parameter is kept for backward compatibility:
-      - "accuracy" (default): Full analysis via AnalysisEngine
-      - "speed": Lighter analysis (still uses AnalysisEngine but with duration cap)
+    ``depth`` = "rekordbox" | "high" selects how much the engine computes
+    (see run_full_analysis); ``duration_cap`` limits the decoded seconds and
+    bypasses the cache — explicit opt-in only.
     """
 
     _executor: ClassVar[ProcessPoolExecutor | None] = None
@@ -123,18 +125,21 @@ class AudioAnalyzer:
             cls._tasks.clear()
 
     @classmethod
-    def analyze_track(cls, task_id: str, file_path: str, mode: str = "accuracy") -> dict[str, Any]:
+    def analyze_track(
+        cls,
+        task_id: str,
+        file_path: str,
+        depth: str = DEFAULT_DEPTH,
+        duration_cap: float | None = None,
+    ) -> dict[str, Any]:
         """Submit an analysis job to the worker pool."""
         executor = cls.get_executor()
         engine = _load_engine()
 
         if engine is not None:
-            # Use the production engine
-            duration_cap = 120.0 if mode == "speed" else None
-            future = executor.submit(engine.run_full_analysis, file_path, duration_cap)
+            future = executor.submit(engine.run_full_analysis, file_path, duration_cap, depth=depth)
         else:
-            # Legacy fallback
-            future = executor.submit(cls._run_legacy_analysis, file_path, mode)
+            future = executor.submit(cls._run_legacy_analysis, file_path)
 
         cls._tasks[task_id] = future
         return {"task_id": task_id, "status": "processing"}
@@ -157,14 +162,18 @@ class AudioAnalyzer:
         return {"status": "processing"}
 
     @classmethod
-    def analyze_sync(cls, file_path: str, mode: str = "accuracy") -> dict[str, Any]:
+    def analyze_sync(
+        cls,
+        file_path: str,
+        depth: str = DEFAULT_DEPTH,
+        duration_cap: float | None = None,
+    ) -> dict[str, Any]:
         """Synchronous analysis. Blocks until done."""
         engine = _load_engine()
         if engine is not None:
-            duration_cap = 120.0 if mode == "speed" else None
-            result = engine.run_full_analysis(file_path, duration_cap)
+            result = engine.run_full_analysis(file_path, duration_cap, depth=depth)
             return cls._normalize_result(result)
-        return cls._run_legacy_analysis(file_path, mode)
+        return cls._run_legacy_analysis(file_path)
 
     @classmethod
     def capabilities(cls) -> dict[str, Any]:
@@ -203,16 +212,13 @@ class AudioAnalyzer:
                 if isinstance(b, dict) and "time_ms" in b
             ]
 
-        # Legacy field: "mode"
-        normalized.setdefault("mode", "accuracy")
-
         # Legacy field: "duration_analyzed"
         normalized.setdefault("duration_analyzed", result.get("duration", 0))
 
         return normalized
 
     @staticmethod
-    def _run_legacy_analysis(file_path: str, mode: str) -> dict[str, Any]:
+    def _run_legacy_analysis(file_path: str) -> dict[str, Any]:
         """
         Legacy fallback when analysis_engine is not available.
         Uses basic librosa for BPM detection.
@@ -222,7 +228,6 @@ class AudioAnalyzer:
                 "bpm": 128.0,
                 "key": "Unknown",
                 "beatgrid": [],
-                "mode": mode,
                 "error": "librosa not installed",
             }
 
@@ -257,7 +262,6 @@ class AudioAnalyzer:
                 "bpm": round(bpm, 2),
                 "key": "Unknown",
                 "beatgrid": beat_times.tolist(),
-                "mode": mode,
                 "duration_analyzed": librosa.get_duration(y=y, sr=sr),
                 "status": "ok",
                 "error": None,
@@ -269,7 +273,6 @@ class AudioAnalyzer:
                 "bpm": 128.0,
                 "key": "Unknown",
                 "beatgrid": [],
-                "mode": mode,
                 "error": str(e),
                 "status": "error",
             }
