@@ -5766,7 +5766,7 @@ Seeded stratified sample of 40 local tracks + Rekordbox PQTZ beat grids.
 
 - `norm_genre()`
 
-### `scripts/dev/sound_component_research/baseline/synth_test.py`
+### `scripts/dev/sound_component_research/baseline/synthetic_truth.py`
 
 Synthetic sanity check for the pickers / classifiers / decay estimators (known truth).
 
@@ -5831,24 +5831,6 @@ Shared helpers for the sc-bench measurement spike.
 - `get_demucs()` — Load via the demucs package's legacy remote repo = dl.fbaipublicfiles.com (sha256-checked).
 - `separate()` — wav_np float32 (2,n) @44.1k -> dict stem -> np float32 (2,n).
 - `emit()`
-
-### `scripts/dev/sound_component_research/models/debug_clap.py`
-
-*(no module docstring)*
-
-### `scripts/dev/sound_component_research/models/debug_clap2.py`
-
-*(no module docstring)*
-
-### `scripts/dev/sound_component_research/models/debug_clap3.py`
-
-*(no module docstring)*
-
-- `cos()`
-
-### `scripts/dev/sound_component_research/models/debug_crepe.py`
-
-*(no module docstring)*
 
 ### `scripts/dev/sound_component_research/onnx/bp_dump_windows.py`
 

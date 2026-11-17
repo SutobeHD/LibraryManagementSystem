@@ -411,7 +411,7 @@
 | `scripts/dev/sound_component_research/baseline/posthoc.py` | Post-hoc checks on the stored results (no audio access). |
 | `scripts/dev/sound_component_research/baseline/run.py` | Run the baseline features on the sample. |
 | `scripts/dev/sound_component_research/baseline/select_sample.py` | Seeded stratified sample of 40 local tracks + Rekordbox PQTZ beat grids. |
-| `scripts/dev/sound_component_research/baseline/synth_test.py` | Synthetic sanity check for the pickers / classifiers / decay estimators (known truth). |
+| `scripts/dev/sound_component_research/baseline/synthetic_truth.py` | Synthetic sanity check for the pickers / classifiers / decay estimators (known truth). |
 | `scripts/dev/sound_component_research/baseline/tune_hats.py` | Label-free tuning of the high-band onset picker. |
 | `scripts/dev/sound_component_research/baseline/w8_compare.py` | W2b cross-check against the app's own whole-track numbers (audio_w8.jsonl, bass.share_60/120). |
 | `scripts/dev/sound_component_research/models/bench_basicpitch.py` | basic-pitch (ONNX backend, CPU) on the `other` stem 30 s window. |
@@ -420,10 +420,6 @@
 | `scripts/dev/sound_component_research/models/bench_features.py` | Per-stem cheap features after in-memory separation (GPU, default config). |
 | `scripts/dev/sound_component_research/models/bench_pitch.py` | torchcrepe (tiny/full) on the `other` stem, 30 s window, GPU vs CPU. |
 | `scripts/dev/sound_component_research/models/common.py` | Shared helpers for the sc-bench measurement spike. |
-| `scripts/dev/sound_component_research/models/debug_clap.py` | *(no module docstring)* |
-| `scripts/dev/sound_component_research/models/debug_clap2.py` | *(no module docstring)* |
-| `scripts/dev/sound_component_research/models/debug_clap3.py` | *(no module docstring)* |
-| `scripts/dev/sound_component_research/models/debug_crepe.py` | *(no module docstring)* |
 | `scripts/dev/sound_component_research/onnx/bp_dump_windows.py` | Dump the 30 s mix windows (22050 Hz mono) used by the earlier basic-pitch bench, so both envs read identical … |
 | `scripts/dev/sound_component_research/onnx/bp_min.py` | Minimal basic-pitch pre / post-processing without importing `basic_pitch` (no TensorFlow, no pretty_midi). |
 | `scripts/dev/sound_component_research/onnx/bp_probe.py` | basic-pitch nmp.onnx with the minimal pre/post (bp_min) vs the official package output. |
