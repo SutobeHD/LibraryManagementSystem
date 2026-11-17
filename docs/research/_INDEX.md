@@ -44,9 +44,10 @@ _(none)_
 _(none)_
 
 ### review
-- [review_sound-component-sorting.md](implement/review_sound-component-sorting.md) — Sort by sound components; plan revision 4 after rework A-C: analysis window from Rekordbox main phrases, off-beat share + hat-pattern similarity back, on-beat out with evidence, W1 / W5 confirmed on 60 fresh tracks, ONNX + licence probes done, model tier (melody, sound classes) measured and left out of the build; awaiting Plan-Reviewer (2026-11-17)
+_(none)_
 
 ### approvalgate ⛔ THE GATE
+- [approvalgate_sound-component-sorting.md](implement/approvalgate_sound-component-sorting.md) — ⛔ **AWAITING /approve** (reworked) — Sort by sound components; plan revision 4.1 after the user's gate reject 2026-11-13: analysis window from Rekordbox main phrases, off-beat column + hat-pattern similarity back, on-beat and "open hats" listed for the gate, bass / hat-sound similarity confirmed on 60 fresh tracks, acceptance on a 240-track set with control, audio scan 1.7-2.4 CPU-h, no new dependency; melody + sound classes measured and left out; 8 gate decisions; 16 build tasks + 3 measure-only; Plan-Reviewer PASS round 5 (2026-11-17)
 - [approvalgate_recording-booth.md](implement/approvalgate_recording-booth.md) — ⛔ **AWAITING /approve** (re-planned) — DJ-set recorder; **lead model now DDJ-GRV6** (4-channel / STEMS-native / GROOVE CIRCUIT + Sound-Color/Beat-FX + 4 decks) after gate-reject 2026-06-02. Plan re-scoped: GRV6 outline + full control map (stem-ISO/drum/FX), spike 1c extended (EQ + stem-ISO/sound-color/GROOVE-CIRCUIT on-the-wire), 4-deck timeline, 4-channel meters; mockup rebuilt 4-channel GRV6; 16 tasks (3 spikes + 10 core + 3 video); capture unchanged (class-MIDI → `midir`); live track-id unmet (PDL=Export-only) → post-hoc reconcile (2026-06-02)
 
 ### rework
