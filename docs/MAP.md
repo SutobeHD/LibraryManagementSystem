@@ -332,6 +332,8 @@
 | `scripts/check_attr_defined.py` | Fail if mypy reports any `attr-defined` error in app/. |
 | `scripts/compare_rekordbox.py` | compare_rekordbox.py — A/B accuracy harness: our engine vs Rekordbox. |
 | `scripts/dev/phrase_spike.py` | phrase_spike.py — manual P0 verification for the phrase memory-cue ANLZ write. |
+| `scripts/dev/rb_anlz_tags.py` | Raw Rekordbox ANLZ tag editing + MP3/FLAC container helpers (no pyrekordbox dependency). |
+| `scripts/dev/rb_format_copies.py` | Rekordbox format copies: mirror a playlist folder as AIFF / MP3 / FLAC copies. |
 | `scripts/dev/rbox_artist_merge_probe.py` | Probe rbox's artist/playlist write semantics against a COPY of a master.db. |
 | `scripts/dev/rescan_unreadable.py` | Re-scan only the rows marked unreadable in an audio_report.json. |
 | `scripts/dev/safe_format_swap.py` | safe_format_swap.py -- defensive m4a -> AIFF swap for ONE Rekordbox playlist. |

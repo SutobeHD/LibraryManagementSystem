@@ -4360,6 +4360,71 @@ phrase_spike.py — manual P0 verification for the phrase memory-cue ANLZ write.
 
 - `main()`
 
+### `scripts/dev/rb_anlz_tags.py`
+
+Raw Rekordbox ANLZ tag editing + MP3/FLAC container helpers (no pyrekordbox dependency).
+
+- `read_tags()`
+- `write_tags()`
+- `md5_file()`
+- `ppth_tag()` — Rekordbox 6+ stores only ``?/<filename>`` (UTF-16-BE, NUL-terminated).
+- `pvbr_tag()` — 400 zero entries + one trailing value: 0 for PCM/FLAC, ``frames*1152`` for MP3.
+- `pqtz_entries()` — (beat, tempo*100, time_ms) per beat.
+- `shift_pqtz()`
+- `shift_pqt2()` — PQT2 header carries first/last beat time at offsets 28 and 36.
+- `shift_wave()` — Prepend ``k`` zero entries to a PWV3/PWV5/PWV7 waveform (150 entries/s).
+- `pwv3_heights()`
+- `mp3_header()` — First frame offset + Xing/Info tag + LAME encoder string + delay/padding.
+- `rekordbox_mp3_view()` — How Rekordbox decodes this MP3 relative to ffmpeg's default (gapless) decode.
+- `flac_frames()` — (pts_samples, duration_samples, byte_pos) per FLAC frame.
+- `build_pvb2()` — Rekordbox's FLAC seek table: 400 x (u64 sample, u64 byte offset, u32 blocksize).
+- `patch_3ex()` — ``d2`` = own content ID, ``d3`` = md5 of own audio file; everything else untouched.
+
+### `scripts/dev/rb_format_copies.py`
+
+Rekordbox format copies: mirror a playlist folder as AIFF / MP3 / FLAC copies.
+
+- `log()`
+- `resolve_ffmpeg()`
+- `open_db()`
+- `rekordbox_running()`
+- `norm()`
+- `Ctx`
+- `  Ctx.dest_dir()`
+- `  Ctx.stage_dir()`
+- `  Ctx.load()`
+- `  Ctx.save()`
+- `probe_file()`
+- `astream()`
+- `has_cover()`
+- `is_lossless()`
+- `source_bits()`
+- `source_view()` — ffmpeg input args + samples to prepend so that ffmpeg reproduces Rekordbox's timeline.
+- `find_folder()`
+- `base_stem()`
+- `reconcile_copy_map()` — orig_cid -> copy_cid for target t, from state.json + rows found under the dest dir.
+- `cmd_plan()`
+- `run()`
+- `decode()`
+- `lag_of()` — Samples by which `new` is delayed vs `ref` (positive = later) + normalised correlation.
+- `mp3_bitrate()`
+- `build_cmd()`
+- `stage_anlz()`
+- `choose_name()` — Returns (dest path, reuse_existing_file).
+- `build_one()`
+- `cmd_build()`
+- `best_shift()` — Sample offset of audio `a` against Rekordbox's stored PWV3 heights `h` (150/s).
+- `cmd_verify()`
+- `fingerprint_contents()`
+- `fingerprint_playlists()`
+- `split_dir()`
+- `iso_utc()`
+- `make_copy()`
+- `cmd_apply()`
+- `cmd_check()`
+- `cmd_rollback()`
+- `main()`
+
 ### `scripts/dev/rbox_artist_merge_probe.py`
 
 Probe rbox's artist/playlist write semantics against a COPY of a master.db.

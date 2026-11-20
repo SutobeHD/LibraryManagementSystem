@@ -197,11 +197,14 @@ notes = "Spike ohne Aufrufer; läuft nur auf entschlüsselter Kopie."
 [[feature]]
 id = "hardwerk-format-copies"
 group = "Format-Kopien"
-name = "Kopien mit Grid-/Cue-Transfer"
-status = "idea"
-desc = "Beatgrid-, Hot- und Memory-Cue-Transfer Original -> MP3/AIFF-Kopie, mit automatischer Codec-Delay-Kompensation."
-related = ["format-converter", "mp3-bitrate-variants"]
-todo = ["Transfer per pyrekordbox als Feature", "Gapless-Delay automatisch (+1105 / LAME +1152)", "48 Hardwerk-MP3-Grids noch versetzt", "AIFF-Grids prüfen"]
+name = "Format-Kopien eines Rekordbox-Ordners (AIFF/MP3/FLAC)"
+status = "unmerged"
+branch = "feat/artist-hub"
+desc = "Spiegelt einen Playlist-Ordner als AIFF/MP3/FLAC-Kopien in Rekordbox: Grid/Cues/Key/Artwork/MyTags exakt, keine Neu-Analyse, Deltas bei Re-Run, Originale unberührt."
+paths = ["scripts/dev/rb_format_copies.py", "scripts/dev/rb_anlz_tags.py"]
+related = ["format-converter", "mp3-bitrate-variants", "format-converter-filetype-fix"]
+todo = ["Als App-Feature (Route + UI) statt Dev-Skript", "Verwaiste 16.10-AIFF/MP3-Dateien (nach Duplikat-Merge) neu registrieren oder löschen", "48 Hardwerk-MP3-Grids (Juli) noch versetzt"]
+notes = "Dev-Skript, System-Python (pyrekordbox 0.4.4). Gelaufen: 16.10 (3 Formate, 2026-10), Groove to go (MP3 320, 2026-11-20). Messungen + Rezept: Memory reference_beatgrid_transfer_pyrekordbox."
 
 # ── Abhängigkeiten ────────────────────────────────────────────────────────
 
