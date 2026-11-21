@@ -4398,6 +4398,7 @@ B9 regression: a USB sync writes EVERY selected track, not just the 16 template 
 - `no_analysis()`
 - `test_sync_writes_every_track()`
 - `test_small_sync_uses_template_slots_only()`
+- `test_failed_slot_repair_leaves_no_broken_row()` — A half-written row left behind makes every later content read fail.
 - `test_failed_growth_falls_back_to_template_cap()`
 
 ### `tests/test_onelibrary_wal_flush.py`

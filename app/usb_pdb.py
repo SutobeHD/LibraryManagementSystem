@@ -751,11 +751,12 @@ class PdbBuilder:
         empty data page made Rekordbox compute last_page=first+1 which
         contradicts F: drive's single-page layout for empty tables.
 
-        At most MAX_ROWS_PER_PAGE rows per page. Only 12-byte playlist
-        entries could exceed 255 (~284 fit), and a >255-row page needs a
-        different last-write header shape (rbxport: rekordbox 6.8.6 crashes
-        on the wrong one) that is not verified against our F: reference.
-        Smaller pages keep every page in the verified regime.
+        At most MAX_ROWS_PER_PAGE rows per page. Small rows can exceed 255
+        per page (12-byte playlist entries ~284, genre/label rows more), and
+        a >255-row page needs a different last-write header shape (rbxport:
+        rekordbox 6.8.6 crashes on the wrong one) that is not verified
+        against our F: reference. Smaller pages keep every page in the
+        verified regime.
         """
         if not rows:
             return []

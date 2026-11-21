@@ -10,6 +10,7 @@ hardware.
 from __future__ import annotations
 
 import gc
+import shutil
 import struct
 from pathlib import Path
 
@@ -231,6 +232,37 @@ def test_small_sync_uses_template_slots_only(tmp_path, no_analysis):
     stick.mkdir()
     _check_export(stick, source, _sync(stick, source))
     assert set(_read_onelibrary(stick)["rows"]) <= set(range(1, 17))
+
+
+class _RefusingDb:
+    """Real rbox handle whose `update_content` refuses — a failed slot repair."""
+
+    def __init__(self, db):
+        self._db = db
+
+    def __getattr__(self, name):
+        return getattr(self._db, name)
+
+    def update_content(self, _slot):
+        raise RuntimeError("refused")
+
+
+def test_failed_slot_repair_leaves_no_broken_row(tmp_path):
+    """A half-written row left behind makes every later content read fail."""
+    path = tmp_path / "exportLibrary.db"
+    shutil.copy2(OneLibraryUsbWriter.TEMPLATE_DB, path)
+    db = rbox.OneLibrary(str(path))
+    try:
+        new_id = max(c.id for c in db.get_contents()) + 1
+        assert OneLibraryUsbWriter._new_slot(_RefusingDb(db), 1, new_id) is None
+        assert len(db.get_contents()) == 16
+        slot = OneLibraryUsbWriter._new_slot(db, 1, new_id)
+        assert slot is not None and slot.id == new_id
+        assert slot.image_id not in {c.image_id for c in db.get_contents() if c.id != new_id}
+        assert len(db.get_contents()) == 17
+    finally:
+        del db
+        gc.collect()
 
 
 def test_failed_growth_falls_back_to_template_cap(tmp_path, no_analysis, monkeypatch):

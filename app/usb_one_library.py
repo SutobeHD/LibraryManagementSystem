@@ -1090,16 +1090,20 @@ class OneLibraryUsbWriter:
         try:
             created = db.create_content(f"/__placeholder__/{new_id}.mp3")
         except Exception as exc:
-            if "Unexpected null" not in str(exc):
-                logger.warning("[OneLibrary] create_content failed: %s", exc)
-                return None
+            # Decide on what is in the table, not on the message: whatever the
+            # error said, an unreadable row at new_id must be repaired or removed.
             try:
                 found = db.get_content_by_id(new_id)
             except Exception:
-                pass  # the half-written row, as expected
+                pass  # the half-written row ("Unexpected null …"), as expected
             else:
                 # None = nothing was inserted; a readable row is not ours.
-                logger.warning("[OneLibrary] No half-written row at id %d (%r)", new_id, found)
+                logger.warning(
+                    "[OneLibrary] create_content failed, no half-written row at id %d (%r): %s",
+                    new_id,
+                    found,
+                    exc,
+                )
                 return None
         else:
             new_id = int(created.id)  # create_content works: still fill it from the template
