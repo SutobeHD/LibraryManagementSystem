@@ -171,8 +171,9 @@ group = "Import"
 parent = "import-manager"
 name = "Import-Settings-Panel"
 status = "partial"
+test = "testen"
 desc = "Rechte Spalte im Import: Lossless/Lossy-Analyse, Zielformat, Safe-Delete."
-notes = "/api/library/quality-stats fehlt (zeigt hart 1247/892). Zielformat und Backup gehen nie ans Backend."
+notes = "Zielformat und Backup gehen nie ans Backend. Qualitäts-Zahlen kommen seit B16 von GET /api/library/quality-stats (nach Dateiendung, .m4a = lossy); vorher zeigte das Panel hart 1247/892."
 
 [[feature]]
 id = "folder-watcher"

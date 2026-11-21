@@ -138,8 +138,9 @@ const ImportView = ({ onSelectTrack, onImportComplete }) => {
             .then((res) => {
                 if (res.data) setQualityStats(res.data);
             })
-            .catch(() => {
-                setQualityStats({ lossless: 1247, lossy: 892, total: 2139 });
+            .catch((err) => {
+                console.error('[ImportView] quality-stats failed', err);
+                toast.error('Library-Qualität konnte nicht geladen werden.');
             });
     }, []);
 

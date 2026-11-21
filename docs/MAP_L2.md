@@ -916,6 +916,7 @@ Log redaction helpers — scrub absolute paths from log lines + tracebacks.
 - `format_swap_picker_mytags()` — MyTag list with track counts.
 - `format_swap_picker_subset_counts()` — Cheap pre-dry-run count + total source MB for a library subset.
 - `get_lib_status()`
+- `get_library_quality_stats()` — Lossless/lossy track counts of the loaded library, by file extension.
 - `set_lib_mode()`
 - `sync_lib()` — Persist the in-memory library.
 - `LoadLibReq`
@@ -4154,6 +4155,14 @@ Tests for app.library_format_swap.
 - `  TestMasterDbWriteLock.test_db_lock_is_the_global_write_lock()` — Not a second private RLock that only serialises this module.
 - `  TestMasterDbWriteLock.test_every_master_db_mutation_holds_the_lock()`
 - `  TestMasterDbWriteLock.test_rollback_db_restore_holds_the_lock()` — rollback() overwrites master.db wholesale via shutil.copy2.
+
+### `tests/test_library_quality_stats.py`
+
+GET /api/library/quality-stats — lossless/lossy counts by file extension (B16).
+
+- `facade()`
+- `test_counts_by_extension_without_auth()`
+- `test_no_library_loaded_returns_zeros()`
 
 ### `tests/test_library_source.py`
 
