@@ -3,7 +3,7 @@ slug: usb-onelibrary-track-limit
 title: Lift the 16-track cap of the USB export (exportLibrary.db + export.pdb)
 owner: claude
 created: 2026-11-21
-last_updated: 2026-11-21
+last_updated: 2026-11-22
 tags: [usb, onelibrary, pdb, cdj]
 related: []
 supersedes: []
@@ -17,6 +17,8 @@ superseded_by: []
 ## Lifecycle
 
 - 2026-11-21 — `implement/approvalgate_` — created interactively; idea from feature registry + B9 test, research + plan in one pass, waiting for user sign-off
+- 2026-11-22 — `implement/accepted_` — user approved in chat after rbox 0.3.1 probe: "A jetzt, Upgrade später"
+- 2026-11-22 — `implement/inprogress_` — implementation on `fix/usb-onelibrary-track-limit`
 
 ## Original Idea (verbatim — never edit)
 
@@ -53,6 +55,14 @@ Stick export writes ≤16 tracks. Cap = row count of `app/templates/exportLibrar
 - Writer pages arbitrarily (`_pages_for_rows`, no row/page cap). rbxport writes identical empty index pages (export.md §2.5 "same bytes as our writer") on rekordbox-7-style sticks → no evidence of a hard limit. Verdict: **unbelegt, kein Writer-Limit.** Perf on CDJ menus with big libraries = open, only hardware can tell.
 - Real new risk with >16 tracks: playlist-entry rows (12 B) reach **>255 rows/page** at ≥256 entries. rbxport #349: rekordbox 6.8.6 crashes on >255-row pages without its special header shape (export.md §2.3). Our header for that regime is unverified (§11 contradiction).
 - **Confidence:** medium (no hardware).
+
+### 2026-11-22 — rbox 0.3.1 probe (user request; throwaway venv, project `.venv` untouched)
+- `create_content` still raises "Unexpected null"; failed INSERT now rolled back (no half-row) → Option-A trick is 0.1.7-only.
+- `NewContent(path=...)` constructible; `insert_content` works once every non-null field is set (copied from a template row).
+- `OneLibrary(path)` now takes the rekordbox **directory**; explicit file = `OneLibrary.from_path()`. `rbox.one_library` deprecated → `rbox.onelib`.
+- New `DeviceLibrary` (export.pdb + exportExt.pdb read/write, `save()` atomic per file) — candidate to replace `usb_pdb.py`.
+- Full suite with 0.3.1 on override path: only the 3 OneLibrary-path tests fail, other 2556 green. Live master.db behaviour untested.
+- Decision: no bump in this change (shared `.venv` of parallel sessions, 15 rbox modules) → follow-up.
 
 ### 2026-11-21 — dependency landscape
 - No SQLCipher binding / AES lib in `.venv` (no `cryptography`, `sqlcipher3`, `pycryptodome`). PyPI: `rbox` 0.3.1, `sqlcipher3-wheels` 0.5.7.
@@ -130,7 +140,11 @@ after:  20 selected → exportLibrary.db 20 rows, export.pdb 20 rows
 
 ## Implementation Log
 
-_(after approval)_
+### 2026-11-22 — Implementation
+- Built: `_grow_slots` / `_new_slot` (create + repair, round-robin template clone, own image row), `numberOfContents` = written rows, PDB `MAX_ROWS_PER_PAGE = 255`.
+- Surprised: playlist links used the source index as `seq` → rbox rejects gaps ("Invalid sequence number"); one track missing on the stick emptied the rest of the playlist. Fixed: seq = links made so far.
+- Deviation: `_new_slot` catches `Exception` (fake rbox in `test_usb_relocate.py`, future API drift) → any failure falls back to the template cap instead of aborting the export.
+- Tests: `tests/test_onelibrary_track_limit.py` (17 / 100 / 1000 tracks read back from both DBs, ≤16 unchanged, growth-failure fallback); page-cap case in `tests/test_pdb_structure.py`. Mutation-checked: new tests fail on old code.
 
 ## Decision / Outcome
 

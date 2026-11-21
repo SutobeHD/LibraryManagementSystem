@@ -47,7 +47,6 @@ _(none)_
 _(none)_
 
 ### approvalgate ⛔ THE GATE
-- [approvalgate_usb-onelibrary-track-limit.md](implement/approvalgate_usb-onelibrary-track-limit.md) — ⛔ **AWAITING /approve** — lift 16-track USB export cap (B9); Option A = grow template slots at runtime via rbox 0.1.7 create+repair, + numberOfContents fix + PDB ≤255 rows/page; ~500-track PDB limit = unbelegt (2026-11-21)
 - [approvalgate_recording-booth.md](implement/approvalgate_recording-booth.md) — ⛔ **AWAITING /approve** (re-planned) — DJ-set recorder; **lead model now DDJ-GRV6** (4-channel / STEMS-native / GROOVE CIRCUIT + Sound-Color/Beat-FX + 4 decks) after gate-reject 2026-06-02. Plan re-scoped: GRV6 outline + full control map (stem-ISO/drum/FX), spike 1c extended (EQ + stem-ISO/sound-color/GROOVE-CIRCUIT on-the-wire), 4-deck timeline, 4-channel meters; mockup rebuilt 4-channel GRV6; 16 tasks (3 spikes + 10 core + 3 video); capture unchanged (class-MIDI → `midir`); live track-id unmet (PDL=Export-only) → post-hoc reconcile (2026-06-02)
 
 ### rework
@@ -62,6 +61,7 @@ _(none)_
 - [accepted_download-format-setting.md](implement/accepted_download-format-setting.md) — AIFF default + 6-target dropdown (Option A); full plan + Threat Model; GATE C PASSED 2026-05-29 (agent-delegated); load-bearing task = -map_metadata 0 + mutagen art-overlay fix (2026-05-29)
 
 ### inprogress
+- [inprogress_usb-onelibrary-track-limit.md](implement/inprogress_usb-onelibrary-track-limit.md) — lift 16-track USB export cap (B9); approved 2026-11-22 (Option A, rbox 0.3.1 bump = follow-up); building on `fix/usb-onelibrary-track-limit` (2026-11-22)
 - [inprogress_external-track-match-unified-module.md](implement/inprogress_external-track-match-unified-module.md) — **CRITICAL PATH**: sister-doc prereq for 3 other features (remix-detector, extended-remix-finder, quality-upgrade-finder). **Module T-3..T-9 SHIPPED** (`app/external_track_match.py` — parse_version_tag/extract_title_stem/fuzzy/fingerprint, 26 tests green); T-1/T-2 corpus + T-10 SC-delegate `[ ]` for routine/owner (2026-05-29)
 - [inprogress_analysis-remix-detector.md](implement/inprogress_analysis-remix-detector.md) — Variant detector M1/M2/M3; sidecar `variants.db`. **T-2 schema + T-3 detector SHIPPED** (classify/cluster/canonical-pick, consumes external_track_match, 15 tests green); T-1 corpus + T-4 routes + T-5 hook/CLI `[ ]` (2026-05-30)
 - [inprogress_analysis-underground-mainstream-classifier.md](implement/inprogress_analysis-underground-mainstream-classifier.md) — 2D-Display + SC 0.80/Spotify 0.20 aggregate; ECDF carve-out; **T1-T3 `app/popularity_engine.py` SHIPPED** (sidecar store + migrate framework + CRUD, 10 tests green); T4+ `[ ]` for `research-implement` routine (2026-05-29)
