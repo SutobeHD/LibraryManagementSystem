@@ -140,6 +140,7 @@ from .soundcloud_api import (
     SoundCloudSyncEngine,
 )
 from .soundcloud_downloader import sc_downloader
+from .track_fields import TrackFieldError
 from .usb_manager import (
     UsbActions,
     UsbDetector,
@@ -377,6 +378,9 @@ class BatchReq(BaseModel):
 
 
 class TrackUpdateReq(BaseModel):
+    # forbid: an unknown key (e.g. "BPM") was dropped here and the request answered 200.
+    model_config = {"extra": "forbid"}
+
     Rating: int | None = None
     ColorID: int | None = None
     Comment: str | None = None
@@ -3256,6 +3260,8 @@ def update_track(tid: str, r: TrackUpdateReq):
         return {"status": "success", "file_tags": tag_status}
     except HTTPException:
         raise
+    except TrackFieldError as e:
+        raise HTTPException(400, str(e)) from e
     except Exception as e:
         logger.error(f"Update failed for {tid}: {e}")
         raise HTTPException(500, f"Update failed: {e!s}")
@@ -3263,7 +3269,18 @@ def update_track(tid: str, r: TrackUpdateReq):
 
 @app.patch("/api/tracks/batch", dependencies=[Depends(require_session)])
 def batch_up(r: BatchReq):
-    return {"status": "success" if db.update_tracks_metadata(r.track_ids, r.updates) else "error"}
+    """Write the same fields to many tracks. 400 names a field or value the backend refuses.
+
+    A refused update leaves every track untouched. A failed write is a 500, not the old
+    200 `{"status": "error"}` that no caller read.
+    """
+    try:
+        ok = db.update_tracks_metadata(r.track_ids, r.updates)
+    except TrackFieldError as e:
+        raise HTTPException(400, str(e)) from e
+    if not ok:
+        raise HTTPException(500, "Library update failed for one or more tracks.")
+    return {"status": "success"}
 
 
 @app.post("/api/system/heartbeat")

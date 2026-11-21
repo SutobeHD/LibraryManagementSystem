@@ -191,6 +191,11 @@
   - Fixed: every XML save dropped all track ratings, and colours set in the
     app; both are now kept. Fields an XML library cannot store (Remixer, Year,
     a misspelt key) are refused instead of vanishing on the next reload.
+  - Fixed: the track-edit endpoints answered 200 for an edit that failed or
+    was silently dropped, so the app showed success. A refused field or value
+    is now a 400 that names it (shown in the error toast, e.g. "Edit BPM/Key"
+    in a live library), an unknown key in the single-track edit a 422, and a
+    failed save a 500.
 - Performance (backend):
   - Perf: artist/label lists and drill-downs no longer re-read
     `metadata_mappings.json` once per track — the mappings are cached; a hand

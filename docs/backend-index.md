@@ -22,12 +22,12 @@ Marker convention in the route tables below:
 | GET | `/api/track/{tid}` | Single track full detail |
 | GET | `/api/track/{tid}/cues` | Hot cues + memory cues for a track |
 | GET | `/api/track/{tid}/beatgrid` | Beatgrid data for a track |
-| POST | `/api/track/{tid}` `[AUTH]` | Update track metadata fields |
+| POST | `/api/track/{tid}` `[AUTH]` | Update track metadata fields. Body `TrackUpdateReq {Rating?, ColorID?, Comment?, Genre?}` with `extra="forbid"`: any other key → 422 (was dropped, 200). A value the backend refuses (`app.track_fields.TrackFieldError`, e.g. live `Rating` 9) → 400 naming it; a failed write → 500 |
 | DELETE | `/api/track/{tid}` `[AUTH]` | Delete a track |
 | POST | `/api/track/delete` `[AUTH]` | Delete track by body param |
 | POST | `/api/track/cues/save` `[AUTH]` | Save cue points for a track |
 | POST | `/api/track/grid/save` `[AUTH]` | Save beatgrid for a track |
-| PATCH | `/api/tracks/batch` `[AUTH]` | Batch update metadata on multiple tracks |
+| PATCH | `/api/tracks/batch` `[AUTH]` | Batch update metadata on multiple tracks. Body `BatchReq {track_ids, updates}` → `{status: "success"}`. 400 (`detail` names the field / value, e.g. `live library cannot write field(s): BPM, Key`) when a key is outside `db.writable_track_fields()` or a value has the wrong type / range — every track untouched. 500 when the write fails: XML unknown id or a save that failed (memory rolled back), live row missing (was 200 `{"status": "error"}`, read by no caller) |
 | POST | `/api/tracks/move` `[AUTH]` | Move tracks between playlists |
 | GET | `/api/artists` | All artists (normalized) |
 | GET | `/api/artist/{aid}/tracks` | Tracks by artist |
