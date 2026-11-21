@@ -1645,15 +1645,19 @@ class OneLibraryUsbWriter:
                     # Both ids MUST be int for rbox's create_playlist_content.
                     if child["type"] in ("1", "4") and one_id is not None:
                         linked = 0
-                        for ti, t_src_id in enumerate(child["track_ids"]):
+                        for t_src_id in child["track_ids"]:
                             content_id_str = content_id_map.get(str(t_src_id))
                             if not content_id_str:
                                 continue
                             try:
+                                # seq = links made so far, not the source index:
+                                # rbox rejects a gap ("Invalid sequence number"),
+                                # and one track missing on the stick then emptied
+                                # the rest of the playlist.
                                 db.create_playlist_content(
                                     int(one_id),
                                     int(content_id_str),
-                                    ti,
+                                    linked,
                                 )
                                 linked += 1
                             except Exception as e:
