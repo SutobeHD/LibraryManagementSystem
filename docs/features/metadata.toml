@@ -28,7 +28,7 @@ test = "testen"
 desc = "Felder ablehnen, die Live/XML nicht speichern kann; XML-Save atomar; 400/422 statt stillem 200."
 paths = ["app/track_fields.py", "tests/test_track_metadata_fields.py"]
 related = ["db-write-lock", "artist-merge"]
-todo = ["Backup vor Merge inkl. masterPlaylists6.xml", "Rekordbox-läuft-Guard auch für Playlist-/Metadaten-Writer", "Datei-Backup vor Tag-Writes (Revert stellt nur den Tag-String her)"]
+todo = ["Backup vor Merge inkl. masterPlaylists6.xml", "Datei-Backup vor Tag-Writes (Revert stellt nur den Tag-String her)"]
 notes = "Routen-Teil (400/422/500 statt 200) aus dem alten Worktree wf_1fefdec9-6fc-2 (Branch claude/fix-track-metadata-fields) auf fix/kern-loop-backend-b12-b14 portiert; der alte Worktree ist danach überholt."
 
 [[feature]]

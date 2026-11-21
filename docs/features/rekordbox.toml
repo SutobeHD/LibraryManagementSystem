@@ -43,8 +43,10 @@ id = "rekordbox-running-guard"
 group = "Datenbank"
 name = "Rekordbox-läuft-Sperre"
 status = "shipped"
-desc = "Erkennt laufendes Rekordbox, blockt Writes (Format-Swap, Merge, Projektion, analyze-full)."
-notes = "Lebt in app/services.py."
+test = "testen"
+desc = "Erkennt laufendes Rekordbox, blockt Live-master.db-Writes mit 409: Track-Edits, MyTags, Track-Löschen, alle Playlist-Änderungen, Importe, Duplikat-Merges, SC-Sync/-Merge, Format-Swap, Artist-Merge/Projektion, analyze-full."
+paths = ["tests/test_rekordbox_running_guard.py"]
+notes = "Routen: app/main.py _reject_while_rekordbox_runs(action) als erste Anweisung im Handler (nur Live-Modus scannt, fail-open). Format-Swap nutzt services.is_rekordbox_running. Offen: /api/usb/playcount/resolve schreibt master.db (fester Pfad, ohne db_lock) ungeschützt; Downloads/Folder-Watcher/Render importieren später im Hintergrund ohne Check; 409-Text kommt im Frontend nur als generischer Fehler-Toast an."
 
 [[feature]]
 id = "rekordbox-write-backups"

@@ -12,6 +12,7 @@ FastAPI app (~7500 lines). Security: CORS locked to localhost, `validate_audio_p
 Marker convention in the route tables below:
 - `[AUTH]` — requires `Authorization: Bearer <SESSION_TOKEN>`. Missing/wrong → 401.
 - `[RL]` — gated by `@rate_limit` in addition to `[AUTH]`. Excess → 429 with `Retry-After` header.
+- `[RB]` — writes the live master.db: in live mode 409 `Rekordbox is running. Close it before <action>.` while a Rekordbox process runs (`_reject_while_rekordbox_runs`, first statement of the handler; fails open when the scan fails). XML mode never scans. Older guarded routes (artist merge/projection, batch-comment, analyze-full/batch, download-names) say so in their row.
 - Unmarked rows are open (read-only or heartbeat).
 
 ### Library Endpoints
@@ -22,12 +23,12 @@ Marker convention in the route tables below:
 | GET | `/api/track/{tid}` | Single track full detail |
 | GET | `/api/track/{tid}/cues` | Hot cues + memory cues for a track |
 | GET | `/api/track/{tid}/beatgrid` | Beatgrid data for a track |
-| POST | `/api/track/{tid}` `[AUTH]` | Update track metadata fields. Body `TrackUpdateReq {Rating?, ColorID?, Comment?, Genre?}` with `extra="forbid"`: any other key → 422 (was dropped, 200). A value the backend refuses (`app.track_fields.TrackFieldError`, e.g. live `Rating` 9) → 400 naming it; a failed write → 500 |
-| DELETE | `/api/track/{tid}` `[AUTH]` | Delete a track |
-| POST | `/api/track/delete` `[AUTH]` | Delete track by body param |
+| POST | `/api/track/{tid}` `[AUTH]` `[RB]` | Update track metadata fields. Body `TrackUpdateReq {Rating?, ColorID?, Comment?, Genre?}` with `extra="forbid"`: any other key → 422 (was dropped, 200). A value the backend refuses (`app.track_fields.TrackFieldError`, e.g. live `Rating` 9) → 400 naming it; a failed write → 500 |
+| DELETE | `/api/track/{tid}` `[AUTH]` `[RB]` | Delete a track |
+| POST | `/api/track/delete` `[AUTH]` `[RB]` | Delete track by body param |
 | POST | `/api/track/cues/save` `[AUTH]` | Save cue points for a track |
 | POST | `/api/track/grid/save` `[AUTH]` | Save beatgrid for a track |
-| PATCH | `/api/tracks/batch` `[AUTH]` | Batch update metadata on multiple tracks. Body `BatchReq {track_ids, updates}` → `{status: "success"}`. 400 (`detail` names the field / value, e.g. `live library cannot write field(s): BPM, Key`) when a key is outside `db.writable_track_fields()` or a value has the wrong type / range — every track untouched. 500 when the write fails: XML unknown id or a save that failed (memory rolled back), live row missing (was 200 `{"status": "error"}`, read by no caller) |
+| PATCH | `/api/tracks/batch` `[AUTH]` `[RB]` | Batch update metadata on multiple tracks. Body `BatchReq {track_ids, updates}` → `{status: "success"}`. 400 (`detail` names the field / value, e.g. `live library cannot write field(s): BPM, Key`) when a key is outside `db.writable_track_fields()` or a value has the wrong type / range — every track untouched. 500 when the write fails: XML unknown id or a save that failed (memory rolled back), live row missing (was 200 `{"status": "error"}`, read by no caller) |
 | POST | `/api/tracks/move` `[AUTH]` | Move tracks between playlists |
 | GET | `/api/artists` | All artists (normalized) |
 | GET | `/api/artist/{aid}/tracks` | Tracks by artist |
@@ -78,17 +79,17 @@ Marker convention in the route tables below:
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/playlists/tree` | Full playlist tree (nested folders + playlists) |
-| POST | `/api/playlists/create` `[AUTH]` | Create new playlist |
-| POST | `/api/playlists/rename` `[AUTH]` | Rename playlist |
-| POST | `/api/playlists/move` `[AUTH]` | Move playlist in tree |
-| POST | `/api/playlists/delete` `[AUTH]` | Delete playlist |
-| POST | `/api/playlists/add-track` `[AUTH]` | Add track to playlist |
-| POST | `/api/playlists/remove-track` `[AUTH]` | Remove track from playlist |
-| POST | `/api/playlists/reorder` `[AUTH]` | Reorder tracks within playlist |
-| POST | `/api/playlists/smart/create` `[AUTH]` | Create smart-playlist with rules |
+| POST | `/api/playlists/create` `[AUTH]` `[RB]` | Create playlist (`type` "1") or folder ("0"). → `{status: "success", id: "<playlist id>"}` (was the whole node dict); 500 when the backend created nothing (was `success` + `id: null`) |
+| POST | `/api/playlists/rename` `[AUTH]` `[RB]` | Rename playlist |
+| POST | `/api/playlists/move` `[AUTH]` `[RB]` | Move playlist in tree |
+| POST | `/api/playlists/delete` `[AUTH]` `[RB]` | Delete playlist |
+| POST | `/api/playlists/add-track` `[AUTH]` `[RB]` | Add track to playlist |
+| POST | `/api/playlists/remove-track` `[AUTH]` `[RB]` | Remove track from playlist |
+| POST | `/api/playlists/reorder` `[AUTH]` `[RB]` | Reorder tracks within playlist |
+| POST | `/api/playlists/smart/create` `[AUTH]` `[RB]` | Create smart-playlist with rules |
 | POST | `/api/playlists/smart/update` `[AUTH]` | Update smart-playlist rules |
 | GET | `/api/playlists/smart/{pid}/evaluate` | Re-evaluate smart-playlist against current library |
-| POST | `/api/playlists/folder/create` `[AUTH]` | Create folder node in playlist tree |
+| POST | `/api/playlists/folder/create` `[AUTH]` `[RB]` | Create folder node in playlist tree |
 
 ### Audio Endpoints
 | Method | Path | Description |
@@ -100,7 +101,7 @@ Marker convention in the route tables below:
 | GET | `/api/audio/analyze/{task_id}` | Poll analysis result: `{ status, bpm, key, confidence }` |
 | POST | `/api/audio/slice` `[AUTH]` | Slice audio file at beat positions |
 | POST | `/api/audio/render` `[AUTH]` | Render audio with FFmpeg (format conversion, export) |
-| POST | `/api/audio/import` `[AUTH]` | Import a local audio file into the library |
+| POST | `/api/audio/import` `[AUTH]` `[RB]` | Import a local audio file into the library |
 | POST | `/api/track/{tid}/analyze` `[AUTH]` | Full analysis pipeline on single track |
 | POST | `/api/track/{tid}/analyze-full` `[AUTH]` | Analyze + write ANLZ files + update master.db in one call. Body: `{ force: bool }`. 409 when not in live mode / live library not loaded (`db.get_analysis_writer()` is None) or when Rekordbox is running. Writer errors map by `reason` (`_ANALYZE_FULL_ERRORS`): `track_not_found` → 404, `no_anlz_path` / `audio_missing` → 409, anything else → 500; fixed `detail` strings, never the writer's `error` text (can hold an absolute path). Single-flight with `analyze-batch` (`_analysis_db_run_lock`): 409 while either runs. Before 2026-10 it answered 400 in every mode (`hasattr` probe on the facade) |
 | POST | `/api/library/analyze-batch` `[AUTH]` | Batch analyze multiple tracks; NDJSON streaming progress. Body: `{ track_ids: [int], force: bool }`. Same 409 gates as `analyze-full`, incl. the shared single-flight slot; the stream's `finally` or the response's `BackgroundTask` frees it (whichever first), so a stream that never starts cannot leak it |
@@ -124,10 +125,10 @@ Marker convention in the route tables below:
 | POST | `/api/library/unload` `[AUTH]` | Unload current library |
 | POST | `/api/library/new` `[AUTH]` | Create a new empty library |
 | POST | `/api/library/sync` `[AUTH]` | Persist current state (XML mode writes rekordbox.xml; live mode is a no-op) |
-| POST | `/api/library/smart-playlists` `[AUTH]` | Generate smart playlists from rules |
-| POST | `/api/library/scan-folder` `[AUTH]` | Background scan of a directory; auto-imports audio files not yet in library. Body: `{ path: str }`. Dedup per file against the live `db.tracks` via `_is_known_audio_path`; `resolve()` memoised in `_resolve_cached`, cleared at batch start |
-| POST | `/api/library/import-paths` `[AUTH]` | Bulk-import a list of explicit file paths (files or folders). Same dedup as scan-folder: live `db.tracks` per file (a track another writer adds mid-batch is skipped, not re-imported), memo cleared at batch start |
-| POST | `/api/library/clean-titles` `[AUTH]` | Clean track title strings (remove tags, fix encoding) |
+| POST | `/api/library/smart-playlists` `[AUTH]` `[RB]` | Generate smart playlists from rules |
+| POST | `/api/library/scan-folder` `[AUTH]` `[RB]` | Background scan of a directory; auto-imports audio files not yet in library. Body: `{ path: str }`. Dedup per file against the live `db.tracks` via `_is_known_audio_path`; `resolve()` memoised in `_resolve_cached`, cleared at batch start |
+| POST | `/api/library/import-paths` `[AUTH]` `[RB]` | Bulk-import a list of explicit file paths (files or folders). Same dedup as scan-folder: live `db.tracks` per file (a track another writer adds mid-batch is skipped, not re-imported), memo cleared at batch start |
+| POST | `/api/library/clean-titles` `[AUTH]` `[RB]` | Clean track title strings (remove tags, fix encoding) |
 | GET | `/api/library/folder-watcher/status` | Report active folder-watcher state |
 | POST | `/api/library/folder-watcher/add` `[AUTH]` | Register a folder for auto-watch + auto-import |
 | POST | `/api/library/folder-watcher/remove` `[AUTH]` | Stop watching a folder |
@@ -140,7 +141,7 @@ Marker convention in the route tables below:
 |--------|------|-------------|
 | POST | `/api/xml/clean` `[AUTH]` | Clean Rekordbox XML (strip tags, fix encoding, normalize) |
 | POST | `/api/rekordbox/export` `[AUTH]` | Export selected tracks to Rekordbox-compatible XML |
-| POST | `/api/rekordbox/import` `[AUTH]` | Import tracks from a Rekordbox XML export |
+| POST | `/api/rekordbox/import` `[AUTH]` `[RB]` | Import tracks from a Rekordbox XML export. 404 when `xml_path` does not exist (was turned into a 500) |
 | POST | `/api/file/write` `[AUTH]` | Write raw XML content to a file (sandboxed) |
 | POST | `/api/file/reveal` `[AUTH]` | Open OS file-manager at the given sandboxed path |
 
@@ -155,8 +156,8 @@ Marker convention in the route tables below:
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/tools/duplicates` | Find duplicate tracks (title + artist matching) |
-| POST | `/api/tools/duplicates/merge` `[AUTH]` | Merge a set of duplicate tracks |
-| POST | `/api/tools/duplicates/merge-all` `[AUTH]` | Auto-merge all detected duplicates |
+| POST | `/api/tools/duplicates/merge` `[AUTH]` `[RB]` | Merge a set of duplicate tracks |
+| POST | `/api/tools/duplicates/merge-all` `[AUTH]` `[RB]` | Auto-merge all detected duplicates |
 | POST | `/api/tools/rename` `[AUTH]` | Rename tracks (not supported in XML-only mode) |
 | POST | `/api/tools/batch-comment` `[AUTH]` | Batch update comments on multiple tracks. Body `{source_id: "LIB"\|playlist_id, action: remove\|replace\|append\|set, find?, replace?}` → `{status, count}`. Runs `batch_worker.apply_batch_comment` in-process on the live library's rbox connection (`db.active_db.db`), each track's re-read + `update_content` under `db_lock()` (per track, not per run), and refreshes the cached `Comment` of every changed track; 409 outside live mode or while Rekordbox runs, 422 for any other `action` (`Literal`), 404 for a `source_id` that is neither `LIB` nor a playlist (`UnknownPlaylistError`); elapsed time logged on every exit. Plain `def` (threadpool), off the event loop. Was hard-wired to `%APPDATA%/Pioneer/rekordbox[6]/master.db`, then a `[sys.executable, batch_worker.py]` subprocess — in the frozen build that booted a second sidecar (fresh `LMS_TOKEN=` logged, token file overwritten) |
 | POST | `/api/metadata/merge` `[AUTH]` | Merge metadata from one track into another |
@@ -172,9 +173,9 @@ Marker convention in the route tables below:
 | GET | `/api/soundcloud/settings` | Get SC-specific settings (target folder, etc.) |
 | PUT | `/api/soundcloud/settings` `[AUTH]` | Update SC settings |
 | POST | `/api/soundcloud/preview-matches` `[AUTH]` | Preview library matches for SC playlist tracks (dry run) |
-| POST | `/api/soundcloud/sync` `[AUTH]` | Run SC playlist sync (match + mark) |
-| POST | `/api/soundcloud/sync-all` `[AUTH]` | Sync all SC playlists at once |
-| POST | `/api/soundcloud/merge` `[AUTH]` | Merge SC playlist into local playlist |
+| POST | `/api/soundcloud/sync` `[AUTH]` `[RB]` | Run SC playlist sync (match + mark) |
+| POST | `/api/soundcloud/sync-all` `[AUTH]` `[RB]` | Sync all SC playlists at once |
+| POST | `/api/soundcloud/merge` `[AUTH]` `[RB]` | Merge SC playlist into local playlist |
 | POST | `/api/soundcloud/download` `[AUTH]` | Start legal download: body `ScDownloadRequest`. Accepts URL or pre-resolved track data. Rejects if `downloadable=false`. Uses official SC API only. Returns `{task_id}`. |
 | POST | `/api/soundcloud/download-playlist` `[AUTH]` | Bulk-download every track in an SC playlist |
 | GET | `/api/soundcloud/tasks` | List all active download tasks |
@@ -627,7 +628,7 @@ Background job system with Python fallback fingerprinting (librosa PCM / MD5).
 |--------|------|-------------|
 | POST | `/api/duplicates/scan` `[AUTH]` | Start background fingerprint scan, returns `job_id` |
 | GET | `/api/duplicates/results` | Poll scan status/results |
-| POST | `/api/duplicates/merge` `[AUTH]` | Merge duplicate tracks in library |
+| POST | `/api/duplicates/merge` `[AUTH]` `[RB]` | Merge duplicate tracks in library |
 
 ---
 
@@ -638,10 +639,10 @@ Per-track tag taxonomy (orthogonal to genres). Stored in `master.db.djmdMyTag` +
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/mytags` | List all tag definitions |
-| POST | `/api/mytags` `[AUTH]` | Create new tag definition |
-| DELETE | `/api/mytags/{tag_id}` `[AUTH]` | Delete tag definition + cascade unlink |
+| POST | `/api/mytags` `[AUTH]` `[RB]` | Create new tag definition |
+| DELETE | `/api/mytags/{tag_id}` `[AUTH]` `[RB]` | Delete tag definition + cascade unlink |
 | GET | `/api/track/{tid}/mytags` | Tags applied to a single track |
-| POST | `/api/track/{tid}/mytags` `[AUTH]` | Replace the tag set on a track |
+| POST | `/api/track/{tid}/mytags` `[AUTH]` `[RB]` | Replace the tag set on a track |
 
 ---
 

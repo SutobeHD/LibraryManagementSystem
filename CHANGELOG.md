@@ -204,6 +204,16 @@
     beat number as `Battito`, plus key, rating, comment and bit rate. An XML
     library track with an empty field no longer crashes the export, and
     importing an XML now decodes encoded locations.
+  - Fixed: in a live library, track edits, MyTags, track delete, every
+    playlist change, imports (folder scan, drag-drop, upload, Rekordbox XML),
+    duplicate merges, title cleaning, label playlists and SoundCloud
+    sync/merge wrote master.db while Rekordbox was open, which overwrites or
+    corrupts those rows. They now answer "Rekordbox is running. Close it
+    before ..." (409) and write nothing. XML libraries are unaffected.
+  - Fixed: creating a playlist answered success even when nothing was
+    created, and returned the whole playlist instead of its id, so
+    "Duplicate playlist" made an empty copy. It now returns the id and
+    reports a failed create as an error.
 - Performance (backend):
   - Perf: artist/label lists and drill-downs no longer re-read
     `metadata_mappings.json` once per track — the mappings are cached; a hand
