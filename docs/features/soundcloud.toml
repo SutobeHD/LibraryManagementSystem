@@ -127,12 +127,13 @@ id = "sc-downloader"
 group = "Downloads"
 name = "SC-Downloader (2-stufig)"
 status = "shipped"
+test = "testen"
 desc = "Offizieller Download, sonst v2-Transcodings (progressive/HLS -> ffmpeg); Previews übersprungen."
 paths = ["app/soundcloud_downloader.py", "tests/test_soundcloud_downloader*.py"]
 routes = ["/api/soundcloud/download", "/api/soundcloud/task/{task_id}"]
 depends_on = ["sc-api-client", "download-registry"]
-todo = ["B18: nutzt nacktes FFMPEG_BIN statt ffmpeg_resolver - Lexicon-ffmpeg im PATH kann kein HLS -> Stream-Downloads scheitern", "B18: AIFF als pcm_s16le (AIFF-C sowt) statt pcm_s16be (klassisches AIFF)"]
-notes = "Host-Allowlist (SSRF), 1-GiB-Cap, ffmpeg protocol_whitelist - Schicht-A-Invarianten."
+todo = ["B18: AIFF als pcm_s16le (AIFF-C sowt) statt pcm_s16be (klassisches AIFF)"]
+notes = "Host-Allowlist (SSRF), 1-GiB-Cap, ffmpeg protocol_whitelist - Schicht-A-Invarianten. B18 (Teil ffmpeg) gefixt: HLS-Mux nimmt per ffmpeg_resolver ein ffmpeg mit https/tls/tcp, AIFF-Konvertierung eins mit pcm_s16le; ohne passendes ffmpeg klare Fehlermeldung statt stillem Scheitern. AIFF-C sowt bleibt bis zum CDJ-Test."
 
 [[feature]]
 id = "sc-download-pipeline"
@@ -220,7 +221,7 @@ test = "getestet"
 tested = "2026-11-14"
 desc = "ffmpeg-Binary pro Encoder (Setting > env > PATH > bekannte Pfade), ffprobe separat."
 paths = ["app/ffmpeg_resolver.py"]
-notes = "Nur der Format-Swap nutzt ihn; Downloader und AudioEngine nehmen das nackte FFMPEG_BIN. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): ok."
+notes = "Nur der Format-Swap nutzt ihn; Downloader und AudioEngine nehmen das nackte FFMPEG_BIN. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): ok. Seit B18 auch Protokoll-Probe (resolve_for_protocols, ffmpeg -protocols) für den SoundCloud-HLS-Download."
 
 # ── Neue Quellen ──────────────────────────────────────────────────────────
 
