@@ -317,6 +317,7 @@
 | `tests/test_download_registry.py` | Tests for app/download_registry.py — SoundCloud download dedup/history DB. |
 | `tests/test_duplicate_grouping.py` | Duplicate finder: O(n) digest grouping, parallel fingerprinting, location index. |
 | `tests/test_external_track_match.py` | external_track_match unit tests (external-track-match-unified-module T-3..T-9). |
+| `tests/test_ffmpeg_protocols.py` | Protocol-aware ffmpeg resolution and its use in the SoundCloud downloader (B18). |
 | `tests/test_folder_watcher.py` | Tests for app/folder_watcher.py — auto-import folder watcher. |
 | `tests/test_genre_atlas.py` | Tests for app.genre_atlas: matching logic on a synthetic atlas + integrity of the snapshot. |
 | `tests/test_genre_atlas_routes.py` | Route tests for the genre-atlas hints (app/main.py). |
@@ -330,6 +331,7 @@
 | `tests/test_live_import_analysis.py` | An imported track's analysis must reach master.db (B4, 0.1 core-loop test). |
 | `tests/test_live_playlist_b11.py` | Live playlist operations end to end against an rbox stand-in (B11, 0.1 core-loop test). |
 | `tests/test_live_playlist_ops.py` | Tests for the live-mode playlist primitives in `app/live_database.py`. |
+| `tests/test_live_stock_date.py` | StockDate in live track dicts: a missing date must not become the string "None" (B17). |
 | `tests/test_logging_redaction.py` | Unit tests for `app.logging_utils.RedactingFormatter`. |
 | `tests/test_main_route_table.py` | app/main.py defines each top-level name once, so no request model or handler is shadowed. |
 | `tests/test_main_security.py` | Regression tests for ``POST /api/file/reveal`` sandbox. |

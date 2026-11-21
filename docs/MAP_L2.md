@@ -610,6 +610,8 @@ Per-encoder FFmpeg binary resolution with cached ``-encoders`` probing.
 - `candidate_binaries()` — Ordered ``(path, source_label)`` candidates.
 - `probe_audio_encoders()` — Audio encoder names of ``path``, or ``None`` when the probe fails.
 - `resolve_for_encoder()` — First candidate whose probe carries ``encoder`` wins.
+- `probe_input_protocols()` — Input protocol names of ``path`` (``ffmpeg -protocols``), or ``None`` when the probe fails.
+- `resolve_for_protocols()` — First candidate whose input protocols include every name in ``required`` wins.
 - `resolve_ffprobe()` — ffprobe path, independent of discovery-candidate ffmpeg binaries.
 
 ### `app/folder_watcher.py`
@@ -3746,6 +3748,11 @@ Unit tests for the pure comparison helpers in scripts/compare_rekordbox.py.
 - `test_beatgrid_metrics_aligned()`
 - `test_beatgrid_metrics_offset()`
 - `test_beatgrid_metrics_empty()`
+- `test_rb_key_name_camelot_passes_through()`
+- `test_rb_key_name_musical_notation()`
+- `test_rb_key_name_unknown_is_empty()`
+- `test_rb_key_names_maps_row_id_to_name()`
+- `test_rb_beats_read_through_pyrekordbox()`
 
 ### `tests/test_cue_beatgrid_persistence.py`
 
@@ -3966,6 +3973,19 @@ external_track_match unit tests (external-track-match-unified-module T-3..T-9).
 - `test_fingerprint_unavailable_when_binary_missing()`
 - `test_fingerprint_rejects_path_outside_roots()`
 - `test_module_has_no_db_writer_imports()`
+
+### `tests/test_ffmpeg_protocols.py`
+
+Protocol-aware ffmpeg resolution and its use in the SoundCloud downloader (B18).
+
+- `test_probe_reads_only_input_protocols()`
+- `test_probe_failure_is_none_and_cached()`
+- `test_resolve_skips_a_decode_only_build()`
+- `test_resolve_reports_when_nothing_qualifies()`
+- `test_hls_download_runs_the_resolved_binary()`
+- `test_hls_download_stops_without_a_network_ffmpeg()`
+- `test_aiff_conversion_uses_the_resolved_binary()`
+- `test_aiff_conversion_keeps_the_source_without_ffmpeg()`
 
 ### `tests/test_folder_watcher.py`
 
@@ -4269,6 +4289,12 @@ Tests for the live-mode playlist primitives in `app/live_database.py`.
 - `  TestCreatePlaylistCaching.test_folder_type_comes_from_the_returned_row()`
 - `  TestCreatePlaylistCaching.test_caller_intent_wins_when_rbox_omits_the_attribute()`
 - `  TestCreatePlaylistCaching.test_root_parent_is_passed_to_rbox_as_none()`
+
+### `tests/test_live_stock_date.py`
+
+StockDate in live track dicts: a missing date must not become the string "None" (B17).
+
+- `test_stock_date_passes_through_and_null_is_empty()`
 
 ### `tests/test_logging_redaction.py`
 
@@ -5437,6 +5463,7 @@ compare_rekordbox.py — A/B accuracy harness: our engine vs Rekordbox.
 - `key_relation()` — Classify the harmonic relation between two Camelot codes.
 - `bpm_relation()` — Classify our BPM vs Rekordbox's, accounting for octave (half/double) errors.
 - `beatgrid_metrics()` — Compare two beat-grids (lists of beat times in ms).
+- `rb_key_name_to_camelot()` — Rekordbox key name ('11A', 'Am', 'Dbm', 'F#') -> Camelot code, '' when unknown.
 - `compare_track()` — Read RB analysis for one track and re-run ours; return a comparison row.
 - `main()`
 
