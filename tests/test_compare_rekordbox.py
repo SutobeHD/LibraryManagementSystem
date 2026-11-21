@@ -124,3 +124,52 @@ def test_beatgrid_metrics_empty():
     m = cmp.beatgrid_metrics([], [1.0, 2.0])
     assert m["matched"] == 0
     assert m["mean_abs_err_ms"] == -1.0
+
+
+# --- Rekordbox key names (B15) ----------------------------------------------
+
+
+def test_rb_key_name_camelot_passes_through():
+    assert cmp.rb_key_name_to_camelot("11A") == "11A"
+    assert cmp.rb_key_name_to_camelot("8b") == "8B"
+
+
+def test_rb_key_name_musical_notation():
+    assert cmp.rb_key_name_to_camelot("Am") == "8A"
+    assert cmp.rb_key_name_to_camelot("C") == "8B"
+    assert cmp.rb_key_name_to_camelot("F#m") == "11A"
+    assert cmp.rb_key_name_to_camelot("Dbm") == "12A"
+    assert cmp.rb_key_name_to_camelot("Eb") == "5B"
+
+
+def test_rb_key_name_unknown_is_empty():
+    assert cmp.rb_key_name_to_camelot(None) == ""
+    assert cmp.rb_key_name_to_camelot("") == ""
+    assert cmp.rb_key_name_to_camelot("m") == ""
+    assert cmp.rb_key_name_to_camelot("H") == ""
+
+
+def test_rb_key_names_maps_row_id_to_name():
+    class Row:
+        def __init__(self, rid, name):
+            self.id, self.name = rid, name
+
+    class Db:
+        def get_keys(self):
+            return [Row(241295350, "Am"), Row(7, "11A")]
+
+    assert cmp._rb_key_names(Db()) == {"241295350": "Am", "7": "11A"}
+
+
+def test_rb_beats_read_through_pyrekordbox(monkeypatch):
+    import app.anlz_safe as anlz_safe
+
+    monkeypatch.setattr(
+        anlz_safe,
+        "_pqtz_entries_from_dat",
+        lambda path: [
+            {"time": 0.5, "bpm": 128.0, "beat": 1},
+            {"time": 0.96875, "bpm": 128.0, "beat": 2},
+        ],
+    )
+    assert cmp._read_rb_beats_ms("x.DAT") == [500.0, 968.75]

@@ -164,7 +164,8 @@ desc = "A/B über 10-50 echte Tracks, Live-master.db-Write mit User-DB, echter S
 related = ["analysis-accuracy-harness", "usb-onelibrary-export"]
 
 # ── Ideen ─────────────────────────────────────────────────────────────────
-todo = ["B15: scripts/compare_rekordbox.py misst Key (key_id als 1..24 statt db.get_key_by_id) und Grid (rbox.Anlz -> 0 Beats, pyrekordbox nötig) nicht", "CDJ-3000-Test durch Nutzer: BPM/Länge, Cover, Waveform, Grid auf dem Kick, Cues, Sync-Drift"]
+todo = ["CDJ-3000-Test durch Nutzer: BPM/Länge, Cover, Waveform, Grid auf dem Kick, Cues, Sync-Drift"]
+notes = "B15 gefixt: compare_rekordbox.py liest Grids per pyrekordbox (app.anlz_safe) und Keys über die djmdKey-Tabelle (Camelot oder Notenname)."
 
 [[feature]]
 id = "bpm-octave-disambiguation"
