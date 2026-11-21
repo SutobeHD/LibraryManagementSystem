@@ -870,7 +870,7 @@ Log redaction helpers — scrub absolute paths from log lines + tracebacks.
 - `save_cues()`
 - `save_grid()`
 - `update_track()`
-- `batch_up()`
+- `batch_up()` — Write the same fields to many tracks.
 - `system_heartbeat()` — Lightweight keep-alive ping.
 - `HealthResponse` — Liveness/readiness payload.
 - `system_health()` — Unauthenticated liveness probe.
@@ -1440,8 +1440,12 @@ variant_schema — DDL + idempotent migration runner for the variants sidecar.
 
 ### `app/xml_generator.py`
 
-*(no module docstring)*
+Rekordbox collection XML (DJ_PLAYLISTS) writer for the /api/rekordbox/export bridge.
 
+- `kind_for_path()` — Rekordbox ``Kind`` for the file's real extension ("MP3 File", "AIFF File"), or None.
+- `location_for_path()` — ``file://localhost/...`` URL, percent-encoded the way Rekordbox writes it.
+- `date_added()` — ``YYYY-MM-DD`` from the track's ``StockDate``; today only when it has none.
+- `xml_rating()` — Rekordbox XML rating (0/51/102/153/204/255) or None when unusable.
 - `RekordboxXML`
 - `  RekordboxXML.generate()` — Generates a Rekordbox-compatible XML collection.
 - `  RekordboxXML.generate_for_track()` — Legacy wrapper for single track generation.
@@ -4281,6 +4285,7 @@ Unit tests for `app.logging_utils.RedactingFormatter`.
 - `test_data_dir_prefixes_scrubbed()` — EXPORT/MUSIC/TEMP dirs (resolved once at import) must also be scrubbed,
 - `test_safe_error_message_str_noop_on_clean_input()`
 - `test_non_exception_log_format_unchanged()` — A path-free `logger.info("hello")` must be byte-identical via
+- `test_allowed_roots_boot_line_hides_user_paths()` — The boot line used to log the list repr: doubled backslashes beat the scrub.
 
 ### `tests/test_main_route_table.py`
 
@@ -5152,6 +5157,19 @@ Track-metadata writes refuse fields and values the backend cannot store (issue K
 - `test_xml_swap_retries_a_transient_lock()`
 - `test_xml_write_that_dies_halfway_leaves_the_library_whole()`
 - `test_xml_unserialisable_nested_value_is_false_and_the_next_save_works()`
+- `no_tag_writes()`
+- `live_main()`
+- `xml_main()`
+- `test_batch_route_400_names_the_refused_fields()`
+- `test_batch_route_400_on_a_bad_value()`
+- `test_batch_route_success()`
+- `test_batch_route_xml_value_that_would_corrupt_the_file_is_400()`
+- `test_batch_route_unknown_track_is_500()`
+- `test_batch_route_failed_xml_save_is_500()`
+- `test_batch_route_xml_writes_bpm_and_key()`
+- `test_track_route_rejects_an_unknown_body_key()`
+- `test_track_route_400_on_an_out_of_range_value()`
+- `test_track_route_writes_the_ranking_view_fields()`
 
 ### `tests/test_usb_artwork.py`
 
@@ -5419,6 +5437,16 @@ Tests for app/xml_generator.py — Rekordbox collection XML export.
 - `test_beatgrid_and_cues_exported()`
 - `test_generate_does_not_mutate_input_positionmarks()` — Regression: DROP append must copy, not mutate the caller's list.
 - `test_missing_path_does_not_crash()` — A track dict without 'path' must not raise KeyError.
+- `test_kind_follows_the_real_file_extension()`
+- `test_location_is_percent_encoded_and_round_trips()`
+- `test_date_added_comes_from_stock_date()`
+- `test_tonality_rating_comments_bitrate_exported_when_present()`
+- `test_rating_scale()`
+- `test_track_ids_stay_stable_and_unique()`
+- `test_xml_library_track_with_none_fields_exports()`
+- `test_control_characters_do_not_break_the_file()`
+- `test_tempo_uses_rekordbox_battito_attribute()`
+- `test_export_round_trips_through_the_xml_library_loader()`
 
 
 ## scripts/ — Dev/Build Utilities

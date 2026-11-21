@@ -86,7 +86,7 @@
 | `app/usb_pdb.py` | USB export.pdb writer — legacy CDJ DeviceLibrary format. |
 | `app/variant_detector.py` | variant_detector — title-only variant classifier + clusterer (M1). |
 | `app/variant_schema.py` | variant_schema — DDL + idempotent migration runner for the variants sidecar. |
-| `app/xml_generator.py` | *(no module docstring)* |
+| `app/xml_generator.py` | Rekordbox collection XML (DJ_PLAYLISTS) writer for the /api/rekordbox/export bridge. |
 
 ## frontend/src/ — React Frontend
 

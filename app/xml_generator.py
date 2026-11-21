@@ -1,3 +1,5 @@
+"""Rekordbox collection XML (DJ_PLAYLISTS) writer for the /api/rekordbox/export bridge."""
+
 import re
 import urllib.parse
 import xml.etree.ElementTree as ET
