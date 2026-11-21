@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import random
 import sys
 from pathlib import Path
@@ -222,6 +223,15 @@ def rb_key_name_to_camelot(name: str | None) -> str:
     return _CAMELOT_MAP.get(f"{root} {'minor' if minor else 'major'}", "")
 
 
+def default_master_db(appdata: str | None = None) -> str | None:
+    """Rekordbox's own master.db path, or None. rbox has no auto-detect: `MasterDb()` needs a path."""
+    base = appdata if appdata is not None else os.environ.get("APPDATA", "")
+    if not base:
+        return None
+    path = Path(base) / "Pioneer" / "rekordbox" / "master.db"
+    return str(path) if path.exists() else None
+
+
 def _rb_key_names(db) -> dict[str, str]:
     """djmdKey id -> name. `key_id` on a track is this table's row id, not 1..24."""
     try:
@@ -374,7 +384,14 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
 
-    db = rbox.MasterDb(args.db) if args.db else rbox.MasterDb()
+    db_path = args.db or default_master_db()
+    if not db_path:
+        print(
+            "ERROR: no master.db found under %APPDATA%/Pioneer/rekordbox — pass --db.",
+            file=sys.stderr,
+        )
+        return 2
+    db = rbox.MasterDb(db_path)
     tids = _collect_tracks(db, args.ids, args.n, args.seed, min_len_s=args.min_len)
     if not tids:
         print("No analyzed tracks found.", file=sys.stderr)

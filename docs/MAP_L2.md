@@ -3754,6 +3754,8 @@ Unit tests for the pure comparison helpers in scripts/compare_rekordbox.py.
 - `test_rb_key_name_unknown_is_empty()`
 - `test_rb_key_names_maps_row_id_to_name()`
 - `test_rb_beats_read_through_pyrekordbox()`
+- `test_default_master_db_found_under_appdata()`
+- `test_default_master_db_missing()`
 
 ### `tests/test_cue_beatgrid_persistence.py`
 
@@ -5473,6 +5475,7 @@ compare_rekordbox.py — A/B accuracy harness: our engine vs Rekordbox.
 - `bpm_relation()` — Classify our BPM vs Rekordbox's, accounting for octave (half/double) errors.
 - `beatgrid_metrics()` — Compare two beat-grids (lists of beat times in ms).
 - `rb_key_name_to_camelot()` — Rekordbox key name ('11A', 'Am', 'Dbm', 'F#') -> Camelot code, '' when unknown.
+- `default_master_db()` — Rekordbox's own master.db path, or None.
 - `compare_track()` — Read RB analysis for one track and re-run ours; return a comparison row.
 - `main()`
 

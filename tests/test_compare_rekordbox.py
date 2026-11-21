@@ -173,3 +173,15 @@ def test_rb_beats_read_through_pyrekordbox(monkeypatch):
         ],
     )
     assert cmp._read_rb_beats_ms("x.DAT") == [500.0, 968.75]
+
+
+def test_default_master_db_found_under_appdata(tmp_path):
+    db = tmp_path / "Pioneer" / "rekordbox" / "master.db"
+    db.parent.mkdir(parents=True)
+    db.write_bytes(b"")
+    assert cmp.default_master_db(str(tmp_path)) == str(db)
+
+
+def test_default_master_db_missing(tmp_path):
+    assert cmp.default_master_db(str(tmp_path)) is None
+    assert cmp.default_master_db("") is None
