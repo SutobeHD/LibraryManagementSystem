@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 
 # Bump when output schema changes — invalidates all stale cache entries.
-ANALYSIS_VERSION = 3
+ANALYSIS_VERSION = 4  # 4: regression BPM + uniform grid for steady tracks (B5)
 
 USE_CONTENT_HASH = False  # opt-in: also compare a quick xxhash/md5 sample
 

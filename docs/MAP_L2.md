@@ -3728,6 +3728,23 @@ Tests for app/batch_worker.py — the comment transform and the batch loop.
 - `test_batch_skips_rows_whose_comment_does_not_change()`
 - `test_each_row_is_reread_and_written_inside_db_write_lock()` — update_content writes the whole row: a read outside the lock clobbers a
 
+### `tests/test_bpm_regression_grid.py`
+
+BPM from a regression line through all beats, uniform grid for steady tracks (B5).
+
+- `test_fit_recovers_the_exact_tempo_from_quantised_beats()`
+- `test_fit_survives_dropped_and_stray_beats()`
+- `test_tempo_change_is_not_steady()`
+- `test_slow_tempo_drift_is_not_steady()`
+- `test_too_few_beats()`
+- `test_anchor_lies_on_a_tracked_beat()`
+- `test_integer_snap_only_within_tolerance()`
+- `test_snap_is_refused_when_it_would_drift_the_grid()`
+- `test_uniform_beats_cover_the_tracked_span()`
+- `engine()`
+- `test_steady_128_bpm_track_gets_exact_tempo_and_uniform_grid()`
+- `test_tempo_change_keeps_the_tracked_beats()`
+
 ### `tests/test_compare_rekordbox.py`
 
 Unit tests for the pure comparison helpers in scripts/compare_rekordbox.py.
