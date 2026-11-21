@@ -68,6 +68,8 @@ PDB_PAGE_SIZE = 4096
 PDB_FILE_HEADER_LEN = 32
 PDB_TABLE_DESC_LEN = 16
 PDB_PAGE_HEADER_LEN = 0x28  # 32 base + 8 data extension; heap starts here
+# Keeps data pages out of the >255-row header regime — see PdbBuilder._pages_for_rows.
+MAX_ROWS_PER_PAGE = 255
 
 # Table type ids — matches spec
 T_TRACKS = 0x00
@@ -748,6 +750,12 @@ class PdbBuilder:
         single-page convention for tables with no rows). Writing a sentinel
         empty data page made Rekordbox compute last_page=first+1 which
         contradicts F: drive's single-page layout for empty tables.
+
+        At most MAX_ROWS_PER_PAGE rows per page. Only 12-byte playlist
+        entries could exceed 255 (~284 fit), and a >255-row page needs a
+        different last-write header shape (rbxport: rekordbox 6.8.6 crashes
+        on the wrong one) that is not verified against our F: reference.
+        Smaller pages keep every page in the verified regime.
         """
         if not rows:
             return []
@@ -763,7 +771,7 @@ class PdbBuilder:
             # Index size: ceil(row_count / 16) groups × 36 bytes
             groups = (row_count_after + 15) // 16
             new_index = groups * 36
-            if used + r_size + new_index > budget:
+            if used + r_size + new_index > budget or len(current.rows_data) >= MAX_ROWS_PER_PAGE:
                 pages.append(current)
                 current = _Page(page_index=len(pages), table_type=table_type)
                 used = 0
@@ -941,7 +949,6 @@ class PdbBuilder:
 
 
 # ─── Public sync-time API ─────────────────────────────────────────────────
-
 
 
 def _atomic_write_bytes(target: Path, data: bytes) -> None:
