@@ -878,7 +878,7 @@ Log redaction helpers — scrub absolute paths from log lines + tracebacks.
 - `move_t()`
 - `ren_t()` — Bulk smart-rename audio files on disk using a token pattern.
 - `get_tree()`
-- `create_pl()`
+- `create_pl()` — Create a playlist (``type`` "1") or folder ("0").
 - `rename_pl()`
 - `move_pl()`
 - `delete_pl()`
@@ -919,7 +919,7 @@ Log redaction helpers — scrub absolute paths from log lines + tracebacks.
 - `LoadLibReq`
 - `load_lib()`
 - `unload_lib()`
-- `rbx_export()` — Exports specified tracks to a Rekordbox XML file.
+- `rbx_export()` — Write the given tracks as a Rekordbox XML into ``EXPORT_DIR``.
 - `rbx_import()` — Imports tracks and metadata from a Rekordbox XML file.
 - `gen_smart()` — Rebuild the "By Label" auto-playlists.
 - `PathRequest` — Generic single-path body used by every endpoint that needs to point at
@@ -4634,6 +4634,24 @@ Tests for app/rekordbox_bridge.py — Rekordbox XML <-> local DB import.
 - `test_import_updates_existing_and_adds_new()`
 - `test_import_no_collection_raises()`
 - `test_import_parses_beatgrid()`
+
+### `tests/test_rekordbox_running_guard.py`
+
+Live master.db writers refuse while Rekordbox runs (B13); playlist create + XML export.
+
+- `tripwires()` — Entry points that reach a library through their own ``db`` import, not ``main.db``.
+- `test_live_write_refused_while_rekordbox_runs()`
+- `test_live_audio_upload_refused_before_the_file_is_saved()`
+- `test_xml_mode_never_scans_for_rekordbox()`
+- `test_live_write_goes_through_while_rekordbox_is_closed()`
+- `test_scan_failure_fails_open()`
+- `test_create_playlist_answers_the_id_string()`
+- `test_create_playlist_failure_is_500()`
+- `test_create_playlist_xml_library_answers_the_new_id()`
+- `exports()`
+- `test_export_stays_inside_exports()`
+- `test_export_refuses_unusable_names()`
+- `test_export_with_no_known_track_is_400()`
 
 ### `tests/test_require_session.py`
 

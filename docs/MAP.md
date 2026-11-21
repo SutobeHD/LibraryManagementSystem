@@ -350,6 +350,7 @@
 | `tests/test_rate_limit.py` | Tests for ``app/rate_limit.py`` -- in-process token-bucket limiter. |
 | `tests/test_rbep_parser.py` | Tests for app/rbep_parser.py — Rekordbox Editor Project (.rbep) XML parser. |
 | `tests/test_rekordbox_bridge.py` | Tests for app/rekordbox_bridge.py — Rekordbox XML <-> local DB import. |
+| `tests/test_rekordbox_running_guard.py` | Live master.db writers refuse while Rekordbox runs (B13); playlist create + XML export. |
 | `tests/test_require_session.py` | Phase-2 require_session dual-acceptance tests (T3 — app/auth.py). |
 | `tests/test_route_uniqueness.py` | Routing-table invariant: no duplicate (method, path) registrations. |
 | `tests/test_sc_fuzzy_index.py` | SoundCloud sync matcher: the indexed matcher answers exactly like the old brute force. |
