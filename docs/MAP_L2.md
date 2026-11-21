@@ -2078,7 +2078,7 @@ Sticky progress banner — visible on every screen while local-file or SoundClou
 
 ### `frontend/src/components/ImportView.jsx`
 
-Recursively walk a DataTransferItemList, returning every File inside any dropped folder.
+*(no module docstring)*
 
 ### `frontend/src/components/InsightsView.jsx`
 

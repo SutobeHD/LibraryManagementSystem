@@ -170,7 +170,7 @@
 | `frontend/src/components/FormatConverterView.jsx` | FormatConverterView — Library-wide audio format converter UI. |
 | `frontend/src/components/GenreSuggestions.jsx` | Genre suggestions from the genre atlas for one library track. |
 | `frontend/src/components/ImportProgressBanner.jsx` | Sticky progress banner — visible on every screen while local-file or SoundCloud imports are running. |
-| `frontend/src/components/ImportView.jsx` | Recursively walk a DataTransferItemList, returning every File inside any dropped folder. |
+| `frontend/src/components/ImportView.jsx` | *(no module docstring)* |
 | `frontend/src/components/InsightsView.jsx` | InsightsView — DJ-Style Analytics Dashboard Datenbasierte Einblicke in den eigenen DJ-Stil und die Library: •… |
 | `frontend/src/components/LibraryView.jsx` | *(no module docstring)* |
 | `frontend/src/components/MatchInspectorModal.jsx` | *(no module docstring)* |
