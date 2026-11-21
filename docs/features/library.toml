@@ -11,12 +11,12 @@ id = "track-table"
 group = "Browsen & Suchen"
 name = "Track-Tabelle"
 status = "shipped"
+test = "testen"
 desc = "Sortierbare Track-Liste: Spalten, Camelot-Key-Farben, Cover-Thumb, Drag, Kontextmenü."
 paths = ["frontend/src/components/TrackTable.jsx"]
 routes = ["/api/file/reveal"]
 related = ["inline-rating-color", "collection-view", "list-context-menus", "perf-frontend-virtualization"]
-todo = ["B17: Spalte 'Date Added' immer '-' - TrackTable liest t.DateAdded, Live-Backend liefert StockDate"]
-notes = "Virtualisiert seit PR #63 (in #60, perf-frontend-virtualization). LibraryView.jsx ist ein toter Vorgänger."
+notes = "Virtualisiert seit PR #63 (in #60, perf-frontend-virtualization). LibraryView.jsx ist ein toter Vorgänger. B17 (Date Added leer) gefixt: Spalte zeigt StockDate, fehlendes Datum ist leer statt 'None'."
 
 [[feature]]
 id = "collection-view"
