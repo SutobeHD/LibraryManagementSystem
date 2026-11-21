@@ -146,6 +146,12 @@ after:  20 selected → exportLibrary.db 20 rows, export.pdb 20 rows
 - Deviation: `_new_slot` catches `Exception` (fake rbox in `test_usb_relocate.py`, future API drift) → any failure falls back to the template cap instead of aborting the export.
 - Tests: `tests/test_onelibrary_track_limit.py` (17 / 100 / 1000 tracks read back from both DBs, ≤16 unchanged, growth-failure fallback); page-cap case in `tests/test_pdb_structure.py`. Mutation-checked: new tests fail on old code.
 
+### 2026-11-22 — Review (independent agent, probes on template copies)
+- No blocking bug. Half row at max+1, `delete_content` cleanup, Stage 1b/3 interplay, PDB mirror, page packing (255 → 1 page, 256 → 255+1, ext PDB unaffected) verified.
+- Fixed from review: `_new_slot` decided on the error text; now decides on whether an unreadable row sits at the new id (repair or remove either way) + direct test for a refused repair.
+- Open, hardware only: grown slots repeat the template's 16 `master_content_id`s (Rekordbox desktop matching); rows without ANLZ keep a dangling template `analysis_data_file_path` (same as the 16 template slots).
+- Full suite 2565 passed / 2 skipped.
+
 ## Decision / Outcome
 
 **Result**: pending
