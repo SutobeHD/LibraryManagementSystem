@@ -140,7 +140,7 @@ Marker convention in the route tables below:
 | Method | Path | Description |
 |--------|------|-------------|
 | POST | `/api/xml/clean` `[AUTH]` | Clean Rekordbox XML (strip tags, fix encoding, normalize) |
-| POST | `/api/rekordbox/export` `[AUTH]` | Export selected tracks to Rekordbox-compatible XML |
+| POST | `/api/rekordbox/export` `[AUTH]` | Export selected tracks to Rekordbox-compatible XML. Body `RbxSyncReq {track_ids, filename?}`; `filename` reduced to its basename, `.xml` appended when missing, default `rekordbox_export.xml`, must resolve inside `EXPORT_DIR` (`_rbx_export_path`) → `{status, message, path}`. 400 on an unusable name (`..`, `?<>|:`, control chars) or when no id is a known track |
 | POST | `/api/rekordbox/import` `[AUTH]` `[RB]` | Import tracks from a Rekordbox XML export. 404 when `xml_path` does not exist (was turned into a 500) |
 | POST | `/api/file/write` `[AUTH]` | Write raw XML content to a file (sandboxed) |
 | POST | `/api/file/reveal` `[AUTH]` | Open OS file-manager at the given sandboxed path |

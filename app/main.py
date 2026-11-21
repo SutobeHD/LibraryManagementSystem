@@ -4,6 +4,7 @@ import json
 import logging
 import multiprocessing as _mp
 import os
+import re
 import secrets
 import shutil
 import sqlite3
@@ -17,7 +18,7 @@ import uuid
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from concurrent.futures import Executor, ThreadPoolExecutor
 from contextlib import asynccontextmanager
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any, BinaryIO
 
 import uvicorn
@@ -4380,20 +4381,48 @@ def unload_lib():
 # --- REKORDBOX SYNC ENDPOINTS ---
 
 
+_RBX_EXPORT_DEFAULT_NAME = "rekordbox_export.xml"
+_ILLEGAL_FILENAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+
+
+def _rbx_export_path(filename: str | None) -> Path:
+    """``EXPORT_DIR/<basename>.xml`` for a client-chosen name, or 400.
+
+    The name was joined onto ``EXPORT_DIR`` as sent: ``../rekordbox.xml`` overwrote the
+    XML library, an absolute path wrote anywhere, ``None`` was a 500. ``PureWindowsPath``
+    drops directory parts for both separators and a drive prefix on every OS; the
+    resolve + ``is_relative_to`` check (as in ``validate_audio_path``) still catches a
+    name that resolves outside ``EXPORT_DIR``.
+    """
+    raw = (filename or "").strip() or _RBX_EXPORT_DEFAULT_NAME
+    name = PureWindowsPath(raw).name.strip()
+    if name in ("", ".", "..") or _ILLEGAL_FILENAME_CHARS.search(name):
+        raise HTTPException(400, "Invalid export file name.")
+    if not name.lower().endswith(".xml"):
+        name += ".xml"  # appended, not with_suffix: "Set 21.11.2026" keeps its dots
+    root = Path(EXPORT_DIR).resolve()
+    target = (root / name).resolve()
+    if not target.is_relative_to(root) or target == root:
+        raise HTTPException(400, "Invalid export file name.")
+    return target
+
+
 @app.post("/api/rekordbox/export", dependencies=[Depends(require_session)])
-async def rbx_export(r: RbxSyncReq):
-    """Exports specified tracks to a Rekordbox XML file."""
+def rbx_export(r: RbxSyncReq) -> dict[str, str]:
+    """Write the given tracks as a Rekordbox XML into ``EXPORT_DIR``. 400 on a bad name."""
+    output_path = _rbx_export_path(r.filename)
     try:
-        output_path = EXPORT_DIR / r.filename
         xml_path = RekordboxBridge.export_collection(r.track_ids, output_path)
-        return {
-            "status": "success",
-            "message": f"Exported {len(r.track_ids)} tracks to XML.",
-            "path": str(xml_path),
-        }
+    except ValueError as e:  # none of the ids resolved to a track
+        raise HTTPException(400, str(e)) from e
     except Exception as e:
         logger.error(f"Rekordbox export failed: {e}")
-        raise HTTPException(500, safe_error_message(e))
+        raise HTTPException(500, safe_error_message(e)) from e
+    return {
+        "status": "success",
+        "message": f"Exported {len(r.track_ids)} tracks to XML.",
+        "path": str(xml_path),
+    }
 
 
 @app.post("/api/rekordbox/import", dependencies=[Depends(require_session)])

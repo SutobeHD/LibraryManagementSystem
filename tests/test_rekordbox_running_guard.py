@@ -1,11 +1,13 @@
-"""Live master.db writers refuse while Rekordbox runs (B13); playlist create answers its id.
+"""Live master.db writers refuse while Rekordbox runs (B13); playlist create + XML export.
 
 Rekordbox keeps master.db open and overwrites or corrupts rows written behind its back.
 Every route that reaches a live master.db write answers 409 before touching the library
 while a Rekordbox process runs; an XML library never triggers the process scan.
 
-Also covers ``/api/playlists/create``: it answered "success" with the whole node, or
-with ``id: null`` when the live write failed.
+Also covers ``/api/playlists/create`` (answered "success" with the whole node, or with
+``id: null`` when the live write failed) and ``/api/rekordbox/export`` (joined the
+client's file name onto ``exports/`` unchecked: ``../x.xml`` or an absolute path wrote
+outside it, ``None`` was a 500).
 
 Every library is a stub and every file lives in ``tmp_path``; no real master.db or
 Rekordbox process is touched.
@@ -14,13 +16,14 @@ Rekordbox process is touched.
 from __future__ import annotations
 
 import asyncio
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
 
 import httpx
 import pytest
 
-from app import main
+from app import main, rekordbox_bridge
 from app.main import app
 
 GUARDED: list[tuple[str, str, dict[str, Any] | None]] = [
@@ -257,3 +260,76 @@ def test_create_playlist_xml_library_answers_the_new_id(
     pid = r.json()["id"]
     assert isinstance(pid, str) and pid
     assert db.get_playlist_by_id(pid) is not None
+
+
+# --- /api/rekordbox/export ---------------------------------------------------------
+
+
+class _TrackSource:
+    def get_track_details(self, tid: str) -> dict[str, Any] | None:
+        if tid != "1":
+            return None
+        return {"ID": "1", "Title": "T", "path": "C:/Music/t.aiff", "StockDate": "2022-02-02"}
+
+
+@pytest.fixture
+def exports(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    out = tmp_path / "sandbox" / "exports"
+    out.mkdir(parents=True)
+    monkeypatch.setattr(main, "EXPORT_DIR", out)
+    monkeypatch.setattr(rekordbox_bridge, "db", _TrackSource())
+    return out
+
+
+@pytest.mark.parametrize(
+    ("filename", "written"),
+    [
+        (None, "rekordbox_export.xml"),
+        ("", "rekordbox_export.xml"),
+        ("my set", "my set.xml"),
+        ("my set.txt", "my set.txt.xml"),
+        ("Set 21.11.2026", "Set 21.11.2026.xml"),
+        ("loud.XML", "loud.xml"),  # generator normalises the suffix case
+        ("../escape.xml", "escape.xml"),
+        ("..\\..\\escape.xml", "escape.xml"),
+        ("C:\\Windows\\abs.xml", "abs.xml"),
+        ("/etc/abs.xml", "abs.xml"),
+    ],
+)
+def test_export_stays_inside_exports(
+    exports: Path, auth_token: dict[str, str], filename: str | None, written: str
+) -> None:
+    r = _send(
+        "POST", "/api/rekordbox/export", {"track_ids": ["1"], "filename": filename}, auth_token
+    )
+
+    assert r.status_code == 200, r.text
+    target = exports / written
+    assert Path(r.json()["path"]) == target.resolve()
+    assert [p.name for p in exports.iterdir()] == [written]
+    assert [p.name for p in exports.parent.iterdir()] == ["exports"]  # nothing escaped
+    track = ET.parse(target).getroot().find(".//TRACK")
+    assert (track.get("TrackID"), track.get("Kind"), track.get("DateAdded")) == (
+        "1",
+        "AIFF File",
+        "2022-02-02",
+    )
+
+
+@pytest.mark.parametrize("filename", ["..", ".", "a?b.xml", "a<b>.xml", "a|b", "x\x01.xml"])
+def test_export_refuses_unusable_names(
+    exports: Path, auth_token: dict[str, str], filename: str
+) -> None:
+    r = _send(
+        "POST", "/api/rekordbox/export", {"track_ids": ["1"], "filename": filename}, auth_token
+    )
+
+    assert r.status_code == 400, r.text
+    assert list(exports.iterdir()) == []
+
+
+def test_export_with_no_known_track_is_400(exports: Path, auth_token: dict[str, str]) -> None:
+    r = _send("POST", "/api/rekordbox/export", {"track_ids": ["nope"]}, auth_token)
+
+    assert r.status_code == 400, r.text
+    assert list(exports.iterdir()) == []

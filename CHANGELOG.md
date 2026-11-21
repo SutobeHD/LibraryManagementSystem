@@ -204,6 +204,10 @@
     beat number as `Battito`, plus key, rating, comment and bit rate. An XML
     library track with an empty field no longer crashes the export, and
     importing an XML now decodes encoded locations.
+  - Fixed: the Rekordbox XML export wrote the file name as sent: `../x.xml`
+    or an absolute path landed outside `exports/` (e.g. over the XML
+    library), and no name was a server error. The name is now reduced to a
+    plain `.xml` file inside `exports/`; an unusable name is refused.
   - Fixed: in a live library, track edits, MyTags, track delete, every
     playlist change, imports (folder scan, drag-drop, upload, Rekordbox XML),
     duplicate merges, title cleaning, label playlists and SoundCloud
