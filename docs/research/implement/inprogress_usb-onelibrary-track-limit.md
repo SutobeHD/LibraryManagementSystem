@@ -150,7 +150,7 @@ after:  20 selected → exportLibrary.db 20 rows, export.pdb 20 rows
 - No blocking bug. Half row at max+1, `delete_content` cleanup, Stage 1b/3 interplay, PDB mirror, page packing (255 → 1 page, 256 → 255+1, ext PDB unaffected) verified.
 - Fixed from review: `_new_slot` decided on the error text; now decides on whether an unreadable row sits at the new id (repair or remove either way) + direct test for a refused repair.
 - Open, hardware only: grown slots repeat the template's 16 `master_content_id`s (Rekordbox desktop matching); rows without ANLZ keep a dangling template `analysis_data_file_path` (same as the 16 template slots).
-- Full suite 2565 passed / 2 skipped.
+- Full suite 2566 passed / 2 skipped (branch head).
 
 ## Decision / Outcome
 
