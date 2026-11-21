@@ -337,6 +337,7 @@
 | `tests/test_metadata_fixer_detector.py` | M0 detector tests — read-only malformation detection. |
 | `tests/test_metadata_fixer_schema.py` | metadata-fixer undo-log schema tests (T4 — app/metadata_fixer/schema.py). |
 | `tests/test_musicbrainz_client.py` | MusicBrainz client tests (T-22, Threat T14 — app/musicbrainz_client.py). |
+| `tests/test_onelibrary_track_limit.py` | B9 regression: a USB sync writes EVERY selected track, not just the 16 template slots. |
 | `tests/test_onelibrary_wal_flush.py` | End-to-end regression test for OneLibraryUsbWriter — runs the FULL |
 | `tests/test_pairing.py` | Phase-2 paired-token store tests (T1 — app/auth_db.py). |
 | `tests/test_pairing_store.py` | Phase-2 pairing-code store tests (T2 — app/pairing_store.py). |
