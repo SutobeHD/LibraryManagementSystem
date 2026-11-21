@@ -80,11 +80,13 @@ parent = "cues-beatgrid-io"
 name = "Editoren nutzen Rekordbox-Beatgrid"
 status = "unmerged"
 branch = "feat/editor-rekordbox-beatgrid"
+pr = 77
 desc = "DAW und Waveform-Editor laden das Grid des geladenen Tracks (GET /api/track/{id}/beatgrid): erster Beat, Taktphase, Tempo-Map."
 paths = ["frontend/src/audio/beatGrid.js", "frontend/src/audio/beatGrid.test.js"]
 depends_on = ["cues-beatgrid-io", "dj-edit-daw", "wavesurfer-waveform-editor"]
 related = ["daw-timeline-canvas", "daw-cue-loop-grid-edit", "rbep-projects"]
-notes = "Gestapelt auf feat/light-library-tracks. Backend-Fix im selben Branch: get_track_beatgrid las 'BeatGrid' statt 'beatGrid', Route lieferte immer []. DAW zeichnet konstante BPM ab dem ersten Downbeat; Tempowechsel stehen nur in Tempo-Map/.rbep. Ranking-simpleMode zeichnet keine Beat-Linien, Grid wirkt dort nur auf Snap."
+todo = ["Ranking: Wellenform + Grid zusammen an einem Nicht-AIFF-Track sichtbar prüfen (AIFF bleibt leer, WebAudio dekodiert kein AIFF)"]
+notes = "PR #77 gegen main; braucht die leichte Track-Liste aus #75 (mit #60 in main). 2026-11-08 nach Merge mit #64/#72 in der App geprüft: Editor lädt Grid per /api/track/{id}/beatgrid (155 BPM, Grid-Linien), Ranking holt das Grid pro Track (200). Backend-Fix im selben Branch: get_track_beatgrid las 'BeatGrid' statt 'beatGrid', Route lieferte immer []. DAW zeichnet konstante BPM ab dem ersten Downbeat; Tempowechsel stehen nur in Tempo-Map/.rbep. Ranking-simpleMode zeichnet keine Beat-Linien, Grid wirkt dort nur auf Snap."
 
 [[feature]]
 id = "daw-state-reducer"
