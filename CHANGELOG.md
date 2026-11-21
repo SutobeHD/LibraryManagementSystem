@@ -196,6 +196,14 @@
     is now a 400 that names it (shown in the error toast, e.g. "Edit BPM/Key"
     in a live library), an unknown key in the single-track edit a 422, and a
     failed save a 500.
+  - Fixed: the Rekordbox XML export marked every file "WAV File", wrote
+    un-encoded file locations (a space, `&` or `#` made Rekordbox miss the
+    file), stamped today's date as Date Added, numbered tracks 1..N and wrote
+    the beat number as `Battuta`. It now writes the real file type, a
+    percent-encoded location, the track's own date added and track id, the
+    beat number as `Battito`, plus key, rating, comment and bit rate. An XML
+    library track with an empty field no longer crashes the export, and
+    importing an XML now decodes encoded locations.
 - Performance (backend):
   - Perf: artist/label lists and drill-downs no longer re-read
     `metadata_mappings.json` once per track — the mappings are cached; a hand

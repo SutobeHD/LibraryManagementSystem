@@ -1,8 +1,9 @@
 import os
-import time
 import xml.dom.minidom as minidom
 import xml.etree.ElementTree as ET
 from typing import Any
+
+from .xml_generator import date_added, kind_for_path, location_for_path
 
 
 def format_time_ms_to_sec(ms: int) -> str:
@@ -33,32 +34,23 @@ def analysis_to_xml_track(
     track.set("Album", metadata.get("album", ""))
     track.set("Grouping", "")
     track.set("Genre", metadata.get("genre", ""))
-    track.set(
-        "Kind",
-        "MP3 File" if analysis_result.get("file", "").lower().endswith(".mp3") else "WAV File",
-    )
-    track.set(
-        "Size",
-        str(
-            os.path.getsize(analysis_result.get("file", ""))
-            if analysis_result.get("file") and os.path.exists(analysis_result.get("file"))
-            else 0
-        ),
-    )
+    kind = kind_for_path(analysis_result.get("file", ""))
+    if kind:
+        track.set("Kind", kind)
+    src = str(analysis_result.get("file") or "")
+    track.set("Size", str(os.path.getsize(src) if src and os.path.exists(src) else 0))
     track.set("TotalTime", str(int(analysis_result.get("duration", 0))))
     track.set("DiscNumber", "0")
     track.set("TrackNumber", "0")
     track.set("Year", metadata.get("year", ""))
     track.set("AverageBpm", f"{analysis_result.get('bpm', 120.0):.2f}")
-    track.set("DateAdded", time.strftime("%Y-%m-%d"))
+    track.set("DateAdded", date_added(metadata.get("StockDate") or metadata.get("date_added")))
     track.set("BitRate", "320")  # Assumption or pass actual
     track.set("SampleRate", str(analysis_result.get("sample_rate", 44100)))
     track.set("Comments", "Analyzed by LibraryManagementSystem")
     track.set("PlayCount", "0")
     track.set("Rating", "0")
-    track.set(
-        "Location", f"file://localhost/{analysis_result.get('file', '').replace(os.sep, '/')}"
-    )
+    track.set("Location", location_for_path(analysis_result.get("file", "")))
     track.set("Remixer", "")
     track.set("Tonality", analysis_result.get("key", ""))
     track.set("Label", "")
