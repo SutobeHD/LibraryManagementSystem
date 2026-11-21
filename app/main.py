@@ -88,7 +88,7 @@ KEYRING_SERVICE = "library_management_system"
 # Keyring entry name for the SoundCloud OAuth bearer token.
 KEYRING_SC_TOKEN = "sc_token"
 
-from . import audio_tags, download_registry, folder_watcher
+from . import audio_tags, download_registry, folder_watcher, playable_audio
 from . import soundcloud_api as sc_api
 from . import soundcloud_auth as sc_auth
 from .artist_store import attribution as artist_attribution
@@ -825,10 +825,53 @@ def _content_disposition_inline(filename: str) -> str:
 _STREAM_CHUNK_BYTES = 1024 * 1024
 
 
+async def _wav_view_response(file_path: Path, range_header: str | None) -> Response:
+    """AIFF served as a virtual WAV with Range support (Chromium decodes no AIFF)."""
+    try:
+        view = await asyncio.to_thread(playable_audio.describe, file_path)
+    except playable_audio.WavViewError as e:
+        logger.warning("op=wav_view file=%s err=%s", file_path.name, e)
+        raise HTTPException(415, "Audio encoding not supported for playback") from e
+
+    headers = {
+        "Accept-Ranges": "bytes",
+        "Content-Disposition": _content_disposition_inline(
+            playable_audio.wav_filename(file_path.name)
+        ),
+        "Cache-Control": "no-cache",
+    }
+    start, end, status = 0, view.size - 1, 200
+    if range_header:
+        try:
+            byte_range = playable_audio.parse_range(range_header, view.size)
+        except ValueError as e:
+            return Response(
+                status_code=416,
+                headers={"Content-Range": f"bytes */{view.size}"},
+                content=f"Invalid range: {e}",
+            )
+        if byte_range is not None:  # None: malformed header, ignored -> whole file
+            start, end = byte_range
+            status = 206
+            headers["Content-Range"] = f"bytes {start}-{end}/{view.size}"
+    headers["Content-Length"] = str(end - start + 1)
+    return StreamingResponse(
+        playable_audio.iter_range(view, start, end),
+        status_code=status,
+        media_type="audio/wav",
+        headers=headers,
+    )
+
+
 @app.get("/api/stream")
 async def stream_audio(path: str, request: Request):
-    """Streams audio file with HTTP Range support — required for browser seeking."""
+    """Streams audio file with HTTP Range support — required for browser seeking.
+
+    AIFF goes out as WAV (``_wav_view_response``); every other format as stored.
+    """
     file_path = validate_audio_path(path)
+    if playable_audio.needs_wav_view(file_path):
+        return await _wav_view_response(file_path, request.headers.get("range"))
 
     mime_types = {
         ".mp3": "audio/mpeg",
@@ -3143,12 +3186,14 @@ async def analyze_track(tid: str):
 
 
 @app.get("/api/audio/stream")
-async def stream_audio_file(path: str):
-    """Streams an audio file from the local filesystem"""
+async def stream_audio_file(path: str, request: Request):
+    """Streams an audio file from the local filesystem (AIFF as WAV, see /api/stream)."""
     logger.info(f"Stream request for: {path}")
 
     # SECURITY: Validate against allowed audio roots to prevent path traversal
     valid_path = validate_audio_path(path)
+    if playable_audio.needs_wav_view(valid_path):
+        return await _wav_view_response(valid_path, request.headers.get("range"))
 
     return FileResponse(valid_path, headers={"Accept-Ranges": "bytes"})
 

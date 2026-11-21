@@ -63,6 +63,7 @@
 | `app/pairing_store.py` | pairing_store — in-memory one-shot pairing codes (Phase-2 auth, T2). |
 | `app/phrase_db_writer.py` | phrase_db_writer.py — write phrase memory cues into Rekordbox master.db (djmdCue). |
 | `app/phrase_generator.py` | phrase_generator.py — Phrase & Auto-Cue Generator |
+| `app/playable_audio.py` | Browser-playable view of AIFF files: a virtual WAV computed from the source. |
 | `app/playcount_sync.py` | playcount_sync.py — USB Play-Count Sync Engine |
 | `app/popularity_engine.py` | Popularity sidecar engine — SoundCloud-only at M1 (underground-mainstream T1-T3). |
 | `app/pyrekordbox_compat.py` | Importing pyrekordbox without letting it reconfigure our logging. |
@@ -345,6 +346,7 @@
 | `tests/test_phrase_anlz_dirs.py` | One master.db open per phrase batch via `resolve_anlz_dirs`. |
 | `tests/test_phrase_batch.py` | Tests for the phrase-batch backend (app/main.py): |
 | `tests/test_phrase_db_writer.py` | Unit tests for app/phrase_db_writer.py (djmdCue memory-cue writer). |
+| `tests/test_playable_audio.py` | AIFF served as a virtual WAV (app/playable_audio.py + both stream routes). |
 | `tests/test_playcount_sync.py` | Tests for app/playcount_sync.py — USB <-> PC play-count sync engine. |
 | `tests/test_popularity_engine.py` | PopularityStore tests (underground-mainstream-classifier T1-T3). |
 | `tests/test_rate_limit.py` | Tests for ``app/rate_limit.py`` -- in-process token-bucket limiter. |
