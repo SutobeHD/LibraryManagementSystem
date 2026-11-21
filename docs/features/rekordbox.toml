@@ -216,6 +216,16 @@ related = ["anlz-parser-simplify", "phrase-db-writer", "usb-onelibrary-track-lim
 notes = "User-Entscheidung. requirements.txt ist heute schon unerfüllbar (pyrekordbox 0.1.7 vs sqlalchemy 2.0.49)."
 
 [[feature]]
+id = "rbox-upgrade"
+group = "Abhängigkeiten"
+name = "rbox 0.1.7 -> 0.3.1"
+status = "idea"
+desc = "rbox-Bump: OneLibrary-Zeilen per insert_content statt Halbzeilen-Trick, evtl. export.pdb über rbox DeviceLibrary."
+related = ["pyrekordbox-upgrade", "usb-onelibrary-track-limit", "usb-legacy-pdb"]
+todo = ["OneLibrary(path) nimmt in 0.3.1 ein Verzeichnis -> OneLibrary.from_path()", "_new_slot auf NewContent + insert_content umstellen (Halbzeilen-Trick geht in 0.3.1 nicht mehr)", "rbox.one_library -> rbox.onelib", "Live-Modus gegen echte master.db testen", "Schicht-A-Check + PyInstaller-Bundle"]
+notes = "Probe 2026-11-22 (Wegwerf-venv): insert_content geht, create_content weiter kaputt; volle Suite mit 0.3.1 nur 3 OneLibrary-Pfad-Tests rot. User: erst nach dem 16-Track-Fix, eigener PR (gemeinsames .venv der Parallel-Sitzungen)."
+
+[[feature]]
 id = "track-lock-flag"
 group = "Cues & Phrasen"
 name = "Track-Sperre"
