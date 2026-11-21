@@ -23,6 +23,7 @@ id = "sc-session-status"
 group = "Login"
 name = "SC-Session + Account-Chip"
 status = "shipped"
+test = "testen"
 desc = "Token im OS-Keyring, auth-status ohne Netz-Roundtrip, /me-Chip in der Navigation."
 paths = ["tests/test_soundcloud_auth_status.py"]
 routes = ["/api/soundcloud/auth-token", "/api/soundcloud/auth-status", "/api/soundcloud/me"]
@@ -61,6 +62,7 @@ id = "sc-api-client"
 group = "Sync"
 name = "SoundCloud-API-Client"
 status = "shipped"
+test = "testen"
 desc = "Inoffizielle v2-API: client_id-Scraping, Backoff, Pagination, Proxy."
 paths = ["app/soundcloud_api.py", "tests/test_soundcloud_api.py"]
 notes = "Artist-Katalog/Suche/CallBudget nur auf PR #58."
@@ -113,6 +115,7 @@ id = "sc-url-download"
 group = "Downloads"
 name = "SC-Download per URL"
 status = "shipped"
+test = "testen"
 desc = "URL einfügen -> Download-Task, Task-Liste."
 paths = ["frontend/src/components/SoundCloudView.jsx"]
 routes = ["/api/soundcloud/download", "/api/soundcloud/tasks"]
@@ -128,6 +131,7 @@ desc = "Offizieller Download, sonst v2-Transcodings (progressive/HLS -> ffmpeg);
 paths = ["app/soundcloud_downloader.py", "tests/test_soundcloud_downloader*.py"]
 routes = ["/api/soundcloud/download", "/api/soundcloud/task/{task_id}"]
 depends_on = ["sc-api-client", "download-registry"]
+todo = ["B18: nutzt nacktes FFMPEG_BIN statt ffmpeg_resolver - Lexicon-ffmpeg im PATH kann kein HLS -> Stream-Downloads scheitern", "B18: AIFF als pcm_s16le (AIFF-C sowt) statt pcm_s16be (klassisches AIFF)"]
 notes = "Host-Allowlist (SSRF), 1-GiB-Cap, ffmpeg protocol_whitelist - Schicht-A-Invarianten."
 
 [[feature]]
@@ -135,6 +139,7 @@ id = "sc-download-pipeline"
 group = "Downloads"
 name = "Post-Download-Pipeline"
 status = "shipped"
+test = "testen"
 desc = "Optional AIFF, Tags + Cover, SHA-256, Analyse, Auto-Import, Playlist SC_<name>."
 depends_on = ["sc-downloader", "download-format-setting"]
 related = ["analysis-on-import"]
@@ -162,28 +167,33 @@ id = "download-registry"
 group = "Downloads"
 name = "Download-Registry / Dedup"
 status = "shipped"
+test = "getestet"
+tested = "2026-11-14"
 desc = "SQLite-Dedup per sc_track_id + SHA-256, Analyse-Historie, device_id."
 paths = ["app/download_registry.py", "tests/test_download_registry.py"]
 routes = ["/api/soundcloud/history", "/api/soundcloud/check/{sc_track_id}"]
-notes = "History-Routen ohne UI."
+notes = "History-Routen ohne UI. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): ok."
 
 [[feature]]
 id = "download-manager-view"
 group = "Downloads"
 name = "Download-Manager"
 status = "shipped"
-test = "testen"
+test = "getestet"
+tested = "2026-11-14"
 desc = "Stage-Pipeline-Ansicht (Resolve -> Download -> Analyse -> ANLZ -> Playlist) für Downloads + Import."
 paths = ["frontend/src/components/DownloadManagerView.jsx"]
 routes = ["/api/soundcloud/tasks", "/api/import/tasks"]
 related = ["import-progress-banner", "sc-download-recognizer"]
 todo = ["Mit echtem Download oder Import prüfen - 2026-11-07 Ansicht lädt, aber keine Tasks, Download-Registry leer"]
+notes = "Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): ok."
 
 [[feature]]
 id = "import-progress-banner"
 group = "Downloads"
 name = "Sticky Import-Banner"
 status = "shipped"
+test = "testen"
 desc = "Fortschrittsbanner auf jedem Screen, Klick öffnet den Manager."
 paths = ["frontend/src/components/ImportProgressBanner.jsx"]
 related = ["download-manager-view"]
@@ -206,9 +216,11 @@ id = "ffmpeg-resolver"
 group = "Downloads"
 name = "FFmpeg-Resolver"
 status = "shipped"
+test = "getestet"
+tested = "2026-11-14"
 desc = "ffmpeg-Binary pro Encoder (Setting > env > PATH > bekannte Pfade), ffprobe separat."
 paths = ["app/ffmpeg_resolver.py"]
-notes = "Nur der Format-Swap nutzt ihn; Downloader und AudioEngine nehmen das nackte FFMPEG_BIN."
+notes = "Nur der Format-Swap nutzt ihn; Downloader und AudioEngine nehmen das nackte FFMPEG_BIN. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): ok."
 
 # ── Neue Quellen ──────────────────────────────────────────────────────────
 
