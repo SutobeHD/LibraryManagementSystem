@@ -11,6 +11,7 @@ id = "browser-audio-player"
 group = "Playback"
 name = "Mini-Player (HTML5)"
 status = "shipped"
+test = "testen"
 desc = "<audio>-Player: Play/Pause/Volume, Drag-Seek, amber Mirror-Scrubber."
 paths = ["frontend/src/components/Player.jsx", "frontend/src/components/shared/seededWaveform.js"]
 depends_on = ["audio-stream-route"]

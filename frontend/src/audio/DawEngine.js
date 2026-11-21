@@ -20,6 +20,9 @@ let _isPlaying = false;
 let _onPlaybackEnd = null;
 let animFrameId = null;
 
+// Formats the webview cannot decode from the raw file; /api/audio/stream converts them.
+const BACKEND_ONLY_AUDIO_RE = /\.aiff?$/i;
+
 // ─── AUDIO CONTEXT LIFECYCLE ───────────────────────────────────────────────────
 
 /**
@@ -98,15 +101,18 @@ export async function loadAudio(filepath) {
 
     const ctx = getAudioContext();
 
-    // 1. Try Tauri asset URL first (if available)
+    // 1. Try Tauri asset URL first (if available). AIFF never decodes from the raw file
+    //    (Chromium/WebView2 have no AIFF decoder) — the backend serves it as WAV.
     let url;
-    let useBackend = false;
+    let useBackend = BACKEND_ONLY_AUDIO_RE.test(filepath);
 
-    try {
-        url = convertFileSrc(filepath);
-    } catch (err) {
-        console.warn('[DawEngine] convertFileSrc failed/not available, using backend.', err);
-        useBackend = true;
+    if (!useBackend) {
+        try {
+            url = convertFileSrc(filepath);
+        } catch (err) {
+            console.warn('[DawEngine] convertFileSrc failed/not available, using backend.', err);
+            useBackend = true;
+        }
     }
 
     if (useBackend) {

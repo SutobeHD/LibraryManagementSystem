@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Play, Pause, SkipBack, SkipForward, Volume2, X } from 'lucide-react';
 import api from '../api/api';
 import { log } from '../utils/log';
+import { useToast } from './ToastContext';
 import { waveAmps, drawSeededWave, hashSeed } from './shared/seededWaveform';
 
 /** Three staggered equalizer bars — shown next to the title while playing. */
@@ -80,7 +81,15 @@ const SeededWaveform = ({ seed, playhead, onSeek }) => {
     );
 };
 
+/** Toast text for an `<audio>` MediaError code (backend 403/404/415 surface as SRC_NOT_SUPPORTED). */
+const mediaErrorText = (code) => {
+    if (code === MediaError.MEDIA_ERR_NETWORK) return 'network error while loading';
+    if (code === MediaError.MEDIA_ERR_DECODE) return 'the file could not be decoded';
+    return 'format not supported or file unavailable';
+};
+
 const Player = ({ track, onClose }) => {
+    const toast = useToast();
     const [playing, setPlaying] = useState(false);
     const [volume, setVolumeState] = useState(() => {
         const saved = localStorage.getItem('rb_volume');
@@ -112,11 +121,19 @@ const Player = ({ track, onClose }) => {
     }, [track]);
 
     useEffect(() => {
-        if (audioRef.current && !isStreaming(track)) {
-            playing
-                ? audioRef.current.play().catch((e) => log.warn('Play error', e))
-                : audioRef.current.pause();
+        const audio = audioRef.current;
+        if (!audio || isStreaming(track)) return;
+        if (!playing) {
+            audio.pause();
+            return;
         }
+        // A failed element rejects play() at once; reload so pressing play retries the source.
+        if (audio.error) audio.load();
+        audio.play().catch((e) => {
+            if (e?.name === 'AbortError') return; // superseded by a newer load / pause
+            log.warn('Play error', e);
+            setPlaying(false);
+        });
     }, [playing, track]);
 
     useEffect(() => {
@@ -133,6 +150,15 @@ const Player = ({ track, onClose }) => {
                 setDuration(d);
             }
         }
+    };
+
+    const handleAudioError = () => {
+        const err = audioRef.current?.error;
+        if (!err || err.code === MediaError.MEDIA_ERR_ABORTED) return;
+        console.error('[Player] audio load failed', err.code, err.message);
+        setPlaying(false);
+        const title = track?.Title || 'Unknown Title';
+        toast.error(`Cannot play "${title}": ${mediaErrorText(err.code)}`);
     };
 
     const handleLoadedMeta = () => {
@@ -191,6 +217,7 @@ const Player = ({ track, onClose }) => {
                     onLoadedMetadata={handleLoadedMeta}
                     onDurationChange={handleLoadedMeta}
                     onEnded={() => setPlaying(false)}
+                    onError={handleAudioError}
                     preload="metadata"
                 />
             )}
