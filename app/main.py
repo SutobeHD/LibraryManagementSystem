@@ -215,7 +215,16 @@ def _init_allowed_roots():
             roots.append(dj_path.resolve())
     ALLOWED_AUDIO_ROOTS.extend(roots)
     if _mp.current_process().name == "MainProcess":
-        logger.info(f"Allowed audio roots: {[str(r) for r in ALLOWED_AUDIO_ROOTS]}")
+        logger.info("Allowed audio roots: %s", _describe_roots(ALLOWED_AUDIO_ROOTS))
+
+
+def _describe_roots(roots: list[Path]) -> str:
+    """Roots for the boot log, user-specific prefixes as ``[...]``.
+
+    The old line logged ``str(list)``: the list repr doubles every backslash, so the
+    log formatter's prefix scrub never matched and full user paths reached app.log.
+    """
+    return ", ".join(safe_error_message_str(str(r)) for r in roots)
 
 
 _init_allowed_roots()

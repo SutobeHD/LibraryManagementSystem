@@ -127,6 +127,19 @@ def test_non_exception_log_format_unchanged() -> None:
 
     plain = logging.Formatter(fmt=_FMT).format(record)
     redacted = RedactingFormatter(fmt=_FMT).format(record)
-    assert plain == redacted, (
-        f"non-exception format diverged:\n  plain={plain!r}\n  redacted={redacted!r}"
-    )
+    assert (
+        plain == redacted
+    ), f"non-exception format diverged:\n  plain={plain!r}\n  redacted={redacted!r}"
+
+
+def test_allowed_roots_boot_line_hides_user_paths() -> None:
+    """The boot line used to log the list repr: doubled backslashes beat the scrub."""
+    from pathlib import Path
+
+    from app.main import _describe_roots
+
+    home = Path.home()
+    line = _describe_roots([home / "Music", Path(os.environ.get("APPDATA") or home) / "x"])
+    assert str(home) not in line
+    assert line.count("[...]") == 2
+    assert "\\\\" not in line
