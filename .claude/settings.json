@@ -80,6 +80,7 @@
       "Bash(gh release list*)",
       "Bash(gh release view*)",
       "Bash(gh pr merge*)",
+      "Bash(gh pr create*)",
       "Bash(ls*)",
       "Bash(pwd)",
       "Bash(file *)",
@@ -150,7 +151,6 @@
       "Bash(pip install*)",
       "Bash(cargo add*)",
       "Bash(cargo remove*)",
-      "Bash(gh pr create*)",
       "Bash(gh issue create*)"
     ]
   },
