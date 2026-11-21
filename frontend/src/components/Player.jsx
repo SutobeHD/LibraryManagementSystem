@@ -37,9 +37,7 @@ const SeededWaveform = ({ seed, playhead, onSeek }) => {
         const canvas = canvasRef.current;
         const parent = canvas?.parentElement;
         if (!parent) return undefined;
-        const ro = new ResizeObserver(() =>
-            drawSeededWave(canvas, amps, playheadRef.current, 28),
-        );
+        const ro = new ResizeObserver(() => drawSeededWave(canvas, amps, playheadRef.current, 28));
         ro.observe(parent);
         return () => ro.disconnect();
     }, [amps]);
@@ -150,9 +148,7 @@ const Player = ({ track, onClose }) => {
         const d = audioRef.current.duration;
         // Fallback: track metadata duration (HTML5 audio sometimes reports Infinity for chunked streams)
         const safeDuration =
-            Number.isFinite(d) && d > 0
-                ? d
-                : parseFloat(track?.TotalTime) || duration || 0;
+            Number.isFinite(d) && d > 0 ? d : parseFloat(track?.TotalTime) || duration || 0;
         if (!safeDuration) return;
         const target = Math.max(0, Math.min(1, ratio)) * safeDuration;
         try {
@@ -200,15 +196,24 @@ const Player = ({ track, onClose }) => {
             )}
 
             {/* Track info */}
-            <div className="flex items-center gap-2.5 flex-shrink-0" style={{ flexBasis: 230, minWidth: 0 }}>
+            <div
+                className="flex items-center gap-2.5 flex-shrink-0"
+                style={{ flexBasis: 230, minWidth: 0 }}
+            >
                 <div
                     className="w-11 h-11 rounded-mx-sm overflow-hidden shrink-0 relative"
                     style={{ background: 'var(--mx-card)', border: '1px solid var(--line-subtle)' }}
                 >
                     {track.Artwork ? (
-                        <img src={`${api.defaults.baseURL}/api/artwork?path=${encodeURIComponent(track.Artwork)}`} className="w-full h-full object-cover" loading="lazy" />
+                        <img
+                            src={`${api.defaults.baseURL}/api/artwork?path=${encodeURIComponent(track.Artwork)}`}
+                            className="w-full h-full object-cover"
+                            loading="lazy"
+                        />
                     ) : (
-                        <div className="w-full h-full flex items-center justify-center text-ink-muted text-[10px] font-semibold tracking-wider">RB</div>
+                        <div className="w-full h-full flex items-center justify-center text-ink-muted text-[10px] font-semibold tracking-wider">
+                            RB
+                        </div>
                     )}
                     {streaming && (
                         <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
@@ -222,9 +227,11 @@ const Player = ({ track, onClose }) => {
                         {playing && !streaming && <PlayingBars />}
                     </span>
                     <span className="text-[11px] text-ink-muted truncate mt-0.5">
-                        {streaming
-                            ? <span className="text-amber2">Streaming restricted</span>
-                            : (track.Artist || 'Unknown Artist')}
+                        {streaming ? (
+                            <span className="text-amber2">Streaming restricted</span>
+                        ) : (
+                            track.Artist || 'Unknown Artist'
+                        )}
                     </span>
                 </div>
             </div>
@@ -234,40 +241,60 @@ const Player = ({ track, onClose }) => {
                 <button
                     className="p-1.5 rounded-mx-sm text-ink-secondary hover:text-ink-primary hover:bg-mx-hover transition-colors disabled:opacity-20"
                     disabled={streaming}
-                ><SkipBack size={16} /></button>
+                >
+                    <SkipBack size={16} />
+                </button>
                 <button
                     onClick={() => !streaming && setPlaying(!playing)}
                     disabled={streaming}
                     className={`w-9 h-9 rounded-full flex items-center justify-center transition-all ${
-                        streaming ? 'bg-mx-card text-ink-muted' : 'bg-amber2 text-mx-deepest hover:bg-amber2-hover'
+                        streaming
+                            ? 'bg-mx-card text-ink-muted'
+                            : 'bg-amber2 text-mx-deepest hover:bg-amber2-hover'
                     }`}
                 >
-                    {playing && !streaming
-                        ? <Pause size={16} fill="currentColor" />
-                        : <Play size={16} fill="currentColor" className="ml-0.5" />}
+                    {playing && !streaming ? (
+                        <Pause size={16} fill="currentColor" />
+                    ) : (
+                        <Play size={16} fill="currentColor" className="ml-0.5" />
+                    )}
                 </button>
                 <button
                     className="p-1.5 rounded-mx-sm text-ink-secondary hover:text-ink-primary hover:bg-mx-hover transition-colors disabled:opacity-20"
                     disabled={streaming}
-                ><SkipForward size={16} /></button>
+                >
+                    <SkipForward size={16} />
+                </button>
             </div>
 
             {/* Waveform scrubber */}
             <div className="flex-1 flex flex-col gap-1.5 min-w-0">
                 {streaming ? (
-                    <div className="text-center mx-caption" style={{ color: 'var(--ink-placeholder)' }}>
+                    <div
+                        className="text-center mx-caption"
+                        style={{ color: 'var(--ink-placeholder)' }}
+                    >
                         Direct streaming for cloud/subscription tracks not supported
                     </div>
                 ) : (
                     <>
                         <div className="flex items-center justify-between">
-                            <span className="font-mono text-[10px] font-semibold" style={{ color: 'var(--amber)' }}>{formatTime(progress)}</span>
+                            <span
+                                className="font-mono text-[10px] font-semibold"
+                                style={{ color: 'var(--amber)' }}
+                            >
+                                {formatTime(progress)}
+                            </span>
                             {(track.BPM || track.Key) && (
                                 <span className="mx-chip mx-chip-amber font-mono">
-                                    {track.BPM && `${Math.round(track.BPM)} BPM`}{track.BPM && track.Key && ' · '}{track.Key}
+                                    {track.BPM && `${Math.round(track.BPM)} BPM`}
+                                    {track.BPM && track.Key && ' · '}
+                                    {track.Key}
                                 </span>
                             )}
-                            <span className="font-mono text-[10px] text-ink-muted">{formatTime(duration)}</span>
+                            <span className="font-mono text-[10px] text-ink-muted">
+                                {formatTime(duration)}
+                            </span>
                         </div>
                         <SeededWaveform seed={waveSeed} playhead={playhead} onSeek={seekTo} />
                     </>
@@ -278,7 +305,10 @@ const Player = ({ track, onClose }) => {
             <div className="flex items-center gap-2 flex-shrink-0">
                 <Volume2 size={14} className="text-ink-muted" />
                 <input
-                    type="range" min="0" max="1" step="0.01"
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.01"
                     value={volume}
                     onChange={(e) => setVolume(parseFloat(e.target.value))}
                     className="appearance-none cursor-pointer outline-none [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-ink-primary"
