@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+- USB export:
+  - Fixed: a stick sync wrote at most 16 tracks into `exportLibrary.db` and
+    `export.pdb` (B9) — the cap was the row count of the bundled OneLibrary
+    template. The writer now adds the missing content slots before it writes
+    (rbox 0.1.7 workaround) and falls back to the old cap with a warning only
+    if that fails. Verified on fake sticks with 17 / 100 / 1000 tracks; real
+    CDJ-3000 check pending.
+  - Fixed: one track missing on the stick (skipped, failed, filtered out) left
+    every later track of its playlist unlinked in `exportLibrary.db` — playlist
+    links are now numbered without gaps.
+  - Fixed: `property.numberOfContents` in `exportLibrary.db` always said 16; it
+    now matches the tracks on the stick.
+  - Changed: `export.pdb` data pages hold at most 255 rows, so big playlists
+    never produce the >255-row page header that crashes rekordbox 6.8.6.
+
 - Analysis accuracy + engine fixes:
   - Improved: exact-octave BPM accuracy (Acc-1). `detect_beats_madmom` now
     constrains the madmom DBN tempo window to the octave of a robust coarse
