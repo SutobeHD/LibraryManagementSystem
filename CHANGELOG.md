@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+- USB export:
+  - Fixed: a stick sync wrote at most 16 tracks into `exportLibrary.db` and
+    `export.pdb` (B9) — the cap was the row count of the bundled OneLibrary
+    template. The writer now adds the missing content slots before it writes
+    (rbox 0.1.7 workaround) and falls back to the old cap with a warning only
+    if that fails. Verified on fake sticks with 17 / 100 / 1000 tracks; real
+    CDJ-3000 check pending.
+  - Fixed: one track missing on the stick (skipped, failed, filtered out) left
+    every later track of its playlist unlinked in `exportLibrary.db` — playlist
+    links are now numbered without gaps.
+  - Fixed: `property.numberOfContents` in `exportLibrary.db` always said 16; it
+    now matches the tracks on the stick.
+  - Changed: `export.pdb` data pages hold at most 255 rows, so big playlists
+    never produce the >255-row page header that crashes rekordbox 6.8.6.
+
 - Analysis accuracy + engine fixes:
   - Improved: exact-octave BPM accuracy (Acc-1). `detect_beats_madmom` now
     constrains the madmom DBN tempo window to the octave of a robust coarse
@@ -191,6 +206,33 @@
   - Fixed: every XML save dropped all track ratings, and colours set in the
     app; both are now kept. Fields an XML library cannot store (Remixer, Year,
     a misspelt key) are refused instead of vanishing on the next reload.
+  - Fixed: the track-edit endpoints answered 200 for an edit that failed or
+    was silently dropped, so the app showed success. A refused field or value
+    is now a 400 that names it (shown in the error toast, e.g. "Edit BPM/Key"
+    in a live library), an unknown key in the single-track edit a 422, and a
+    failed save a 500.
+  - Fixed: the Rekordbox XML export marked every file "WAV File", wrote
+    un-encoded file locations (a space, `&` or `#` made Rekordbox miss the
+    file), stamped today's date as Date Added, numbered tracks 1..N and wrote
+    the beat number as `Battuta`. It now writes the real file type, a
+    percent-encoded location, the track's own date added and track id, the
+    beat number as `Battito`, plus key, rating, comment and bit rate. An XML
+    library track with an empty field no longer crashes the export, and
+    importing an XML now decodes encoded locations.
+  - Fixed: the Rekordbox XML export wrote the file name as sent: `../x.xml`
+    or an absolute path landed outside `exports/` (e.g. over the XML
+    library), and no name was a server error. The name is now reduced to a
+    plain `.xml` file inside `exports/`; an unusable name is refused.
+  - Fixed: in a live library, track edits, MyTags, track delete, every
+    playlist change, imports (folder scan, drag-drop, upload, Rekordbox XML),
+    duplicate merges, title cleaning, label playlists and SoundCloud
+    sync/merge wrote master.db while Rekordbox was open, which overwrites or
+    corrupts those rows. They now answer "Rekordbox is running. Close it
+    before ..." (409) and write nothing. XML libraries are unaffected.
+  - Fixed: creating a playlist answered success even when nothing was
+    created, and returned the whole playlist instead of its id, so
+    "Duplicate playlist" made an empty copy. It now returns the id and
+    reports a failed create as an error.
 - Performance (backend):
   - Perf: artist/label lists and drill-downs no longer re-read
     `metadata_mappings.json` once per track — the mappings are cached; a hand

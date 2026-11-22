@@ -277,6 +277,7 @@ stage = "later"
 name = "Nach 1.0"
 goal = "Bewusst zurückgestellt. Kandidaten für 1.x - bei Bedarf in eine Version davor ziehen."
 features = [
+  "rbox-upgrade",
   # Entdecken
   "recommender-rules-baseline",
   "recommender-similar-tracks",

@@ -222,5 +222,18 @@ def test_export_pdb_invariants():
     assert main() == 0
 
 
+def test_playlist_entry_pages_hold_at_most_255_rows():
+    """12-byte entries would fit ~284 per page; the >255-row header shape is
+    unverified (rbxport: rekordbox 6.8.6 crash), so pages stop at 255."""
+    from app.usb_pdb import MAX_ROWS_PER_PAGE, T_PL_ENTRIES, PdbBuilder, encode_playlist_entry_row
+
+    rows = [encode_playlist_entry_row(i, 100 + i, 1) for i in range(600)]
+    pages = PdbBuilder._pages_for_rows(rows, T_PL_ENTRIES)
+    assert [len(p.rows_data) for p in pages] == [MAX_ROWS_PER_PAGE, MAX_ROWS_PER_PAGE, 90]
+    for p in pages:
+        page = p.build()
+        assert int.from_bytes(page[0x18:0x1B], "little") >> 13 == len(p.rows_data)
+
+
 if __name__ == "__main__":
     sys.exit(main())

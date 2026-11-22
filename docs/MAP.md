@@ -64,6 +64,7 @@
 | `app/pairing_store.py` | pairing_store — in-memory one-shot pairing codes (Phase-2 auth, T2). |
 | `app/phrase_db_writer.py` | phrase_db_writer.py — write phrase memory cues into Rekordbox master.db (djmdCue). |
 | `app/phrase_generator.py` | phrase_generator.py — Phrase & Auto-Cue Generator |
+| `app/playable_audio.py` | Browser-playable view of AIFF files: a virtual WAV computed from the source. |
 | `app/playcount_sync.py` | playcount_sync.py — USB Play-Count Sync Engine |
 | `app/popularity_engine.py` | Popularity sidecar engine — SoundCloud-only at M1 (underground-mainstream T1-T3). |
 | `app/pyrekordbox_compat.py` | Importing pyrekordbox without letting it reconfigure our logging. |
@@ -87,7 +88,7 @@
 | `app/usb_pdb.py` | USB export.pdb writer — legacy CDJ DeviceLibrary format. |
 | `app/variant_detector.py` | variant_detector — title-only variant classifier + clusterer (M1). |
 | `app/variant_schema.py` | variant_schema — DDL + idempotent migration runner for the variants sidecar. |
-| `app/xml_generator.py` | *(no module docstring)* |
+| `app/xml_generator.py` | Rekordbox collection XML (DJ_PLAYLISTS) writer for the /api/rekordbox/export bridge. |
 
 ## frontend/src/ — React Frontend
 
@@ -349,6 +350,7 @@
 | `tests/test_metadata_fixer_detector.py` | M0 detector tests — read-only malformation detection. |
 | `tests/test_metadata_fixer_schema.py` | metadata-fixer undo-log schema tests (T4 — app/metadata_fixer/schema.py). |
 | `tests/test_musicbrainz_client.py` | MusicBrainz client tests (T-22, Threat T14 — app/musicbrainz_client.py). |
+| `tests/test_onelibrary_track_limit.py` | B9 regression: a USB sync writes EVERY selected track, not just the 16 template slots. |
 | `tests/test_onelibrary_wal_flush.py` | End-to-end regression test for OneLibraryUsbWriter — runs the FULL |
 | `tests/test_pairing.py` | Phase-2 paired-token store tests (T1 — app/auth_db.py). |
 | `tests/test_pairing_store.py` | Phase-2 pairing-code store tests (T2 — app/pairing_store.py). |
@@ -357,11 +359,13 @@
 | `tests/test_phrase_anlz_dirs.py` | One master.db open per phrase batch via `resolve_anlz_dirs`. |
 | `tests/test_phrase_batch.py` | Tests for the phrase-batch backend (app/main.py): |
 | `tests/test_phrase_db_writer.py` | Unit tests for app/phrase_db_writer.py (djmdCue memory-cue writer). |
+| `tests/test_playable_audio.py` | AIFF served as a virtual WAV (app/playable_audio.py + both stream routes). |
 | `tests/test_playcount_sync.py` | Tests for app/playcount_sync.py — USB <-> PC play-count sync engine. |
 | `tests/test_popularity_engine.py` | PopularityStore tests (underground-mainstream-classifier T1-T3). |
 | `tests/test_rate_limit.py` | Tests for ``app/rate_limit.py`` -- in-process token-bucket limiter. |
 | `tests/test_rbep_parser.py` | Tests for app/rbep_parser.py — Rekordbox Editor Project (.rbep) XML parser. |
 | `tests/test_rekordbox_bridge.py` | Tests for app/rekordbox_bridge.py — Rekordbox XML <-> local DB import. |
+| `tests/test_rekordbox_running_guard.py` | Live master.db writers refuse while Rekordbox runs (B13); playlist create + XML export. |
 | `tests/test_require_session.py` | Phase-2 require_session dual-acceptance tests (T3 — app/auth.py). |
 | `tests/test_route_uniqueness.py` | Routing-table invariant: no duplicate (method, path) registrations. |
 | `tests/test_sc_fuzzy_index.py` | SoundCloud sync matcher: the indexed matcher answers exactly like the old brute force. |

@@ -11,10 +11,10 @@ id = "browser-audio-player"
 group = "Playback"
 name = "Mini-Player (HTML5)"
 status = "shipped"
+test = "testen"
 desc = "<audio>-Player: Play/Pause/Volume, Drag-Seek, amber Mirror-Scrubber."
 paths = ["frontend/src/components/Player.jsx", "frontend/src/components/shared/seededWaveform.js"]
 depends_on = ["audio-stream-route"]
-todo = ["B10: AIFF spielt nicht (Chromium MediaError 4), Player zeigt trotzdem 'spielt' - 2911/4906 Tracks sind AIFF; kein onError am <audio>"]
 notes = "Scrubber-Waveform ist eine seeded Pseudo-Kurve, keine echte Analyse."
 
 [[feature]]
@@ -22,15 +22,14 @@ id = "audio-stream-route"
 group = "Playback"
 name = "Audio-Streaming-Route"
 status = "shipped"
-test = "getestet"
-tested = "2026-11-14"
-desc = "Range-Request-Streaming, sandboxed via validate_audio_path, MIME pro Endung."
-paths = ["tests/test_stream_unicode_filename.py"]
+test = "testen"
+desc = "Range-Request-Streaming, sandboxed via validate_audio_path, MIME pro Endung; AIFF geht als on-the-fly-WAV raus (Chromium/WebView2 dekodiert kein AIFF)."
+paths = ["app/playable_audio.py", "tests/test_playable_audio.py", "tests/test_stream_unicode_filename.py"]
 routes = ["/api/stream", "/api/audio/stream"]
 depends_on = ["audio-path-sandbox"]
+notes = "Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): ok."
 
 # ── Waveform ──────────────────────────────────────────────────────────────
-notes = "Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): ok."
 
 [[feature]]
 id = "multiband-waveform-data"
@@ -53,7 +52,6 @@ status = "partial"
 desc = "WaveSurfer + Overview, blue/rgb/3band-Layer, Cuts, Hot-Cues, Loop, Zoom."
 paths = ["frontend/src/components/WaveformEditor.jsx", "frontend/src/components/waveform/"]
 depends_on = ["multiband-waveform-data", "audio-stream-route"]
-todo = ["Ranking-Waveform bleibt bei AIFF leer: WebView2-WebAudio dekodiert kein AIFF ('WebAudioPlayer load error', 0 Canvases), Beatgrid kommt trotzdem an - AIFF ist Download-Default; prüfen, ob PR #72 (Ranking-Waveform-Pipeline) das löst"]
 notes = "Voller Modus nicht mehr gemountet (ersetzt durch DjEditDaw); nur simpleMode im Ranking."
 
 [[feature]]

@@ -673,10 +673,10 @@ class OneLibraryUsbWriter:
         works fine. `create_image`, `create_artist`, `create_album` etc.
         also work, so reference tables get populated normally.
 
-        Hard limit: the number of user tracks per OneLibrary sync is capped
-        at the template's slot count (currently 16 from F: drive). Beyond
-        that we skip the extras and log clearly. The legacy rekordbox.xml
-        export (always written) covers the full library.
+        The template has 16 slots (F: drive). A sync with more tracks first
+        adds slots (`_grow_slots`). Only when that fails are the extra
+        tracks skipped, with a warning; rekordbox.xml (always written)
+        still covers the full library.
 
         `playlist_filter` (optional list of playlist IDs from the source):
         when set, only tracks reachable through these playlists are written,
@@ -801,6 +801,9 @@ class OneLibraryUsbWriter:
                 before,
                 len(playlist_filter),
             )
+
+        placeholders = self._grow_slots(db, placeholders, len(all_tracks))
+        slot_count = len(placeholders)
 
         total = len(all_tracks)
         used_slots = 0
@@ -937,6 +940,9 @@ class OneLibraryUsbWriter:
             except Exception as exc:
                 logger.debug(f"[OneLibrary] couldn't delete unused slot {unused.id}: {exc}")
 
+        # The template's property row says 16 whatever the stick holds.
+        self._set_number_of_contents(db, used_slots)
+
         # Stage 4 — playlist tree (create_playlist works, no template needed)
         yield {"stage": "playlists", "message": "Writing playlist tree…", "progress": 80}
         try:
@@ -1015,8 +1021,8 @@ class OneLibraryUsbWriter:
                 "stage": "warning",
                 "message": (
                     f"OneLibrary: {used_slots}/{total} tracks written "
-                    f"({skipped_overflow} skipped — template has only {slot_count} slots). "
-                    f"Rebuild template from a Rekordbox stick with more tracks for a higher cap. "
+                    f"({skipped_overflow} skipped — could not add content slots past "
+                    f"{slot_count}, see log). "
                     f"All {total} tracks are in rekordbox.xml for manual import."
                 ),
                 "progress": 100,
@@ -1029,6 +1035,108 @@ class OneLibraryUsbWriter:
             }
 
     # ─── helpers ─────────────────────────────────────────────────────────
+
+    def _grow_slots(self, db, placeholders: list, needed: int) -> list:
+        """Return the template's content slots extended to `needed` rows.
+
+        The template ships 16 rows and rbox 0.1.7 cannot insert a content
+        row directly, so each extra slot comes from `_new_slot`. Template
+        rows are cloned round-robin, so every new row carries column values
+        Rekordbox itself wrote. Stops at the first slot that cannot be made;
+        the caller then writes as many tracks as there are slots.
+        """
+        if needed <= len(placeholders) or not placeholders:
+            return placeholders
+        slots = list(placeholders)
+        next_id = max(int(c.id) for c in db.get_contents()) + 1
+        while len(slots) < needed:
+            base = placeholders[(len(slots) - len(placeholders)) % len(placeholders)]
+            slot = self._new_slot(db, int(base.id), next_id)
+            if slot is None:
+                logger.warning(
+                    "[OneLibrary] Could not add content slot %d — writing %d of %d tracks",
+                    next_id,
+                    len(slots),
+                    needed,
+                )
+                break
+            slots.append(slot)
+            next_id = int(slot.id) + 1
+        logger.info("[OneLibrary] Grew template slots %d -> %d", len(placeholders), len(slots))
+        return slots
+
+    @staticmethod
+    def _new_slot(db, base_id: int, new_id: int):
+        """Add one content row at `new_id` as a copy of template row `base_id`.
+
+        rbox 0.1.7: `create_content` INSERTs a row whose non-null model
+        columns (`file_type`, …) stay NULL, then fails to read it back with
+        "Unexpected null for non-null column"; `NewContent` has no Python
+        constructor, so `insert_content` is unreachable. The INSERT survives
+        that error, at id max+1. `update_content` with a template row
+        re-labelled to that id fills every column — the write path the sync
+        already uses for the template's own slots. A row that cannot be
+        repaired is deleted again: left in place, every later read of the
+        content table fails on it.
+
+        rbox 0.3.x rolls the failed INSERT back (nothing to repair) but can
+        construct `NewContent`; moving to it is a separate dependency bump.
+
+        Returns the readable slot, or None with nothing left behind. Catches
+        `Exception` on purpose: rbox raises `OneLibraryError`, but any failure
+        of this workaround must fall back to the template cap, not end the
+        export.
+        """
+        try:
+            created = db.create_content(f"/__placeholder__/{new_id}.mp3")
+        except Exception as exc:
+            # Decide on what is in the table, not on the message: whatever the
+            # error said, an unreadable row at new_id must be repaired or removed.
+            try:
+                found = db.get_content_by_id(new_id)
+            except Exception:
+                pass  # the half-written row ("Unexpected null …"), as expected
+            else:
+                # None = nothing was inserted; a readable row is not ours.
+                logger.warning(
+                    "[OneLibrary] create_content failed, no half-written row at id %d (%r): %s",
+                    new_id,
+                    found,
+                    exc,
+                )
+                return None
+        else:
+            new_id = int(created.id)  # create_content works: still fill it from the template
+        try:
+            slot = db.get_content_by_id(base_id)
+            slot.id = new_id
+            slot.title = f"__placeholder_{new_id}__"
+            slot.path = f"/__placeholder__/{new_id}.mp3"
+            slot.file_name = f"placeholder_{new_id}.mp3"
+            # Every template slot owns one image row; sharing the base's would
+            # make the two tracks overwrite each other's artwork.
+            slot.image_id = int(db.create_image("").id)
+            db.update_content(slot)
+            return db.get_content_by_id(new_id)
+        except Exception as exc:
+            logger.warning("[OneLibrary] Content slot %d repair failed: %s", new_id, exc)
+            try:
+                db.delete_content(new_id)
+            except Exception as del_exc:
+                logger.error(
+                    "[OneLibrary] Could not remove broken content row %d: %s", new_id, del_exc
+                )
+            return None
+
+    @staticmethod
+    def _set_number_of_contents(db, count: int) -> None:
+        """Make `property.numberOfContents` match the rows on the stick."""
+        try:
+            prop = db.get_properties()[0]
+            prop.number_of_contents = count
+            db.update_property(prop)
+        except Exception as exc:  # rbox OneLibraryError, or no property row (IndexError)
+            logger.warning("[OneLibrary] numberOfContents update skipped: %s", exc)
 
     def _reopen_for_recovery(self) -> None:
         """Open + immediately close the DB once more to force WAL recovery.
@@ -1645,15 +1753,19 @@ class OneLibraryUsbWriter:
                     # Both ids MUST be int for rbox's create_playlist_content.
                     if child["type"] in ("1", "4") and one_id is not None:
                         linked = 0
-                        for ti, t_src_id in enumerate(child["track_ids"]):
+                        for t_src_id in child["track_ids"]:
                             content_id_str = content_id_map.get(str(t_src_id))
                             if not content_id_str:
                                 continue
                             try:
+                                # seq = links made so far, not the source index:
+                                # rbox rejects a gap ("Invalid sequence number"),
+                                # and one track missing on the stick then emptied
+                                # the rest of the playlist.
                                 db.create_playlist_content(
                                     int(one_id),
                                     int(content_id_str),
-                                    ti,
+                                    linked,
                                 )
                                 linked += 1
                             except Exception as e:

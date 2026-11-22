@@ -2,6 +2,7 @@ import logging
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote
 
 from .database import db
 from .xml_generator import RekordboxXML
@@ -39,8 +40,11 @@ class RekordboxBridge:
                 try:
                     # Extract basic info
                     location = track_el.get("Location", "")
-                    # Convert file://localhost/C:/... to C:/...
-                    clean_path = location.replace("file://localhost/", "").replace("/", "\\")
+                    # Convert file://localhost/C:/... to C:/... Rekordbox (and our export)
+                    # percent-encode the URL: an undecoded %20 never matched a library path.
+                    clean_path = (
+                        unquote(location).replace("file://localhost/", "").replace("/", "\\")
+                    )
 
                     track_data: dict[str, Any] = {
                         "Title": track_el.get("Name"),
@@ -62,7 +66,7 @@ class RekordboxBridge:
                             {
                                 "time": float(tempo.get("Inizio") or 0),
                                 "bpm": float(tempo.get("Bpm") or 0),
-                                "beat": int(tempo.get("Battuta") or 1),
+                                "beat": int(tempo.get("Battito") or tempo.get("Battuta") or 1),
                                 "metro": tempo.get("Metro", "4/4"),
                             }
                         )
