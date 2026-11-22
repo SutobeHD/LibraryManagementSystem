@@ -5944,6 +5944,137 @@ Label-free tuning of the high-band onset picker.
 
 W2b cross-check against the app's own whole-track numbers (audio_w8.jsonl, bass.share_60/120).
 
+### `scripts/dev/sound_component_research/derived/cost_probe.py`
+
+Marginal cost of the candidate values: (a) everything derived from stored fingerprints, timed on
+
+- `bench()`
+- `pre_frames()`
+
+### `scripts/dev/sound_component_research/derived/derive_eval.py`
+
+Which further values can the audio component pass give away for free?
+
+- `out()`
+- `sub()`
+- `spear()`
+- `boot()`
+- `saturation()` — Share of tracks inside the densest window of +- 5 % of the observed min-max range.
+- `w2()`
+- `hat()`
+- `bsnd()`
+- `line()`
+- `guard()`
+- `col()`
+- `verdict()`
+- `partial()`
+- `have()`
+- `rb()` — Rank-balanced: off-diagonal distances replaced by their percentile, so every part has the same spre…
+- `kinds()` — All distance matrices for a list of subset dicts (fingerprints quantised as stored).
+- `stats_D()`
+- `nn10()`
+- `js()`
+
+### `scripts/dev/sound_component_research/derived/derived_defs.py`
+
+Definitions of the derived values: the stored fingerprints (as the plan stores them) and the
+
+- `arr()`
+- `q16()`
+- `st_of()`
+- `pit_c_abs()`
+- `hat_bands()`
+- `snd_hrel()`
+- `fp_snd_off()` — bass sound, kick out: 45 x float16 = 90 B.
+- `fp_snd_on()` — bass sound, kick in: 29 x float16 = 58 B.
+- `fp_line_flux()` — bass line rhythm: 16-step low-band flux, sum-normalised, 16 x float16 = 32 B.
+- `fp_pit12()` — bass line notes: 12 between-kick steps x 12 pitch classes, uint8 = 144 B.
+- `fp_hat_timbre()` — hat timbre: 24 bands 5-12 kHz, dB, mean removed, 24 x float16 = 48 B.
+- `fp_hat_decay()` — hat decay: 4-point decay profile + log T20 + log T10 + long-decay share, 7 x float16 = 14 B.
+- `fp_hat_flux()` — hat pattern: 16-step 5-12 kHz flux, 16 x float16 = 32 B.
+- `kb_interval()`
+- `lowflux_share()`
+- `rep1()` — Share of a 16-step profile explained by its own one-beat (4-step) repetition.
+- `chroma()`
+- `entropy12()`
+- `chroma_step_move()` — 1 - mean cosine between each step's pitch-class row and the mean row (weights = row sums).
+- `h12()` — Pitch-class histogram of the voiced between-kick 16ths (ACF f0) - not part of a stored fingerprint.
+- `h_n_pc()`
+- `hat_tilt()` — dB per octave across the 24 bands 5-12 kHz (key = pre_pow gives the control: frames before the onse…
+- `hat_centroid()`
+- `hat_contrast()`
+- `hrel_overtones()` — Mean level of the f0-relative spectrum at the harmonics 2..hmax re the level at the f0 (dB).
+- `bass_class()` — Category of eval_sections.py section 5 (thresholds chosen in rework A).
+
+### `scripts/dev/sound_component_research/derived/grid_lag_blocks.py`
+
+Grid offset per block of window M (lag + contrast), for the 60 fresh tracks of rework A.
+
+- `lag_scores()` — Score per candidate lag exactly as F.estimate_lag builds it.
+- `pick()`
+- `m_blocks()` — Blocks of window M exactly as sections/extract.py analyse_track picks them.
+- `one()`
+- `main()`
+
+### `scripts/dev/sound_component_research/derived/grid_lag_eval.py`
+
+Evaluate grid_lag_blocks.jsonl: repeatability of the grid offset, distribution, contrast as a trust signal.
+
+- `out()`
+- `auc_low()` — Probability that a 'bad' estimate has the lower contrast than a good one.
+
+### `scripts/dev/sound_component_research/derived/synth_bassline.py`
+
+Known-truth check of the low-end rhythm and note-movement candidates (no audio files).
+
+- `make()`
+- `val()`
+
+### `scripts/dev/sound_component_research/derived_structure/derive_confirm.py`
+
+Sensitivity runs on top of derive_features.py: (1) copy agreement on the pairs whose ANLZ
+
+- `out()`
+- `curve()`
+- `corr()`
+
+### `scripts/dev/sound_component_research/derived_structure/derive_features.py`
+
+Which further per-track features fall out of what the planned structure scan already reads
+
+- `post_break_drop()`
+- `family()`
+- `mult()`
+- `derive()`
+- `val()`
+- `agree()`
+- `spearman()`
+- `col()`
+- `cramers_v()`
+- `binned()`
+- `eta()`
+- `out()`
+
+### `scripts/dev/sound_component_research/derived_structure/derive_followup.py`
+
+Follow-up to derive_features.py: grid / cue / status facts for the whole library, a no-audio
+
+- `out()`
+- `sp()`
+- `kind()`
+- `curve()`
+- `ccorr()`
+- `fbm()`
+- `status()`
+- `ents()`
+- `rel()`
+- `cruns()`
+- `big_drop()`
+- `pbd()`
+- `agree()`
+- `show()`
+- `rho()`
+
 ### `scripts/dev/sound_component_research/melody/analyze_melody.py`
 
 Probes 2 + 3 (W8): note events -> 16-step top-voice sequences on the Rekordbox grid ->

@@ -466,6 +466,75 @@ Measurement outputs live in gitignored `tmp/` folders (named per Finding); every
 - **Synthesis:** plan uses the plain hats-energy share (cost figure then holds), the count variants for 16th / off-beat share (held-out numbers), `flux16` with plain cosine at 32 B; the fallback choice moves into the worker; the block-first grid offset is first measured end to end in the acceptance run; on-beat stays out for a semantic reason and is offered at the gate under an honest label.
 - **Confidence:** high (read from the raw output).
 
+### 2026-11-22 — rework D: more structure values from phrases + grid (user: "mehr Features aus den Informationen, die wir sammeln"; supersedes the column-stability row of the RQ3 entry)
+- **Codebase:** probe scripts `scripts/dev/sound_component_research/derived_structure/` (`derive_features.py`, `derive_followup.py`, `derive_confirm.py`) on `tmp/sc-struct/phrases.jsonl` + `tmp/library-analysis/measure/anlz.jsonl`; same code path for the 7 planned columns and every candidate. No audio, no `app/` code.
+- **Measurement (`tmp/sc-derived-struct/`, 4744 tracks with PSSI of 4765; mood high 3954, mid 772, low 18):**
+  - **Copy pairs = 92**, built as in RQ3 (same normalised title, duration ± 3 s, BPM ± 1; 75 cross-format) — **not Chromaprint-confirmed**. Stand-in without audio: the 10-point ANLZ loudness curve correlates > 0.95 in 89 / 92 pairs (random pairs 0.2 %); on those 89 the figures are 0-3 points higher with the same order. Uncertainty ≈ ± 8 points (intro: 0.84, interval 0.76-0.91). The same 92 pairs were used before → nothing here is held-out.
+  - **Correction — planned columns, exact / ± 1 bar (unit) across copies:** intro 0.84 / 0.89, main entry 0.83 / 0.87, drop-after-break 0.88 / 0.88 (0.82 on the 62 pairs with a value), drop count 0.87 / 0.97, break share 0.72 / 0.73 (± 4 points 0.79), outro 0.74 / 0.84, total bars 0.89 / 0.98. The "91 / 89 / 88 / 87 / 93 %" of the RQ3 entry hold only with ± 4 / ± 8 bar tolerances.
+
+  | Candidate | Definition · what a DJ reads | Moods · coverage | Copies = / ± 1 | p10 / p50 / p90 · top value | max ρ vs planned | Verdict |
+  |---|---|---|---|---|---|---|
+  | longest gap between mains | most bars between two main runs, 0 with < 2 · longest stretch without the full part | all · 99.6 % | 0.88 / 0.91 | 4 / 18 / 42 · 16 bars 20 % | 0.55 (break share) | column |
+  | last drop → end | total bars − start of the last main run · bars left to mix the next track in | all · 98.8 % | 0.89 / 0.93 | 24 / 49 / 96 · 32 bars 8 % | 0.38 | column |
+  | longest main run | bars · longest uninterrupted full part | all · 99.6 % | 0.80 / 0.84 | 20 / 47 / 80 · 32 bars 13 % | 0.47 | coarse |
+  | big-drop bar | start of the main run after the longest gap · where the big drop sits | ≥ 2 main runs · 90.9 % | 0.87 / 0.91 | 56 / 104 / 153 · 128 bars 7 % | 0.61 | column; drop-after-break covers 57 %, ρ 0.46, equal on 66 % |
+  | intro type, outro type | variant flag of the first / last phrase (Rekordbox Intro 1 / 2, Outro 1 / 2) | high · 83.0 % | 0.96, 0.95 (κ 0.97, 0.95) | 56 : 44, 37 : 63 | Cramér V 0.50, 0.45 | category, meaning unverified |
+  | main share % | main bars / total | all · 99.6 % | 0.64 / 0.73 (± 4 points 0.82) | 29 / 55 / 74 | 0.55 | coarse at best |
+  | build-up share % | Up bars / total | high | 0.60 / 0.63 (± 4: 0.73) | 11 / 24 / 39 | 0.54 | skip |
+  | odd phrases ≥ 4 (flag) | phrases not a multiple of 4 bars, last excluded | all | 0.95 (κ 0.86) | true 27 % | 0.23 | filter flag |
+  | intro ≥ 16, outro ≥ 16 bars (flags) | thresholds on planned columns · long mix-in / mix-out | all | 0.96, 0.98 (κ 0.89, 0.93) | true 28 %, 20 % | derived | filter, no storage |
+  | intro / outro / entry in seconds | bars × 240 / BPM | all | 0.83 / 0.87; 0.73 / 0.76 | 5 / 13 / 30 s | 0.97-0.99 | skip — unit change (order flips in 2-5 % of random pairs) |
+  | longest break, break count, first drop %, drops ≥ 8, build-up count | — | — | 0.75-0.88 exact | — | 0.81-0.96 | skip — redundant |
+  | phrase count, median phrase, share × 8 bars, fill-in count / share, `bank` | — | — | 0.39-0.78 exact | median phrase = 8 bars on 72 % | — | skip — unstable, saturated or meaning unknown |
+
+  - **Intro / outro type evidence:** where the first tenth of the track lies inside the intro, variant 2 sits at 0.86 of the loudest tenth against 0.42 for variant 1 (P(louder) 0.97); outro 0.79 against 0.50 (P 0.80). From the 10-point ANLZ loudness curve, not from listening → reading "quiet vs loud start / end" is a hypothesis for the 3-track check.
+  - **Grid and cues:** 9 of 4761 grids change tempo (0.19 %) → a constant-tempo flag is one value for 99.8 %. First-beat offset differs by file format (median aiff 23 ms, mp3 65, wav 133; copies agree within 10 ms in 55 %) → a decoder property, not music. Hot cues 0 of 4765, memory cues on 1 track, loops 0 → a "prepared?" column would be constant (cues stored only in `master.db` not checked).
+  - **"Analysed in Rekordbox?" status:** complete 4685 (98.3 %), variable tempo 8, excluded from similarity 50, reader-flagged 1, grid without phrases 17, no grid 3, no ANLZ 1; copies agree 100 % → a filter / badge from the planned `structure_status`, not a sort column.
+  - **Mix partner (seed outro vs candidate intro):** intro and outro both right on 64 % of copies exactly, 76 % ± 1, 83 % in the same 8-bar bin; values pile up (intro 8 bars 30 %, 16 bars 19 %) → a seed's outro matches ≈ 15 % of the library exactly → carries an 8-bar-bin **filter** with a second sort key, not a ranking.
+- **Web:** none.
+- **Synthesis:** three new columns pass (longest gap between mains, last drop → end, big-drop bar), one coarse (longest main run), one category pending its meaning (intro / outro type), two free filters (long intro / outro) and a mix-partner filter. The planned break-share and outro columns are weaker than the RQ3 entry said → coarse; drop-after-break is better replaced by the big-drop bar (wider coverage, no Down / Up label needed). Grid, cue and seconds values add nothing in this library. Every main / drop / break value still rests on the unverified kind → label mapping (3-track check); intro / outro type and odd phrases do not.
+- **Confidence:** medium (92 pairs, ± 8 points, not held-out, pairs not fingerprint-confirmed); high for the "nothing there" results (tempo, cues, first beat).
+
+### 2026-11-22 — rework E: more audio values + combined similarity kinds from the same pass (user: "mehr Features aus den Informationen, die wir sammeln")
+- **Codebase:** probe scripts `scripts/dev/sound_component_research/derived/` (`derived_defs.py`, `derive_eval.py`, `synth_bassline.py`, `grid_lag_blocks.py`, `grid_lag_eval.py`, `cost_probe.py`) on the stored rows of the 60 rework-A tracks (planned values reproduce `eval_sections.txt`) + one lag-only re-run over 296 window-M blocks. No `app/` code.
+- **Measurement (`tmp/sc-derived/`, n = 60, 64 candidates, uncorrected for multiple testing):** Spearman interleaved (Thue-Morse) / early-late [95 % interval] / S1-S2; redundancy = max |ρ| against the nine planned W2 / W4 values; H = definition existed before rework A (held-out on these tracks), A = defined in rework-A code, X = designed now (exploratory); FP = computed from a fingerprint that is stored anyway (0 B), else one float. Extra CPU for all of them ≤ 33 ms per track against the 0.99 CPU-s core set.
+
+  | Candidate | Stability | Verdict (plan rule) | Redundancy | p10 / median / p90 · saturation | Note |
+  |---|---|---|---|---|---|
+  | kick pitch, semitones (H) | 1.00 / 0.94 [0.83-1.00] / 0.90 | column | 0.45 (sub share) | 30.5 / 35.5 / 39.3 · 0.28 | lowest strong on-beat peak; includes the pitch sweep |
+  | bass hits per beat (low-band onsets, H) | 0.99 / 0.96 [0.92-0.98] / 0.95 | column | 0.33 | 1.7 / 2.7 / 3.3 · 0.30 | synthetic 1 / 2 / 4 exact; kick rumble reads 2.7 |
+  | off-beat bass share (FP, X) | 0.99 / 0.98 [0.96-0.99] / 0.98 | column (exploratory) | 0.37 | 0.21 / 0.35 / 0.50 · 0.22 | off-8th low-band flux ÷ between-kick flux; synthetic off-beat bass 1.00 vs rolling 16ths 0.35 |
+  | one-note bass share (H) | 0.96 / 0.89 [0.81-0.94] / 0.86 | column | 0.35 | 0.22 / 0.70 / 1.00 · 0.33 | segments within 1 st of the bass note; synthetic one note 1.00 vs moving line 0.50; misses changes inside a beat, rumble 0.39 |
+  | sub-120 share of total (H) | 1.00 / 0.96 [0.92-0.98] / 0.94 | column | 0.57 | 0.59 / 0.77 / 0.85 · 0.28 | weight of the whole low end |
+  | bass harmonic share (H) | 0.99 / 0.95 [0.87-0.99] / 0.92 | column | 0.39 | 0.29 / 0.73 / 0.97 · 0.25 | tonal vs noisy bass |
+  | kick ↔ bass interval, semitones (A) | 0.99 / 0.95 [0.89-0.99] / 0.88 | stable, meaning unvalidated → coarse | 0.55 | −9.5 / −5.1 / +0.3 · 0.30 | 0 B; "same note" flag (17 %) agrees 0.93 (κ 0.78) yet flags 0 of 8 one-note-loop tracks |
+  | top-end tilt, dB / octave (FP, X) | 0.99 / 0.86 [0.70-0.96] / 0.82 | coarse | 0.38 | −7.1 / −4.5 / −1.7 · 0.30 | bright vs dark top end; pre-onset control ρ 0.64 → largely the mix, not the hats alone |
+  | clap emphasis, share on beats 2 + 4 (FP, X) | 0.97 / 0.84 [0.72-0.90] / 0.70 | coarse | 0.37 | 0.47 / 0.52 / 0.66 · 0.40 | soft styles 0.58 vs hard 0.51 (p 0.0001); flips when the downbeat is wrong |
+  | triplet share (H) | 0.96 / 0.87 [0.77-0.93] / 0.70 | coarse | 0.76 (16th share) | 0 / 0.03 / 0.18 · 0.42 | mostly ≈ 0; swung 16ths count too |
+  | kick tail `tail_db` (A), sustain, dip | 0.97-0.99 / 0.95-0.98 | duplicate | 0.84 [0.72-0.91] (`bass_between_db`) | — | one cluster with "bass between kicks" |
+  | kick-tail mono share, bass re-rise share | 0.94 / 0.79-0.82 | hidden | — | saturation 0.85 / 0.62 | |
+  | 16th hits per beat | 0.99 / 0.91 | duplicate | 0.99 (16th share) | — | |
+  | hat decay T20, fold drop @ 50 ms off-beat | 0.99 / 0.80-0.87 | hidden / not better | 0.71-0.78 (long-decay share) | — | percussive-share ρ −0.47 / −0.74 → fold drop is **less** hat-specific than the planned long-decay share (−0.53) |
+  | chroma entropy (FP, X) | 0.97 / 0.90 / 0.90 | invalid | — | — | fails the synthetic truth (one note 0.88-0.95 vs moving 0.95-0.99) |
+
+  - **Combined similarity kinds from stored fingerprints (0 extra bytes; top-1 / top-10, pool 60; the existing kinds correlate ≤ 0.13 except bass out ~ in 0.69):**
+
+  | Kind | early / late | S1 / S2 | max pair-distance ρ vs existing | Verdict |
+  |---|---|---|---|---|
+  | overall sound = bass sound (kick out) + hat timbre | 0.95 / 0.98 | 0.92 / 0.97 | 0.67 | passes, adds an axis |
+  | kick = kick-in sound + kick pitch + kick tail (0.75 / 0.25, X) | 0.92 / 0.97 | 0.83 / 0.92 | 0.73 | passes (weights chosen now) |
+  | kick = kick-in sound alone | 0.83 / 0.95 | 0.76 / 0.88 | 0.73 | S1 / S2 top-1 < 0.80 |
+  | groove, rhythm only = bass-line flux16 + hat flux16 | 0.87 / 1.00 | 0.75 / 0.90 | 0.73 | passes the coarse bar |
+  | groove = whole bass line + hat pattern | 0.95 / 1.00 | 0.83 / 0.92 | 0.87 (hat pattern) | adds nothing |
+  | everything combined | 1.00 / 1.00 | 0.93 / 0.98 | 0.82 | fails on rank balance (0.70) |
+
+  The existing bass kinds follow the low-band rhythm (ρ 0.72) more than the bass sound (0.59) or the notes (0.28).
+  - **Grid offset:** estimated from all window-M blocks pooled vs the middle 120 s: ≤ 3 ms apart on 100 % (longest block alone: 2 tracks > 5 ms) → pooling all blocks makes the middle-window decode unnecessary. Block contrast separates bad estimates (AUC 0.86; > 5 ms off in 6 / 14 blocks with contrast < 5, 5 / 42 at 5-10, 2 / 240 above 10). Offsets beyond ± 10 ms on 22 % of tracks — MP3 12 / 13 (clusters at −22 and −47 ms = decoder delay), lossless 1 / 39 → a per-track correction is needed, but as a column it shows the file type, not music.
+  - **Synthetic side finding:** staccato 16th bass lines read the planned bass note (mean-spectrum f0) 4.5 semitones low.
+- **Web:** none.
+- **Synthesis:** six more bass / kick columns pass at no extra cost (kick pitch, bass hits per beat, off-beat bass share, one-note bass share, sub-120 share, bass harmonic share); kick ↔ bass interval, top-end tilt, clap emphasis and triplet share only coarse; the kick-tail values duplicate "bass between kicks". Three combined similarity kinds pass from fingerprints already stored: overall sound, kick (with pitch + tail), groove (rhythm only, coarse). Grid offset: pool all blocks, flag blocks with contrast < 5. Meaning is shown on synthetic signals and by stability, not against a listening ground truth; X definitions and blend weights were chosen on these 60 tracks → the 240-track acceptance run decides.
+- **Confidence:** medium-high for stability of the H rows; medium for X rows and the blends (exploratory); low for what kick ↔ bass interval, tilt and clap emphasis mean to a DJ.
+
 ## Adversarial Findings
 
 Stage 2 Adversarial-Agent (phase 2). Devil's-advocate — what could go wrong, what assumptions are weak, what dependencies betray us. ≤120 words. Append-only.

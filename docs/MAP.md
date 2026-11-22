@@ -422,6 +422,15 @@
 | `scripts/dev/sound_component_research/baseline/synthetic_truth.py` | Synthetic sanity check for the pickers / classifiers / decay estimators (known truth). |
 | `scripts/dev/sound_component_research/baseline/tune_hats.py` | Label-free tuning of the high-band onset picker. |
 | `scripts/dev/sound_component_research/baseline/w8_compare.py` | W2b cross-check against the app's own whole-track numbers (audio_w8.jsonl, bass.share_60/120). |
+| `scripts/dev/sound_component_research/derived/cost_probe.py` | Marginal cost of the candidate values: (a) everything derived from stored fingerprints, timed on |
+| `scripts/dev/sound_component_research/derived/derive_eval.py` | Which further values can the audio component pass give away for free? |
+| `scripts/dev/sound_component_research/derived/derived_defs.py` | Definitions of the derived values: the stored fingerprints (as the plan stores them) and the |
+| `scripts/dev/sound_component_research/derived/grid_lag_blocks.py` | Grid offset per block of window M (lag + contrast), for the 60 fresh tracks of rework A. |
+| `scripts/dev/sound_component_research/derived/grid_lag_eval.py` | Evaluate grid_lag_blocks.jsonl: repeatability of the grid offset, distribution, contrast as a trust signal. |
+| `scripts/dev/sound_component_research/derived/synth_bassline.py` | Known-truth check of the low-end rhythm and note-movement candidates (no audio files). |
+| `scripts/dev/sound_component_research/derived_structure/derive_confirm.py` | Sensitivity runs on top of derive_features.py: (1) copy agreement on the pairs whose ANLZ |
+| `scripts/dev/sound_component_research/derived_structure/derive_features.py` | Which further per-track features fall out of what the planned structure scan already reads |
+| `scripts/dev/sound_component_research/derived_structure/derive_followup.py` | Follow-up to derive_features.py: grid / cue / status facts for the whole library, a no-audio |
 | `scripts/dev/sound_component_research/melody/analyze_melody.py` | Probes 2 + 3 (W8): note events -> 16-step top-voice sequences on the Rekordbox grid -> |
 | `scripts/dev/sound_component_research/melody/analyze_w6.py` | Probe 4 (W6 "how melodic" = lead, not pad): scalar candidates from basic-pitch notes on the |
 | `scripts/dev/sound_component_research/melody/build_pairs.py` | Probe 1 (W8 weak ground truth): original <-> remix / edit pairs from title stems. |
