@@ -11,8 +11,10 @@ id = "workspace-topbar-nav"
 group = "Navigation & Fenster"
 name = "TopBar + Workspaces"
 status = "shipped"
+test = "getestet"
+tested = "2026-11-14"
 desc = "Workspaces (Library/Import/Ranking/Editor/USB/SoundCloud/Utilities), Unter-Tabs, Lazy-Views, ErrorBoundary pro View."
-notes = "Komplett in frontend/src/main.jsx (Hub). Views mounten seit PR #65 (in #60) erst beim Tab-Öffnen; zustandsbehaftete Views bleiben gemountet."
+notes = "Komplett in frontend/src/main.jsx (Hub). Views mounten seit PR #65 (in #60) erst beim Tab-Öffnen; zustandsbehaftete Views bleiben gemountet. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): ok."
 
 [[feature]]
 id = "frameless-window"
@@ -29,6 +31,7 @@ id = "boot-splash"
 group = "Navigation & Fenster"
 name = "Splash + Boot-Reveal"
 status = "shipped"
+test = "testen"
 desc = "Splash-Fenster, Hauptfenster startet unsichtbar, Rust-Watchdog nach 10 s."
 paths = ["frontend/public/splashscreen.html"]
 related = ["tauri-sidecar-supervisor"]
@@ -41,6 +44,7 @@ id = "toast-notifications"
 group = "Feedback"
 name = "Toasts"
 status = "shipped"
+test = "testen"
 desc = "react-hot-toast global + eigener ToastContext/useToast."
 paths = ["frontend/src/components/ToastContext.jsx"]
 notes = "Zwei Systeme parallel (31 Dateien hot-toast, 6 useToast)."
@@ -62,6 +66,7 @@ id = "confirm-prompt-modals"
 group = "Feedback"
 name = "Confirm/Prompt-Modals"
 status = "shipped"
+test = "testen"
 desc = "Promise-basierter Ersatz für window.confirm/prompt, Rename-Dialog."
 paths = ["frontend/src/components/ConfirmModal.jsx", "frontend/src/components/PromptModal.jsx", "frontend/src/components/RenameModal.jsx"]
 
@@ -72,9 +77,11 @@ id = "list-context-menus"
 group = "Kontextmenüs"
 name = "Track/Playlist-Rechtsklickmenüs"
 status = "shipped"
+test = "getestet"
+tested = "2026-11-14"
 desc = "Portal-Menüs: Track 9 Aktionen, Playlist 7 Aktionen; funktioniert in WebView2."
 related = ["track-table", "playlist-tree-crud", "context-menu-system"]
-notes = "Eigene Implementierung in TrackTable.jsx/PlaylistBrowser.jsx, nicht das shared ContextMenu."
+notes = "Eigene Implementierung in TrackTable.jsx/PlaylistBrowser.jsx, nicht das shared ContextMenu. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): ok."
 
 [[feature]]
 id = "context-menu-system"
@@ -95,22 +102,26 @@ id = "settings-panel"
 group = "Settings"
 name = "Settings-View"
 status = "shipped"
+test = "getestet"
+tested = "2026-11-14"
 desc = "8 Tabs: Library/Export/USB/Audio/Analysis/Appearance/Shortcuts/Network."
 paths = ["frontend/src/components/SettingsView.jsx", "frontend/src/components/settings/SettingsControls.jsx", "frontend/src/components/settings/SettingsNetwork.jsx"]
 routes = ["/api/settings"]
 depends_on = ["settings-backend-store"]
-notes = "Tabs gehören fachlich zu ihren Features (z. B. SettingsUsb -> usb-profiles)."
+notes = "Tabs gehören fachlich zu ihren Features (z. B. SettingsUsb -> usb-profiles). Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): ok."
 
 [[feature]]
 id = "settings-backend-store"
 group = "Settings"
 name = "SettingsManager + Payload-Caps"
 status = "shipped"
+test = "getestet"
+tested = "2026-11-14"
 research = "security-pydantic-extra-allow-blob-write"
 desc = "JSON-Settings laden/speichern, SetReq-Caps (8 KB/Wert, 256 KB gesamt), Sanitizer beim Laden."
 paths = ["tests/test_settings_caps.py"]
 routes = ["/api/settings"]
-notes = "SettingsManager lebt in services.py (Hub). load() ungecacht; hide_streaming wird seit PR #67 (in #60) in database.py per mtime gecacht."
+notes = "SettingsManager lebt in services.py (Hub). load() ungecacht; hide_streaming wird seit PR #67 (in #60) in database.py per mtime gecacht. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): ok."
 
 [[feature]]
 id = "keyboard-shortcuts"
@@ -138,9 +149,11 @@ id = "melodex-design-system"
 group = "Theming"
 name = "Melodex Design-System"
 status = "shipped"
+test = "getestet"
+tested = "2026-11-14"
 desc = "Amber-Akzent, mx/ink/line-Tokens, DM Sans + JetBrains Mono, UI-Primitives."
 paths = ["frontend/tailwind.config.js", "frontend/src/index.css", "frontend/postcss.config.js"]
-notes = "Neue Views an der Library-Ansicht ausrichten (Coding-Rule)."
+notes = "Neue Views an der Library-Ansicht ausrichten (Coding-Rule). Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): ok."
 
 [[feature]]
 id = "rekordbox-skin"

@@ -11,12 +11,14 @@ id = "track-metadata-update"
 group = "Tag-Editing"
 name = "Track-Metadaten speichern"
 status = "shipped"
+test = "getestet"
+tested = "2026-11-14"
 desc = "Felder einzeln oder als Batch in master.db bzw. XML schreiben."
 paths = ["frontend/src/components/BatchEditBar.jsx"]
 routes = ["/api/track/{tid}", "/api/tracks/batch"]
 depends_on = ["live-master-db"]
 related = ["file-tag-writeback"]
-notes = "Kein eigenes Edit-Formular. BatchEditBar.jsx nicht gemountet. Unbekannte Feld-Keys werden still mit True quittiert (K8)."
+notes = "Kein eigenes Edit-Formular. BatchEditBar.jsx nicht gemountet. Unbekannte Feld-Keys werden still mit True quittiert (K8). Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): ok."
 
 [[feature]]
 id = "track-write-safety"
@@ -28,7 +30,7 @@ test = "testen"
 desc = "Felder ablehnen, die Live/XML nicht speichern kann; XML-Save atomar; 400/422 statt stillem 200."
 paths = ["app/track_fields.py", "tests/test_track_metadata_fields.py"]
 related = ["db-write-lock", "artist-merge"]
-todo = ["4 uncommittete Dateien im Worktree committen (Routen-Teil)", "Backup vor Merge inkl. masterPlaylists6.xml", "Rekordbox-läuft-Guard auch für Playlist-/Metadaten-Writer", "Datei-Backup vor Tag-Writes (Revert stellt nur den Tag-String her)"]
+todo = ["4 uncommittete Dateien im Worktree committen (Routen-Teil)", "Backup vor Merge inkl. masterPlaylists6.xml", "Rekordbox-läuft-Guard auch für Playlist-/Metadaten-Writer", "Datei-Backup vor Tag-Writes (Revert stellt nur den Tag-String her)", "B12: ungültige/unbekannte Felder -> HTTP 500 statt 400/422 (batch_up fängt UnsupportedTrackFields/InvalidTrackFieldValue nicht)"]
 notes = "Worktree .claude/worktrees/wf_1fefdec9-6fc-2. Auf PR #58 gestapelt - nach #58 landen."
 
 [[feature]]
@@ -36,6 +38,7 @@ id = "file-tag-writeback"
 group = "Tag-Editing"
 name = "Tags in Audiodatei schreiben"
 status = "shipped"
+test = "testen"
 desc = "Mutagen schreibt ID3/FLAC/MP4/Vorbis/AIFF/WAV inkl. Cover (Setting write_tags_to_files)."
 paths = ["app/audio_tags.py"]
 depends_on = ["track-metadata-update"]
@@ -46,8 +49,10 @@ id = "native-tag-read"
 group = "Tag-Editing"
 name = "Tags lesen beim Import"
 status = "shipped"
+test = "getestet"
+tested = "2026-11-14"
 desc = "Title/Artist/Album/BPM/Key/ISRC lesen, Fallback 'Artist - Title' aus Dateiname."
-notes = "Lebt in app/audio_tags.py und app/services.py."
+notes = "Lebt in app/audio_tags.py und app/services.py. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): ok."
 
 # ── Bereinigung & Normalisierung ──────────────────────────────────────────
 
@@ -68,10 +73,12 @@ id = "name-normalisation"
 group = "Bereinigung & Normalisierung"
 name = "Artist-Split & Alias-Mapping"
 status = "shipped"
+test = "getestet"
+tested = "2026-11-14"
 desc = "Artist-Strings beim Laden splitten/normalisieren, Alias-Merge für Label/Album/Artist."
 routes = ["/api/metadata/merge"]
 related = ["artist-merge", "metadata-merge-consolidation"]
-notes = "Alias-Mapping lebt nur in der App, wird nie in master.db/Tags geschrieben."
+notes = "Alias-Mapping lebt nur in der App, wird nie in master.db/Tags geschrieben. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): ok."
 
 [[feature]]
 id = "metadata-merge-consolidation"
@@ -146,7 +153,9 @@ id = "artwork-serve-embed"
 group = "Artwork"
 name = "Cover anzeigen & einbetten"
 status = "shipped"
+test = "getestet"
+tested = "2026-11-14"
 desc = "Cover aus Pfad/Rekordbox-Share ausliefern, beim Tag-Write einbetten."
 routes = ["/api/artwork"]
 related = ["usb-artwork", "library-health-filters"]
-notes = "Kein Cover-Editor/Upload im UI."
+notes = "Kein Cover-Editor/Upload im UI. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): ok."

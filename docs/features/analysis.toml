@@ -15,39 +15,48 @@ desc = "madmom-RNN-Beats mit Oktav-Prior, essentia-Key, Downbeat, Tempo-Wechsel,
 paths = ["app/analysis_engine.py"]
 depends_on = ["analysis-settings", "analysis-cache"]
 related = ["genre-definition-schema"]
+todo = ["B5: BPM auf 10-ms-Raster quantisiert (madmom fps=100, Median-IBI): 128 -> 127,66, 124/126 -> 125,0, 152 -> 154,0 - Ansatz mit Nutzer klären", "Key nur 2/8 exakt gleich Rekordbox; essentia in .venv/Bundle nicht installiert -> K-S-Fallback"]
 
 [[feature]]
 id = "analysis-settings"
 group = "DSP-Engine"
 name = "Analyse-Einstellungen"
 status = "shipped"
+test = "getestet"
+tested = "2026-11-14"
 desc = "Tunables (BPM-Range, Cue-Limits, Memory-Grid, Samplerate) per RB_ANALYSIS_-Env, Settings-Tab Analysis."
 paths = ["app/analysis_settings.py", "frontend/src/components/settings/SettingsAnalysis.jsx"]
-notes = "DSP-Tunables nur per Env. UI-Preset analysis_quality liest kein Backend (toter Wert)."
+notes = "DSP-Tunables nur per Env. UI-Preset analysis_quality liest kein Backend (toter Wert). Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): ok."
 
 [[feature]]
 id = "analysis-cache"
 group = "DSP-Engine"
 name = "AnalysisCache"
 status = "shipped"
+test = "getestet"
+tested = "2026-11-14"
 desc = "Ergebnis-Cache auf Platte per Content-Hash."
 paths = ["app/analysis_cache.py"]
-notes = "clear()/invalidate() evtl. Dead Code."
+notes = "clear()/invalidate() evtl. Dead Code. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): ok."
 
 [[feature]]
 id = "auto-cues-phrases"
 group = "DSP-Engine"
 name = "Auto-Cues & Phrasen"
 status = "shipped"
+test = "getestet"
+tested = "2026-11-14"
 desc = "Auto-Hot-Cues, Memory-Cues oder 16-Bar-Grid, Phrasenerkennung mit PSSI-Mood-IDs."
 depends_on = ["analysis-engine", "anlz-writer"]
 related = ["phrase-cue-generator", "hot-cue-16-limits"]
+notes = "Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): ok."
 
 [[feature]]
 id = "waveform-generation"
 group = "DSP-Engine"
 name = "ANLZ-Waveforms erzeugen"
 status = "partial"
+test = "testen"
 desc = "Rekordbox-Waveforms PWAV..PWV7 für die ANLZ-Dateien."
 depends_on = ["analysis-engine", "anlz-writer"]
 related = ["multiband-waveform-data"]
@@ -61,21 +70,25 @@ id = "analysis-on-import"
 group = "Pipelines"
 name = "Auto-Analyse beim Import"
 status = "shipped"
+test = "getestet"
+tested = "2026-11-14"
 desc = "Import und SC-Download starten Vollanalyse und schreiben Companion-ANLZ."
 depends_on = ["analysis-engine", "anlz-writer"]
 related = ["import-manager", "sc-download-pipeline"]
+notes = "Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): ok."
 
 [[feature]]
 id = "analysis-api-manual"
 group = "Pipelines"
 name = "Manuelle (Re-)Analyse & Batch"
 status = "partial"
+test = "testen"
 desc = "Async-Task, Einzel-Track, analyze-full (ANLZ + master.db), NDJSON-Batch, Status."
 paths = ["app/audio_analyzer.py", "app/analysis_db_writer.py"]
 routes = ["/api/audio/analyze", "/api/track/{tid}/analyze", "/api/track/{tid}/analyze-full", "/api/library/analyze-batch"]
 depends_on = ["analysis-engine", "anlz-writer", "live-master-db"]
 related = ["db-write-lock-retrofit"]
-notes = "Kein Frontend ruft die Routen. Schreibt unter db_lock analysed=105 + Key in Rekordbox-Schreibweise (Am, Dbm, F#); ein abgelehnter master.db-Write ist db_update_failed -> 500, nie still ok (B6, fix/kernloop-0.1-bugs)."
+notes = "Kein Frontend ruft die Routen. Schreibt unter db_lock analysed=105 + Key in Rekordbox-Schreibweise (Am, Dbm, F#); ein abgelehnter master.db-Write ist db_update_failed -> 500, nie still ok (B6, fix/kernloop-0.1-bugs). Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): B6 (analyze-full meldete ok trotz gescheitertem master.db-Write) in PR #82 gefixt - neu prüfen."
 
 # ── Matching & Klassifikation ─────────────────────────────────────────────
 
@@ -151,6 +164,8 @@ desc = "A/B über 10-50 echte Tracks, Live-master.db-Write mit User-DB, echter S
 related = ["analysis-accuracy-harness", "usb-onelibrary-export"]
 
 # ── Ideen ─────────────────────────────────────────────────────────────────
+todo = ["CDJ-3000-Test durch Nutzer: BPM/Länge, Cover, Waveform, Grid auf dem Kick, Cues, Sync-Drift"]
+notes = "B15 gefixt: compare_rekordbox.py liest Grids per pyrekordbox (app.anlz_safe) und Keys über die djmdKey-Tabelle (Camelot oder Notenname)."
 
 [[feature]]
 id = "bpm-octave-disambiguation"
