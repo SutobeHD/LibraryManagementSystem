@@ -70,6 +70,11 @@
     beats too. 1 of 50 real uniform grids moved (210 → 20 ms against
     Rekordbox); two more at a 1.4× margin stay put because Rekordbox agrees
     with the shift for one and not for the other.
+  - Fixed: beat grids of `.m4a` / `.mp4` files sat about 48 ms late. The
+    47.9 ms AAC encoder-delay shift was applied although the decoder already
+    drops the priming samples; 8 of 8 real `.m4a` tracks went from 49–56 ms
+    to 1–8 ms against Rekordbox. Raw `.aac` and files with an iTunSMPB tag
+    keep their shift (no such file measured).
 - Reliability hardening (codebase-wide bug-hunt — 16 fixes + 15 new test files,
   full pytest suite 658 passing):
   - Fixed: Rekordbox XML import called a non-existent `db.update_track`, so every

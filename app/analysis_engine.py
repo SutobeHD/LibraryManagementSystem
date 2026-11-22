@@ -175,7 +175,11 @@ _ZERO_DELAY_FORMATS = {".flac", ".wav", ".aiff", ".aif", ".ogg", ".opus"}
 # Rekordbox compensates ~22.5ms; we use exact value when LAME header is present.
 _MP3_DEFAULT_DELAY_S = 0.0225
 
-# AAC/M4A typical encoder delay (Apple/Nero: ~2112 samples = 47.9ms @ 44.1kHz)
+# AAC typical encoder delay (Apple/Nero: ~2112 priming samples = 47.9ms @ 44.1kHz).
+# Raw ADTS .aac only. In an MP4 container (.m4a/.mp4) the decoder already drops
+# the priming samples through the edit list and Rekordbox's grid carries no
+# such offset: 8 of 8 real .m4a tracks sat 49-56 ms behind Rekordbox with this
+# shift and 1-8 ms without it (lossless files: 1-11 ms).
 _AAC_DEFAULT_DELAY_S = 0.0479
 
 
@@ -183,10 +187,11 @@ def get_encoder_delay(file_path: str) -> float:
     """
     Return encoder delay (seconds) to compensate beat-grid alignment.
 
-    For lossy codecs (MP3, AAC), the encoder prepends silence which the decoder
-    plays back -- this shifts all timestamps. Rekordbox compensates this.
+    For MP3 and raw AAC the encoder prepends silence which the decoder plays
+    back -- this shifts all timestamps. Rekordbox compensates this.
 
-    For lossless (FLAC, WAV, AIFF) and ungapped containers (Ogg, Opus), delay = 0.
+    For lossless (FLAC, WAV, AIFF), ungapped containers (Ogg, Opus) and AAC in
+    an MP4 container without an iTunSMPB tag, delay = 0.
     """
     ext = os.path.splitext(file_path)[1].lower()
     if ext in _ZERO_DELAY_FORMATS:
@@ -229,7 +234,7 @@ def get_encoder_delay(file_path: str) -> float:
                         return float(priming) / float(sr)
             except Exception:
                 pass
-        return _AAC_DEFAULT_DELAY_S
+        return _AAC_DEFAULT_DELAY_S if ext == ".aac" else 0.0
 
     return 0.0
 

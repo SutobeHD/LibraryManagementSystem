@@ -146,7 +146,9 @@ def test_settings_env_override(monkeypatch):
         ("foo.ogg", 0.0),
         ("foo.opus", 0.0),
         ("foo.mp3", 0.0225),
-        ("foo.m4a", 0.0479),
+        # MP4 container: the decoder drops the priming samples itself.
+        ("foo.m4a", 0.0),
+        ("foo.mp4", 0.0),
         ("foo.aac", 0.0479),
     ],
 )
