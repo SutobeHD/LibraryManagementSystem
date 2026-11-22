@@ -3770,6 +3770,12 @@ BPM from a regression line through all beats, uniform grid for steady tracks (B5
 - `test_comb_fit_too_few_beats()`
 - `dsp()`
 - `test_slipped_tracker_still_gets_exact_tempo_and_uniform_grid()`
+- `offbeat_audio()`
+- `test_grid_on_the_hats_is_seen_as_off_beat()`
+- `test_off_beat_needs_the_first_sound_between_the_beats_too()`
+- `test_off_beat_needs_a_clear_margin()`
+- `test_tracker_on_the_off_beat_still_gets_a_grid_on_the_kicks()`
+- `test_tracker_on_the_kicks_keeps_its_phase()`
 - `engine()`
 - `test_steady_128_bpm_track_gets_exact_tempo_and_uniform_grid()`
 - `test_tempo_change_keeps_the_tracked_beats()`

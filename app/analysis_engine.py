@@ -933,6 +933,60 @@ def _snap_bpm(bpm: float, half_span_s: float = 0.0) -> float:
     return round(bpm, 2)
 
 
+# Half-beat phase of a uniform grid. The tracker sometimes locks onto the
+# off-beat (open hi-hat plus off-beat bass) and the uniform grid inherits that
+# phase. The punch of the kick tells the two phases apart: level rises of the
+# 150-2000 Hz band — above the sub-bass, below the hats; the band-pass has to
+# be steep or an off-beat sub-bass leaks in — are summed on the grid and half a
+# beat later. Over 50 real uniform grids the later/on-grid ratio was <= 0.87
+# for 47. Of the three above, Rekordbox sits half a beat away from us at 2.92
+# and 1.40 but agrees with us at 1.45, so only a ratio of _PHASE_MIN_RATIO
+# moves the grid — and only when the later phase also wins on most beats
+# (_PHASE_MIN_WINS) and the first sound of the track sits between the beats
+# as well (_PHASE_START_TOL).
+_PHASE_BAND_HZ = (150.0, 2000.0)
+_PHASE_FRAME_S = 0.005
+_PHASE_WINDOW_S = 0.02  # a beat's punch counts within this much of its grid time
+_PHASE_MIN_RATIO = 2.0
+_PHASE_MIN_WINS = 0.6
+_PHASE_START_TOL = 0.15  # of one beat
+
+
+def _punch_onsets(y: np.ndarray, sr: int) -> tuple[np.ndarray, float]:
+    """Rise of the 150-2000 Hz level per frame, and the frame length in seconds."""
+    sos = signal.butter(  # type: ignore[union-attr]
+        4, _PHASE_BAND_HZ, "bandpass", fs=sr, output="sos"
+    )
+    band = signal.sosfilt(sos, y)  # type: ignore[union-attr]
+    hop = max(1, round(sr * _PHASE_FRAME_S))
+    n = len(band) // hop
+    level = np.sqrt(np.mean(band[: n * hop].reshape(n, hop) ** 2, axis=1))
+    return np.maximum(0.0, np.diff(level, prepend=level[:1])), hop / sr
+
+
+def _grid_on_the_off_beat(
+    y: np.ndarray, sr: int, grid_times: np.ndarray, period: float, first_signal_t: float
+) -> bool:
+    """True when the kicks fall half a beat after ``grid_times`` instead of on them."""
+    onsets, frame_s = _punch_onsets(y, sr)
+    reach = max(1, round(_PHASE_WINDOW_S / frame_s))
+    grid = np.asarray(grid_times, dtype=float)
+    on = np.round(grid / frame_s).astype(int)
+    off = np.round((grid + period / 2.0) / frame_s).astype(int)
+    inside = (on - reach >= 0) & (off + reach < len(onsets))
+    if int(inside.sum()) < _GRID_MIN_BEATS:
+        return False
+    window = np.arange(-reach, reach + 1)
+    on_beat = onsets[on[inside][:, None] + window].max(axis=1)
+    off_beat = onsets[off[inside][:, None] + window].max(axis=1)
+    if float(off_beat.sum()) < _PHASE_MIN_RATIO * float(on_beat.sum()):
+        return False
+    if float(np.mean(off_beat > on_beat)) < _PHASE_MIN_WINS:
+        return False
+    start = ((first_signal_t - float(grid[0])) / period) % 1.0
+    return abs(start - 0.5) <= _PHASE_START_TOL
+
+
 def detect_beats_madmom(
     y: np.ndarray,
     sr: int,
@@ -1026,9 +1080,11 @@ def detect_beats_madmom(
             if uniform and fit is not None:
                 half_span = max(fit.anchor - fit.first, fit.last - fit.anchor)
                 bpm = _snap_bpm(bpm_raw, half_span)
-                grid_times = _uniform_beats(
-                    fit.anchor, 60.0 / bpm, float(beats_madmom[0]), float(beats_madmom[-1])
-                )
+                beat_s = 60.0 / bpm
+                span = (float(beats_madmom[0]), float(beats_madmom[-1]))
+                grid_times = _uniform_beats(fit.anchor, beat_s, *span)
+                if _grid_on_the_off_beat(y, sr, grid_times, beat_s, first_signal_t):
+                    grid_times = _uniform_beats(fit.anchor + beat_s / 2.0, beat_s, *span)
                 grid_mode = "uniform"
             else:
                 bpm = _snap_bpm(bpm_raw)

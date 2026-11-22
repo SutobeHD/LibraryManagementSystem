@@ -237,6 +237,85 @@ def test_slipped_tracker_still_gets_exact_tempo_and_uniform_grid(dsp, monkeypatc
     assert off_kick.max() <= 0.012
 
 
+# --- half-beat phase: a uniform grid on the off-beat moves onto the kicks ------
+
+
+def _offbeat_track(kicks: np.ndarray, duration_s: float, period: float) -> np.ndarray:
+    """Kicks on the beat; a hi-hat and a soft sub-bass note half a beat after each."""
+    from scipy import signal
+
+    y = _kick_track(list(kicks), duration_s)
+    n = len(y)
+    rng = np.random.default_rng(3)
+    m = int(0.05 * SR)
+    hat = rng.standard_normal(m) * np.exp(-np.linspace(0, 6, m)) * 0.5
+    hat = signal.sosfilt(signal.butter(4, 6000.0, "high", fs=SR, output="sos"), hat)
+    b = int(0.15 * SR)
+    bass = np.sin(2 * np.pi * 45 * np.arange(b) / SR) * np.hanning(b) * 0.6
+    for t in kicks + period / 2:
+        i = round(t * SR)
+        if i + b < n:
+            y[i : i + m] += hat.astype(np.float32)
+            y[i : i + b] += bass.astype(np.float32)
+    return y
+
+
+@pytest.fixture(scope="module")
+def offbeat_audio(dsp):
+    period = 60.0 / 140.0
+    kicks = np.array(_even(140.0, 60.0))
+    return kicks, period, _offbeat_track(kicks, 60.0, period)
+
+
+def test_grid_on_the_hats_is_seen_as_off_beat(dsp, offbeat_audio) -> None:
+    kicks, period, y = offbeat_audio
+    start = dsp.find_first_signal_onset(y, SR)
+    assert dsp._grid_on_the_off_beat(y, SR, kicks[:-1] + period / 2, period, start)
+    assert not dsp._grid_on_the_off_beat(y, SR, kicks, period, start)
+
+
+def test_off_beat_needs_the_first_sound_between_the_beats_too(dsp, offbeat_audio) -> None:
+    kicks, period, y = offbeat_audio
+    grid = kicks[:-1] + period / 2
+    # Same audio, but the track is taken to start on a grid beat: no flip.
+    assert not dsp._grid_on_the_off_beat(y, SR, grid, period, float(grid[0]))
+
+
+@pytest.mark.parametrize(("louder", "off_beat"), [(1.5, False), (3.0, True)])
+def test_off_beat_needs_a_clear_margin(dsp, louder: float, off_beat: bool) -> None:
+    # A kick on every grid beat and a louder one half a beat later. Rekordbox
+    # itself is split on real tracks at a 1.4-1.5x margin, so that stays put.
+    period = 60.0 / 140.0
+    grid = np.array(_even(140.0, 30.0))
+    y = _kick_track(list(grid), 30.0) + louder * _kick_track(list(grid[:-1] + period / 2), 30.0)
+    between = float(grid[0] + period / 2)
+    assert dsp._grid_on_the_off_beat(y, SR, grid[:-1], period, between) is off_beat
+
+
+def test_tracker_on_the_off_beat_still_gets_a_grid_on_the_kicks(
+    dsp, offbeat_audio, monkeypatch
+) -> None:
+    kicks, period, y = offbeat_audio
+    monkeypatch.setattr(dsp, "madmom", _fake_madmom(_round10(kicks[:-1] + period / 2)))
+    r = dsp.detect_beats_madmom(y, SR, first_signal_t=dsp.find_first_signal_onset(y, SR))
+    assert r is not None
+    assert r["bpm"] == 140.0
+    assert r["grid_mode"] == "uniform"
+    times = np.array([b["time_ms"] for b in r["beats"]]) / 1000.0
+    off_kick = np.abs((times - kicks[0] + period / 2) % period - period / 2)
+    assert off_kick.max() <= 0.012
+
+
+def test_tracker_on_the_kicks_keeps_its_phase(dsp, offbeat_audio, monkeypatch) -> None:
+    kicks, period, y = offbeat_audio
+    monkeypatch.setattr(dsp, "madmom", _fake_madmom(_round10(kicks)))
+    r = dsp.detect_beats_madmom(y, SR, first_signal_t=dsp.find_first_signal_onset(y, SR))
+    assert r is not None
+    times = np.array([b["time_ms"] for b in r["beats"]]) / 1000.0
+    off_kick = np.abs((times - kicks[0] + period / 2) % period - period / 2)
+    assert off_kick.max() <= 0.012
+
+
 @pytest.fixture(scope="module")
 def engine():
     ae._ensure_libs()

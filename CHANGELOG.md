@@ -63,6 +63,13 @@
     that line. A/B against Rekordbox on 60 real tracks: BPM identical 40 → 56,
     median grid error 11.3 → 6.0 ms. Analysis cache version 5 — tracks are
     re-analysed once.
+  - Fixed: a uniform beat grid that sat on the off-beat (tracker locked onto
+    open hi-hat + off-beat bass) moves half a beat onto the kicks — only when
+    the kick band (150–2000 Hz) is at least twice as strong between the beats
+    as on them, on most beats, and the track's first sound sits between the
+    beats too. 1 of 50 real uniform grids moved (210 → 20 ms against
+    Rekordbox); two more at a 1.4× margin stay put because Rekordbox agrees
+    with the shift for one and not for the other.
 - Reliability hardening (codebase-wide bug-hunt — 16 fixes + 15 new test files,
   full pytest suite 658 passing):
   - Fixed: Rekordbox XML import called a non-existent `db.update_track`, so every
