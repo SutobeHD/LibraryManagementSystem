@@ -230,7 +230,7 @@ class LiveRekordboxDB:
                 else "",
                 "Subtitle": getattr(item, "subtitle", ""),
                 "ReleaseYear": int(getattr(item, "release_year", 0) or 0),
-                "StockDate": str(getattr(item, "stock_date", "")),
+                "StockDate": str(getattr(item, "stock_date", None) or ""),
                 "SampleRate": int(getattr(item, "sample_rate", 0) or 0),
                 "ISRC": getattr(item, "isrc", ""),
             }
