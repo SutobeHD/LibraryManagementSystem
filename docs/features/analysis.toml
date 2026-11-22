@@ -11,11 +11,13 @@ id = "analysis-engine"
 group = "DSP-Engine"
 name = "Analyse-Engine BPM/Key/Beatgrid"
 status = "shipped"
+test = "testen"
 desc = "madmom-RNN-Beats mit Oktav-Prior, essentia-Key, Downbeat, Tempo-Wechsel, LUFS/ReplayGain, Genre-Hint."
 paths = ["app/analysis_engine.py"]
 depends_on = ["analysis-settings", "analysis-cache"]
 related = ["genre-definition-schema"]
-todo = ["B5: BPM auf 10-ms-Raster quantisiert (madmom fps=100, Median-IBI): 128 -> 127,66, 124/126 -> 125,0, 152 -> 154,0 - Ansatz mit Nutzer klären", "Key nur 2/8 exakt gleich Rekordbox; essentia in .venv/Bundle nicht installiert -> K-S-Fallback"]
+todo = ["Key nur 2/8 exakt gleich Rekordbox; essentia in .venv/Bundle nicht installiert -> K-S-Fallback", "Tempo-Anker (detect_tempo_changes, librosa) passen nicht zum gleichmäßigen Grid; XML-Export setzt den Anker bei 0.0 (Inizio=0) -> Grid-Phase falsch. Bei grid_mode uniform einen Anker am Downbeat schreiben (wie rekordbox_export.py)", "A/B 2026-11-21: Razor ~210 ms (halbe Periode) und Feel Alive ~58 ms Versatz zu Rekordbox - Phase/Downbeat prüfen (unverändert gegenüber main)"]
+notes = "B5 gefixt: BPM aus einer Regressionsgeraden über alle Beats (statt Median-Abstand im 10-ms-Raster), ganze Zahl nur bei <=0,05 BPM und <=10 ms Drift; stabile Tracks bekommen ein gleichmäßiges Grid wie Rekordbox (grid_mode uniform), schwankende behalten die erkannten Beats. A/B 2026-11-21 an 11 echten Tracks gegen Rekordbox: BPM exakt 1/11 -> 8/11, Grid-Abweichung Median 13,0 -> 9,7 ms. Analyse-Cache auf Version 4."
 
 [[feature]]
 id = "analysis-settings"

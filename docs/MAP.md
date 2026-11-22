@@ -308,6 +308,7 @@
 | `tests/test_auth.py` | Tests for ``app/auth.py`` -- Bearer-token session authentication. |
 | `tests/test_batch_comment_route.py` | POST /api/tools/batch-comment. |
 | `tests/test_batch_worker.py` | Tests for app/batch_worker.py — the comment transform and the batch loop. |
+| `tests/test_bpm_regression_grid.py` | BPM from a regression line through all beats, uniform grid for steady tracks (B5). |
 | `tests/test_compare_rekordbox.py` | Unit tests for the pure comparison helpers in scripts/compare_rekordbox.py. |
 | `tests/test_cue_beatgrid_persistence.py` | Round-trip tests for the cue / beatgrid sidecar persistence. |
 | `tests/test_database.py` | Tests for `app/database.py`. |
