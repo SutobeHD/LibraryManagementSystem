@@ -56,7 +56,7 @@ paths = ["frontend/src/components/PlaylistBrowser.jsx"]
 routes = ["/api/playlists/tree", "/api/playlists/create", "/api/playlists/rename", "/api/playlists/move", "/api/playlists/delete"]
 depends_on = ["live-master-db"]
 related = ["standalone-library-mode"]
-notes = "Live-move_playlist war in leere Ordner und zurück nach ROOT kaputt (rbox: parent_id=None = Eltern behalten, seq ist ein Wert <= Anzahl). Fix auf fix/kernloop-0.1-bugs (B11): ROOT als \"root\", seq=None zum Anhängen, vor/nach per seq-Wert, Baum-Cache danach frisch aus master.db. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): B11 (Verschieben in leeren Ordner / zurück nach ROOT) in PR #82 gefixt - neu prüfen."
+notes = "Live-move_playlist war in leere Ordner und zurück nach ROOT kaputt (rbox: parent_id=None = Eltern behalten, seq ist ein Wert <= Anzahl). Fix auf fix/kernloop-0.1-bugs (B11): ROOT als \"root\", seq=None zum Anhängen, vor/nach per seq-Wert, Baum-Cache danach frisch aus master.db. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): B11 (Verschieben in leeren Ordner / zurück nach ROOT) in PR #82 gefixt - neu prüfen. /api/playlists/create gab den ganzen Knoten als id zurück (Duplizieren kopierte keine Tracks) und success auch ohne neue Playlist: jetzt id-String bzw. 500."
 
 [[feature]]
 id = "playlist-track-ops"

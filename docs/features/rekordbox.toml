@@ -47,9 +47,10 @@ id = "rekordbox-running-guard"
 group = "Datenbank"
 name = "Rekordbox-läuft-Sperre"
 status = "shipped"
-desc = "Erkennt laufendes Rekordbox, blockt Writes (Format-Swap, Merge, Projektion, analyze-full)."
-todo = ["B13: bei laufendem Rekordbox antwortet POST /api/playlists/create 200 mit id null, PATCH /api/tracks/batch 500 MasterDbError - Sperre fehlt dort"]
-notes = "Lebt in app/services.py."
+test = "testen"
+desc = "Erkennt laufendes Rekordbox, blockt Live-master.db-Writes mit 409: Track-Edits, MyTags, Track-Löschen, alle Playlist-Änderungen, Importe, Duplikat-Merges, SC-Sync/-Merge, Format-Swap, Artist-Merge/Projektion, analyze-full."
+paths = ["tests/test_rekordbox_running_guard.py"]
+notes = "Routen: app/main.py _reject_while_rekordbox_runs(action) als erste Anweisung im Handler (nur Live-Modus scannt, fail-open). Format-Swap nutzt services.is_rekordbox_running. Offen: /api/usb/playcount/resolve schreibt master.db (fester Pfad, ohne db_lock) ungeschützt; Downloads/Folder-Watcher/Render importieren später im Hintergrund ohne Check; 409-Text kommt im Frontend nur als generischer Fehler-Toast an."
 
 [[feature]]
 id = "rekordbox-write-backups"
@@ -91,11 +92,12 @@ id = "rekordbox-xml-bridge"
 group = "Standalone & XML"
 name = "Rekordbox-XML Export/Import"
 status = "shipped"
+test = "testen"
 desc = "Auswahl als DJ_PLAYLISTS-XML exportieren, XML importieren (add/update)."
-paths = ["app/rekordbox_bridge.py", "app/xml_generator.py", "frontend/src/components/settings/SettingsExport.jsx"]
+paths = ["app/rekordbox_bridge.py", "app/xml_generator.py", "frontend/src/components/settings/SettingsExport.jsx", "tests/test_xml_generator.py"]
 routes = ["/api/rekordbox/export", "/api/rekordbox/import"]
 depends_on = ["standalone-library-mode"]
-todo = ["B14: XML-Export Kind immer 'WAV File', Location nicht URL-kodiert, DateAdded = heute, kein Tonality/Rating/Comment", "B14 Sicherheit: Export-Dateiname unbereinigt (EXPORT_DIR / r.filename) -> schreibt außerhalb von exports/"]
+notes = "B14 (2026-11-21): Export schrieb Kind immer WAV, Location unkodiert, DateAdded = heute, TrackID 1..N, Beat als Battuta; Dateiname ungeprüft (../ und absolut verließen exports/). Jetzt echte Werte + Tonality/Rating/Comments/BitRate, Name -> Basisname.xml in exports/. Rekordbox-Import der Datei im echten Rekordbox noch ungetestet."
 
 [[feature]]
 id = "xml-cleaner"

@@ -135,6 +135,7 @@ id = "log-path-redaction"
 group = "Logging"
 name = "Log/Error-Redaction"
 status = "shipped"
+test = "testen"
 research = "security-error-handler-exc-info-leak"
 desc = "RedactingFormatter entfernt absolute Pfade aus Logs/Tracebacks, safe_error_message."
 paths = ["app/logging_utils.py", "tests/test_logging_redaction.py"]
