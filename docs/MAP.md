@@ -386,6 +386,7 @@
 | `tests/test_usb_manager.py` | Tests for `app/usb_manager.py`. |
 | `tests/test_usb_mysettings.py` | Tests for app/usb_mysettings.py — Pioneer MYSETTING file schema + I/O. |
 | `tests/test_usb_relocate.py` | Tests for the USB relocation pass (`app/usb_one_library.py`). |
+| `tests/test_validate_real_world.py` | Unit tests for the pure helpers in scripts/validate_real_world.py. |
 | `tests/test_variant_detector.py` | variant_schema + variant_detector tests (analysis-remix-detector T-2, T-3). |
 | `tests/test_variant_schema.py` | Tests for app/variant_schema.py — variants.db DDL + migration runner. |
 | `tests/test_waveform_cache.py` | GET /api/audio/waveform: off-loop compute, disk cache, in-flight dedup. |
@@ -412,4 +413,5 @@
 | `scripts/selftest_analysis.py` | selftest_analysis.py — autonomous accuracy self-test (no Rekordbox needed). |
 | `scripts/sync_genre_atlas.py` | Vendor a slim snapshot of the genre-atlas repo into app/data/genre_atlas.json. |
 | `scripts/test_xml_sync.py` | Add app to path |
+| `scripts/validate_real_world.py` | validate_real_world.py — real-library validation run for the analysis engine. |
 | `scripts/validate_research_docs.py` | Validate every doc under docs/research/{research,implement,archived}/. |

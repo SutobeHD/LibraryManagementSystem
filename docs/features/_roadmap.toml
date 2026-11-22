@@ -21,7 +21,7 @@ unversioned_areas = ["devtools"]
 id = "0.1"
 stage = "alpha"
 name = "Kern-Loop"
-goal = "Track rein (Import oder SoundCloud-Download) -> analysieren -> in der Library ordnen -> auf den USB-Stick -> am CDJ-3000 spielen. Läuft als installierte Windows-App."
+goal = "Track rein (Import oder SoundCloud-Download) -> analysieren -> in der Library ordnen -> auf den USB-Stick im CDJ-3000-Format. Läuft als installierte Windows-App. Der Test am echten CDJ folgt in 0.5 (cdj-hardware-validation)."
 features = [
   # App-Hülle + Plattform
   "tauri-sidecar-supervisor",
@@ -250,6 +250,8 @@ features = [
   "appearance-settings",
   "rekordbox-skin",
   "shared-portal-tooltip",
+  # Hardware-Abnahme
+  "cdj-hardware-validation",
 ]
 
 [[release]]
