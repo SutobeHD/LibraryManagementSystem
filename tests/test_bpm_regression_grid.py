@@ -2,10 +2,13 @@
 
 madmom's DBN places beats on a 10 ms grid, so the median inter-beat interval
 quantised BPM (128 -> 127.66, 124/126 -> 125.0). These tests pin the fit, the
-integer snap and the steady/tracked decision.
+integer snap and the steady/tracked decision, and the comb refit that takes
+over where the tracker slipped on a constant-tempo track.
 """
 
 from __future__ import annotations
+
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -91,6 +94,87 @@ def test_uniform_beats_cover_the_tracked_span() -> None:
     assert np.allclose(np.diff(times), 0.5)
 
 
+# --- comb refit: constant-tempo tracks the tracker did not follow all the way ---
+
+
+def _round10(t: np.ndarray) -> np.ndarray:
+    return np.round(np.asarray(t, dtype=float) / 0.01) * 0.01
+
+
+def _with_slip(
+    bpm: float, n: int = 640, at: int = 300, length: int = 40, stretch: float = 1.06
+) -> np.ndarray:
+    """Steady beats, but the tracker ran ``stretch`` times too slow for ``length`` beats."""
+    period = 60.0 / bpm
+    grid = 0.37 + np.arange(n) * period
+    slipped = np.arange(grid[at], grid[at + length] - 0.2, period * stretch)
+    return _round10(np.concatenate([grid[:at], slipped, grid[at + length :]]))
+
+
+@pytest.mark.parametrize("bpm", [128.0, 135.0, 146.0, 155.0, 170.0])
+def test_comb_fit_recovers_the_tempo_across_a_tracker_slip(bpm: float) -> None:
+    t = _with_slip(bpm)
+    line = ae._fit_beat_grid(t)
+    assert line is None or not line.steady  # the gap-by-gap count is lost in the slip
+    comb = ae._comb_fit_beat_grid(t)
+    assert comb is not None
+    assert 60.0 / comb.period == pytest.approx(bpm, abs=0.005)
+    assert comb.steady
+    assert comb.inlier_frac > 0.9
+    k = (comb.anchor - 0.37) / comb.period  # anchor on the beats outside the slip
+    assert k == pytest.approx(round(k), abs=0.05)
+
+
+def test_comb_fit_keeps_the_main_phase_when_the_outro_flips_half_a_beat() -> None:
+    period = 60.0 / 138.0
+    t = 0.37 + np.arange(400) * period
+    t[352:] += period / 2  # last 12 %: tracker on the off-beat
+    comb = ae._comb_fit_beat_grid(_round10(t))
+    assert comb is not None
+    assert comb.steady
+    assert 60.0 / comb.period == pytest.approx(138.0, abs=0.005)
+    k = (comb.anchor - 0.37) / comb.period
+    assert k == pytest.approx(round(k), abs=0.05)
+
+
+def test_comb_fit_gives_the_tempo_but_no_uniform_grid_when_a_quarter_is_off_phase() -> None:
+    period = 60.0 / 138.0
+    t = 0.37 + np.arange(400) * period
+    t[300:] += period / 2
+    comb = ae._comb_fit_beat_grid(_round10(t))
+    assert comb is not None
+    assert comb.on_one_line
+    assert not comb.steady
+    assert 60.0 / comb.period == pytest.approx(138.0, abs=0.005)
+
+
+@pytest.mark.parametrize("split", [0.5, 0.7, 0.8])
+def test_comb_fit_tempo_change_is_not_steady(split: float) -> None:
+    na = int(400 * split)
+    a = 0.37 + np.arange(na) * (60.0 / 124.0)
+    b = a[-1] + np.arange(1, 400 - na + 1) * (60.0 / 132.0)
+    comb = ae._comb_fit_beat_grid(_round10(np.concatenate([a, b])))
+    assert comb is None or not comb.steady
+
+
+@pytest.mark.parametrize("end_bpm", [128.13, 128.5, 130.0])
+def test_comb_fit_tempo_drift_is_not_on_one_line(end_bpm: float) -> None:
+    periods = 60.0 / np.linspace(128.0, end_bpm, 768)
+    t = 0.37 + np.concatenate(([0.0], np.cumsum(periods[:-1])))
+    comb = ae._comb_fit_beat_grid(_round10(t))
+    assert comb is None or not comb.on_one_line
+
+
+def test_comb_fit_wandering_tempo_is_not_on_one_line() -> None:
+    periods = 0.46 * (1 + np.cumsum(np.random.default_rng(1).normal(0, 0.002, 500)))
+    comb = ae._comb_fit_beat_grid(_round10(0.37 + np.cumsum(periods)))
+    assert comb is None or not comb.on_one_line
+
+
+def test_comb_fit_too_few_beats() -> None:
+    assert ae._comb_fit_beat_grid(_quantised(128.0, n=ae._GRID_COMB_MIN_BEATS - 1)) is None
+
+
 # --- end to end on synthetic audio -------------------------------------------
 
 SR = 44100
@@ -114,6 +198,43 @@ def _kick_track(onsets: list[float], duration_s: float) -> np.ndarray:
 def _even(bpm: float, duration_s: float, start: float = 0.37) -> list[float]:
     bp = 60.0 / bpm
     return [start + i * bp for i in range(int((duration_s - 0.5 - start) / bp))]
+
+
+def _fake_madmom(beats: np.ndarray) -> SimpleNamespace:
+    """Stands in for madmom: the DBN 'tracks' exactly the beats it was given."""
+    return SimpleNamespace(
+        features=SimpleNamespace(
+            beats=SimpleNamespace(
+                RNNBeatProcessor=lambda: lambda path: None,
+                DBNBeatTrackingProcessor=lambda **kwargs: lambda activations: beats,
+            )
+        )
+    )
+
+
+@pytest.fixture(scope="module")
+def dsp():
+    ae._ensure_libs()
+    if ae.librosa is None:
+        pytest.skip("librosa not available")
+    return ae
+
+
+def test_slipped_tracker_still_gets_exact_tempo_and_uniform_grid(dsp, monkeypatch) -> None:
+    kicks = np.array(_even(135.0, 60.0))
+    period = 60.0 / 135.0
+    slipped = np.arange(kicks[60], kicks[72] - 0.2, period * 1.06)
+    tracked = _round10(np.concatenate([kicks[:60], slipped, kicks[72:]]))
+    line = dsp._fit_beat_grid(tracked)
+    assert line is None or not line.steady
+    monkeypatch.setattr(dsp, "madmom", _fake_madmom(tracked))
+    r = dsp.detect_beats_madmom(_kick_track(list(kicks), 60.0), SR)
+    assert r is not None
+    assert r["bpm"] == 135.0
+    assert r["grid_mode"] == "uniform"
+    times = np.array([b["time_ms"] for b in r["beats"]]) / 1000.0
+    off_kick = np.abs((times - kicks[0] + period / 2) % period - period / 2)
+    assert off_kick.max() <= 0.012
 
 
 @pytest.fixture(scope="module")

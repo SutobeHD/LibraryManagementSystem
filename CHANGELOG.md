@@ -55,6 +55,14 @@
   - Added: `scripts/compare_rekordbox.py` (A/B accuracy vs a real library) +
     `scripts/selftest_analysis.py` (autonomous synthetic-ground-truth accuracy,
     MIREX Acc-1/Acc-2). Self-test with RNN: BPM Acc-2 100%, KEY exact 100%.
+  - Fixed: BPM on constant-tempo tracks where the beat tracker slips in a
+    break, intro or outro. The single regression line failed there and the BPM
+    fell back to a value quantised to 1.25 ms per beat (135.0 → 135.21,
+    170.0 → 170.21). A second "comb" fit now takes the beats that share one
+    phase: exact BPM, and a uniform grid when at least 85 % of the beats sit on
+    that line. A/B against Rekordbox on 60 real tracks: BPM identical 40 → 56,
+    median grid error 11.3 → 6.0 ms. Analysis cache version 5 — tracks are
+    re-analysed once.
 - Reliability hardening (codebase-wide bug-hunt — 16 fixes + 15 new test files,
   full pytest suite 658 passing):
   - Fixed: Rekordbox XML import called a non-existent `db.update_track`, so every

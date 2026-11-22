@@ -738,6 +738,22 @@ _BPM_INTEGER_SNAP = 0.05
 # most this much at the ends of the track; beyond it the fitted BPM stays.
 _GRID_MAX_SNAP_DRIFT_S = 0.010
 
+# Comb refit, the second chance for a track the line above calls unsteady. On
+# constant-tempo tracks the tracker often slips for a stretch (break, intro,
+# outro): the beats before and after still sit on one line, but the gap-by-gap
+# count is off by then, so the line through all of them fails and the 8-beat
+# span median that used to take over is quantised to 1.25 ms per beat
+# (135 BPM came out as 135.21). The comb takes the count from the period
+# instead: beats within _GRID_COMB_BAND of a beat of one phase are inliers.
+# That band is much tighter than _GRID_OUTLIER_FRAC, so a slipped stretch drops
+# out instead of bending the line; _GRID_COMB_MIN_INLIER_FRAC of the beats on
+# the line make the track steady (a tempo change at half time leaves ~0.6).
+_GRID_COMB_BAND = 0.1  # of one beat period
+_GRID_COMB_SEARCH = 0.015  # period search range around the 8-beat-span median
+_GRID_COMB_BINS = 40  # phase bins per beat
+_GRID_COMB_MIN_INLIER_FRAC = 0.85
+_GRID_COMB_MIN_BEATS = 16
+
 
 class _GridFit(NamedTuple):
     period: float  # seconds per tracked beat
@@ -747,14 +763,16 @@ class _GridFit(NamedTuple):
     inlier_frac: float
     first: float  # first / last inlier beat time, seconds
     last: float
+    min_inlier_frac: float = _GRID_MIN_INLIER_FRAC
+
+    @property
+    def on_one_line(self) -> bool:
+        """The inliers are jitter around a straight line (no bend, no second phase)."""
+        return self.rms <= _GRID_STEADY_RMS_S and self.quarter_bias <= _GRID_STEADY_QUARTER_BIAS_S
 
     @property
     def steady(self) -> bool:
-        return (
-            self.rms <= _GRID_STEADY_RMS_S
-            and self.quarter_bias <= _GRID_STEADY_QUARTER_BIAS_S
-            and self.inlier_frac >= _GRID_MIN_INLIER_FRAC
-        )
+        return self.on_one_line and self.inlier_frac >= self.min_inlier_frac
 
 
 def _fit_beat_grid(beat_times: np.ndarray) -> _GridFit | None:
@@ -817,6 +835,78 @@ def _fit_beat_grid(beat_times: np.ndarray) -> _GridFit | None:
         inlier_frac=float(mask.mean()),
         first=float(t[mask][0]),
         last=float(t[mask][-1]),
+    )
+
+
+def _comb_fit_beat_grid(beat_times: np.ndarray) -> _GridFit | None:
+    """Tempo line through the beats that share one phase, whatever lies between them.
+
+    Searches the period (around the median 8-beat span) at which most beats
+    fall on one phase, then numbers every beat ``round((t - intercept) /
+    period)`` and least-squares fits the beats within ``_GRID_COMB_BAND`` of
+    the line, a few times over. A stretch where the tracker slipped, skipped
+    or ran at another tempo stays outside the band and only costs inliers.
+
+    Returns ``None`` for fewer than ``_GRID_COMB_MIN_BEATS`` beats.
+    """
+    t = np.asarray(beat_times, dtype=float)
+    n = len(t)
+    if n < _GRID_COMB_MIN_BEATS:
+        return None
+    p0 = float(np.median(t[8:] - t[:-8])) / 8.0
+    span = float(t[-1] - t[0])
+    if p0 <= 0 or span <= 0:
+        return None
+    # Period step: the last beat moves a quarter of the band from one candidate
+    # to the next, so the true period cannot fall between two of them.
+    step = _GRID_COMB_BAND * p0 * p0 / (4.0 * span)
+    periods = np.arange(p0 * (1.0 - _GRID_COMB_SEARCH), p0 * (1.0 + _GRID_COMB_SEARCH), step)
+    half = max(1, round(_GRID_COMB_BAND * _GRID_COMB_BINS))
+    rel = t - t[0]
+    best_count, period, phase = -1, p0, 0.0
+    for start in range(0, len(periods), 256):
+        chunk = periods[start : start + 256, None]
+        bins = (np.mod(rel[None, :], chunk) / chunk * _GRID_COMB_BINS).astype(int)
+        bins = np.minimum(bins, _GRID_COMB_BINS - 1)
+        bins += _GRID_COMB_BINS * np.arange(len(chunk))[:, None]
+        hist = np.bincount(bins.ravel(), minlength=_GRID_COMB_BINS * len(chunk))
+        hist = hist.reshape(len(chunk), _GRID_COMB_BINS)
+        # Beats per phase window of 2 * half bins, wrapping around the beat.
+        cum = np.cumsum(np.concatenate([hist, hist[:, : 2 * half]], axis=1), axis=1)
+        window = cum[:, 2 * half - 1 :][:, :_GRID_COMB_BINS].copy()
+        window[:, 1:] -= cum[:, : _GRID_COMB_BINS - 1]
+        row, col = np.unravel_index(int(np.argmax(window)), window.shape)
+        if int(window[row, col]) > best_count:
+            best_count = int(window[row, col])
+            period = float(chunk[row, 0])
+            phase = (int(col) + half) / _GRID_COMB_BINS * period
+    intercept = float(t[0]) + phase
+    mask = np.zeros(n, dtype=bool)
+    k = np.zeros(n)
+    for _ in range(6):
+        k = np.round((t - intercept) / period)
+        new_mask = np.abs(t - (intercept + period * k)) <= _GRID_COMB_BAND * period
+        if int(new_mask.sum()) < _GRID_MIN_BEATS:
+            return None
+        if np.array_equal(new_mask, mask):
+            break
+        mask = new_mask
+        period, intercept = (float(v) for v in np.polyfit(k[mask], t[mask], 1))
+        if period <= 0:
+            return None
+    k = np.round((t - intercept) / period)
+    resid = (t - (intercept + period * k))[mask]
+    k_anchor = float(np.round(np.mean(k[mask])))
+    quarter_bias = max(float(abs(np.mean(q))) for q in np.array_split(resid, 4))
+    return _GridFit(
+        period=period,
+        anchor=intercept + period * k_anchor,
+        rms=float(np.sqrt(np.mean(resid**2))),
+        quarter_bias=quarter_bias,
+        inlier_frac=float(mask.mean()),
+        first=float(t[mask][0]),
+        last=float(t[mask][-1]),
+        min_inlier_frac=_GRID_COMB_MIN_INLIER_FRAC,
     )
 
 
@@ -899,12 +989,16 @@ def detect_beats_madmom(
             if len(beats_madmom) < 4:
                 return None
 
-            # Tempo from a regression line through all beats (steady tracks),
-            # else from the median 8-beat span (an 8x finer step than one
-            # 10 ms-quantised gap).
+            # Tempo from a regression line through the beats: the line through
+            # all of them when it is steady, else the comb line through the
+            # beats of one phase. Only when neither holds, from the median
+            # 8-beat span (an 8x finer step than one 10 ms-quantised gap).
             fit = _fit_beat_grid(beats_madmom)
+            if fit is None or not fit.steady:
+                comb = _comb_fit_beat_grid(beats_madmom)
+                fit = comb if comb is not None and comb.on_one_line else None
             steady = fit is not None and fit.steady
-            if steady and fit is not None:
+            if fit is not None:
                 tracked_period = fit.period
             elif len(beats_madmom) >= 16:
                 tracked_period = float(np.median(beats_madmom[8:] - beats_madmom[:-8])) / 8.0

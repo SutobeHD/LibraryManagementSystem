@@ -3761,6 +3761,15 @@ BPM from a regression line through all beats, uniform grid for steady tracks (B5
 - `test_integer_snap_only_within_tolerance()`
 - `test_snap_is_refused_when_it_would_drift_the_grid()`
 - `test_uniform_beats_cover_the_tracked_span()`
+- `test_comb_fit_recovers_the_tempo_across_a_tracker_slip()`
+- `test_comb_fit_keeps_the_main_phase_when_the_outro_flips_half_a_beat()`
+- `test_comb_fit_gives_the_tempo_but_no_uniform_grid_when_a_quarter_is_off_phase()`
+- `test_comb_fit_tempo_change_is_not_steady()`
+- `test_comb_fit_tempo_drift_is_not_on_one_line()`
+- `test_comb_fit_wandering_tempo_is_not_on_one_line()`
+- `test_comb_fit_too_few_beats()`
+- `dsp()`
+- `test_slipped_tracker_still_gets_exact_tempo_and_uniform_grid()`
 - `engine()`
 - `test_steady_128_bpm_track_gets_exact_tempo_and_uniform_grid()`
 - `test_tempo_change_keeps_the_tracked_beats()`
