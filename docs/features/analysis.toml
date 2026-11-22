@@ -161,10 +161,14 @@ notes = "Windows-Konsolen-Fix d96309f liegt nur auf Backup / 485cbfe."
 id = "analysis-real-world-validation"
 group = "Validierung"
 name = "Echt-Library-Test (PC)"
-status = "idea"
+status = "shipped"
+test = "testen"
 desc = "A/B gegen Rekordbox über 50 echte Tracks und Schreibtest in eine Kopie der master.db. Ohne Hardware."
-related = ["analysis-accuracy-harness", "usb-onelibrary-export", "cdj-hardware-validation"]
-notes = "B15 gefixt: compare_rekordbox.py liest Grids per pyrekordbox (app.anlz_safe) und Keys über die djmdKey-Tabelle (Camelot oder Notenname)."
+paths = ["scripts/validate_real_world.py", "tests/test_validate_real_world.py"]
+depends_on = ["analysis-accuracy-harness"]
+related = ["usb-onelibrary-export", "cdj-hardware-validation"]
+todo = ["BPM bei als unruhig eingestuften Tracks knapp daneben (17/49), Branch fix/bpm-unsteady-tracks", "Grid bei 3/49 Tracks einen halben Beat versetzt", "Rund 60 Tracks der Library tragen schon klassische Tonartnamen - Reparatur-Werkzeug fehlt", "djmdCue und Teile von my_tag_songs kann rbox nicht lesen - im Schreibtest nicht verglichen"]
+notes = "Lauf 2026-11-22: A/B 49 Tracks - BPM exakt 32, alle in Toleranz, Grid-Median 11,3 ms. Schreibtest auf Kopie der master.db, 5 Tracks: nur die geschriebenen Zeilen geändert, echte Library byteidentisch; dabei Tonart-Schreibweise (Camelot statt klassisch) gefunden und gefixt. B15 gefixt: compare_rekordbox.py liest Grids per pyrekordbox (app.anlz_safe) und Keys über die djmdKey-Tabelle (Camelot oder Notenname)."
 
 # ── Ideen ─────────────────────────────────────────────────────────────────
 
