@@ -525,7 +525,7 @@ These are optional and not started without the user's say:
 | B11 | `analysis_quality` | strip from existing `settings.json` on load |
 | B12 | Per-run override | **Build it:** pressing "Analyse" opens a small dialog preset to the global depth, overridable per run |
 | C | Sound-component questions | answers recorded in `docs/research/research/idea_sound-component-sorting.md` → Open Questions; new wish W9 "similar song structure" (sort by same / similar / different phrase structure, seed track → similar builds) added there; W3 generalised to **user-definable sound classes** (bells are one example of many) |
-| D | §D questions (screenshots, atlas fallback, old branch, Stage F, P6) | **answered later** |
+| D | §D questions (screenshots, atlas fallback, old branch, Stage F, P6) | **answered 2026-11-22:** atlas BPM fallback in `app/genre_atlas.py` — not now; old remote branch `feat/library-analysis` — delete, but only after PR #78 is merged; Stage F (network) — not now; P6 — covered by the research doc `sound-component-sorting` (columns + similarity); PSSI screenshots — still open |
 
 
 ---
