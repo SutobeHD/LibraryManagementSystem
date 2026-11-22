@@ -431,6 +431,7 @@
 | `scripts/dev/sound_component_research/derived_structure/derive_confirm.py` | Sensitivity runs on top of derive_features.py: (1) copy agreement on the pairs whose ANLZ |
 | `scripts/dev/sound_component_research/derived_structure/derive_features.py` | Which further per-track features fall out of what the planned structure scan already reads |
 | `scripts/dev/sound_component_research/derived_structure/derive_followup.py` | Follow-up to derive_features.py: grid / cue / status facts for the whole library, a no-audio |
+| `scripts/dev/sound_component_research/derived_structure/mix_partner_joint.py` | Joint copy agreement of intro AND outro bars (mix-partner filter), same code path as derive_features.py. |
 | `scripts/dev/sound_component_research/melody/analyze_melody.py` | Probes 2 + 3 (W8): note events -> 16-step top-voice sequences on the Rekordbox grid -> |
 | `scripts/dev/sound_component_research/melody/analyze_w6.py` | Probe 4 (W6 "how melodic" = lead, not pad): scalar candidates from basic-pitch notes on the |
 | `scripts/dev/sound_component_research/melody/build_pairs.py` | Probe 1 (W8 weak ground truth): original <-> remix / edit pairs from title stems. |

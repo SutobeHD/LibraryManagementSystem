@@ -6075,6 +6075,10 @@ Follow-up to derive_features.py: grid / cue / status facts for the whole library
 - `show()`
 - `rho()`
 
+### `scripts/dev/sound_component_research/derived_structure/mix_partner_joint.py`
+
+Joint copy agreement of intro AND outro bars (mix-partner filter), same code path as derive_features.py.
+
 ### `scripts/dev/sound_component_research/melody/analyze_melody.py`
 
 Probes 2 + 3 (W8): note events -> 16-step top-voice sequences on the Rekordbox grid ->
