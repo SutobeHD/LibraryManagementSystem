@@ -513,3 +513,224 @@ def test_key_failure_after_the_row_write_keeps_the_cache_on_the_new_bpm(tmp_path
     assert result["reason"] == "db_update_failed"
     assert master.writes == ["update_content(9, analysed=105)"]  # BPM landed
     assert writer.live_db.tracks["9"]["BPM"] == 124.0  # so the cache shows it
+
+
+# --- key notation ------------------------------------------------------------
+#
+# A real library stored its keys in Camelot ("7A", "9A": 4900 of 5000 tracks). The
+# writer put the classic name of the same key ("Dm", "Em") next to them, and Rekordbox
+# sorts and filters the key column by that text.
+
+
+def test_camelot_codes_match_the_engine_for_every_key_id():
+    """The code written is checked against the writer's own key-id table, so that table
+    must say what the engine says for all 24 keys, or every Camelot write falls back."""
+    from app.analysis_db_writer import KeyNotation, library_key_name
+    from app.analysis_engine import _CAMELOT_MAP, _REKORDBOX_KEY_ID
+
+    assert len(_REKORDBOX_KEY_ID) == 24
+    for full_key, key_id in _REKORDBOX_KEY_ID.items():
+        code = _CAMELOT_MAP[full_key]
+        assert library_key_name(key_id, KeyNotation.CAMELOT, code) == code
+        assert library_key_name(key_id, KeyNotation.CLASSIC, code) == (
+            AnalysisDBWriter._key_id_to_name(key_id)
+        )
+
+
+@pytest.mark.parametrize(
+    ("names", "expected"),
+    [
+        (["7A", "9A", "12B", "Dm"], "camelot"),
+        (["Dm", "Em", "F#", "7A"], "classic"),
+        (["7A", "Dm"], "classic"),  # tie
+        ([], "classic"),
+        ([None, "", "  "], "classic"),  # no keyed track
+        (["7A", None, "", None], "camelot"),  # tracks without a key do not vote
+        (["1A", "10A", "11B", "12A"], "camelot"),
+        (["13A", "0B", "8C", "7a", "A7", "7AB"], "classic"),  # not Camelot codes
+        (["13A", "7A", "8B"], "camelot"),
+    ],
+)
+def test_library_key_notation_is_the_majority_of_the_keyed_tracks(names, expected):
+    from app.analysis_db_writer import KeyNotation, library_key_notation
+
+    assert library_key_notation(names) is KeyNotation(expected)
+    assert library_key_notation(iter(names)) is KeyNotation(expected)  # one pass is enough
+
+
+@pytest.mark.parametrize("camelot", [None, "", "7", "13A", "7a", " 7A", "7A ", 7, "8A", "7B"])
+def test_library_key_name_falls_back_to_classic_without_a_usable_camelot_code(camelot):
+    """Key id 15 is D minor = "7A". Anything else in the code slot is not written."""
+    from app.analysis_db_writer import KeyNotation, library_key_name
+
+    assert library_key_name(15, KeyNotation.CAMELOT, camelot) == "Dm"
+
+
+def test_library_key_name_follows_the_notation():
+    from app.analysis_db_writer import KeyNotation, library_key_name
+
+    assert library_key_name(15, KeyNotation.CAMELOT, "7A") == "7A"
+    assert library_key_name(15, KeyNotation.CLASSIC, "7A") == "Dm"
+    assert library_key_name(17, KeyNotation.CAMELOT, "9A") == "9A"
+    for no_key in (0, 25, None, True, "15"):
+        assert library_key_name(no_key, KeyNotation.CAMELOT, "7A") is None
+        assert library_key_name(no_key, KeyNotation.CLASSIC, "7A") is None
+
+
+class _KeyRow:
+    def __init__(self, kid: str, name: str) -> None:
+        self.id = kid
+        self.name = name
+
+
+class _KeyedContent:
+    def __init__(self, key_id: str | None) -> None:
+        self.key_id = key_id
+
+
+class _LibraryMasterDb(_RecordingMasterDb):
+    """A library whose tracks carry ``track_keys``; counts the library-wide reads."""
+
+    def __init__(
+        self, share: str, rel_by_id: dict[str, str | None], track_keys: list[str | None]
+    ) -> None:
+        super().__init__(share, rel_by_id)
+        names = sorted({k for k in track_keys if k})
+        self._keys = [_KeyRow(str(100 + i), name) for i, name in enumerate(names)]
+        id_by_name = {row.name: row.id for row in self._keys}
+        self._contents = [_KeyedContent(id_by_name.get(k) if k else None) for k in track_keys]
+        self.scans = 0
+        self.scan_lock_held: list[bool] = []
+        self.key_writes: list[tuple[str, str]] = []
+
+    def get_keys(self) -> list[_KeyRow]:
+        return list(self._keys)
+
+    def get_contents(self) -> list[_KeyedContent]:
+        self.scans += 1
+        self.scan_lock_held.append(_lock_held_elsewhere())
+        return list(self._contents)
+
+    def update_content_key(self, tid, key) -> None:
+        super().update_content_key(tid, key)
+        self.key_writes.append((str(tid), key))
+
+
+_CAMELOT_LIBRARY = ["7A"] * 49 + ["Dm"]  # the measured shape: ~1 % stray classic names
+_CLASSIC_LIBRARY = ["Dm", "Em", "F#m", "Ab", None]
+
+
+@pytest.mark.parametrize(
+    ("track_keys", "written"),
+    [
+        (_CAMELOT_LIBRARY, "8A"),
+        (_CLASSIC_LIBRARY, "Am"),
+        (["7A", "9A", "8B", "Dm", "Em"], "8A"),  # mixed: Camelot majority
+        (["7A", "9A", "Bbm", "Dm", "Em"], "Am"),  # mixed: classic majority
+        (["7A", "9A", "Dm", "Em"], "Am"),  # tie
+        ([], "Am"),  # empty library
+        ([None, None], "Am"),  # no track has a key yet
+    ],
+)
+def test_update_db_writes_the_key_in_the_notation_of_the_library(tmp_path, track_keys, written):
+    master = _LibraryMasterDb(str(tmp_path / "share"), {"9": _REL}, track_keys)
+    writer = AnalysisDBWriter(_LiveDBWith({"9": {"BPM": 0}}, master))
+
+    assert writer._update_db("9", dict(_ANALYSIS)) is True  # A minor: "Am" / "8A"
+
+    assert master.key_writes == [("9", written)]
+    assert master.writes == ["update_content(9, analysed=105)", "update_content_key(9)"]
+
+
+@pytest.mark.parametrize("camelot", ["", None, "8", "8a", "13A", "7A"])
+def test_camelot_library_gets_the_classic_name_when_the_code_is_unusable(tmp_path, camelot):
+    master = _LibraryMasterDb(str(tmp_path / "share"), {"9": _REL}, _CAMELOT_LIBRARY)
+    writer = AnalysisDBWriter(_LiveDBWith({"9": {"BPM": 0}}, master))
+
+    writer._update_db("9", {**_ANALYSIS, "camelot": camelot})
+
+    assert master.key_writes == [("9", "Am")]
+
+
+def test_camelot_library_gets_the_classic_name_when_the_code_is_missing(tmp_path):
+    master = _LibraryMasterDb(str(tmp_path / "share"), {"9": _REL}, _CAMELOT_LIBRARY)
+    writer = AnalysisDBWriter(_LiveDBWith({"9": {"BPM": 0}}, master))
+
+    writer._update_db("9", {"bpm": 124.0, "key_id": 22})
+
+    assert master.key_writes == [("9", "Am")]
+
+
+def test_unknown_key_writes_no_key_in_either_notation(tmp_path):
+    for track_keys in (_CAMELOT_LIBRARY, _CLASSIC_LIBRARY):
+        master = _LibraryMasterDb(str(tmp_path / "share"), {"9": _REL}, track_keys)
+        writer = AnalysisDBWriter(_LiveDBWith({"9": {"BPM": 0}}, master))
+
+        assert writer._update_db("9", {"bpm": 124.0, "key_id": 0, "camelot": ""}) is True
+
+        assert master.writes == ["update_content(9, analysed=105)"]
+
+
+def test_notation_is_detected_once_for_a_batch_of_writes(tmp_path, monkeypatch):
+    """One ``get_contents`` per track would read 5000 rows 5000 times in a full re-analysis."""
+    audio = _audio_file(tmp_path)
+    ids = ["1", "2", "3", "4"]
+    master = _LibraryMasterDb(str(tmp_path / "share"), dict.fromkeys(ids, _REL), _CAMELOT_LIBRARY)
+    writer = AnalysisDBWriter(_LiveDBWith({i: {"BPM": 0, "path": audio} for i in ids}, master))
+    monkeypatch.setattr(writer, "_run_analysis", lambda p: dict(_ANALYSIS))
+    monkeypatch.setattr(
+        "app.anlz_writer.write_anlz_files",
+        lambda **kw: {"dat": os.path.join(kw["anlz_dir"], "ANLZ0000.DAT")},
+    )
+
+    results = list(writer.analyze_batch(ids, force=True))
+
+    assert [r["status"] for r in results] == ["ok"] * 4
+    assert master.key_writes == [(i, "8A") for i in ids]
+    assert master.scans == 1
+    assert master.scan_lock_held == [False]  # the library-wide read never blocks writers
+
+
+def test_failed_notation_read_writes_classic_and_is_retried(tmp_path):
+    class _FlakyMasterDb(_LibraryMasterDb):
+        def get_contents(self):
+            if not self.scans:
+                self.scans += 1
+                raise RuntimeError("database is locked")
+            return super().get_contents()
+
+    master = _FlakyMasterDb(str(tmp_path / "share"), {"9": _REL}, _CAMELOT_LIBRARY)
+    writer = AnalysisDBWriter(_LiveDBWith({"9": {"BPM": 0}}, master))
+
+    assert writer._update_db("9", dict(_ANALYSIS)) is True  # the write itself still lands
+    assert writer._update_db("9", dict(_ANALYSIS)) is True
+    assert writer._update_db("9", dict(_ANALYSIS)) is True
+
+    assert master.key_writes == [("9", "Am"), ("9", "8A"), ("9", "8A")]
+    assert master.scans == 2  # the failure is not cached, the answer is
+
+
+def test_forgetting_the_notation_reads_the_library_again(tmp_path):
+    from app.analysis_db_writer import KeyNotation
+
+    master = _LibraryMasterDb(str(tmp_path / "share"), {"9": _REL}, _CAMELOT_LIBRARY)
+    writer = AnalysisDBWriter(_LiveDBWith({"9": {"BPM": 0}}, master))
+
+    assert writer.key_notation() is KeyNotation.CAMELOT
+    master._contents = [_KeyedContent(None)]  # reloaded: no keyed track left
+    assert writer.key_notation() is KeyNotation.CAMELOT
+    writer.forget_key_notation()
+    assert writer.key_notation() is KeyNotation.CLASSIC
+    assert master.scans == 2
+
+
+def test_notation_does_not_come_from_the_partial_track_cache(tmp_path):
+    """The cache may hold only the tracks being written, and its ``Key`` is the Camelot
+    code after an analysis write even in a classic library."""
+    master = _LibraryMasterDb(str(tmp_path / "share"), {"9": _REL}, _CLASSIC_LIBRARY)
+    tracks = {"9": {"BPM": 0, "Key": "8A"}, "10": {"Key": "7A"}, "11": {"Key": "9A"}}
+    writer = AnalysisDBWriter(_LiveDBWith(tracks, master))
+
+    writer._update_db("9", dict(_ANALYSIS))
+
+    assert master.key_writes == [("9", "Am")]

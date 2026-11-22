@@ -10,10 +10,12 @@ This replaces the need for Rekordbox to analyze tracks — our analysis
 is injected directly, and Rekordbox will read it as if it analyzed the track itself.
 """
 
+import enum
 import logging
 import os
+import re
 import time
-from collections.abc import Generator
+from collections.abc import Generator, Iterable
 from concurrent.futures import ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from pathlib import Path
@@ -39,6 +41,16 @@ REKORDBOX_ANALYSED = 105
 #: for any other spelling, so "A minor" would add a key Rekordbox never uses.
 _REKORDBOX_PITCH_NAMES = ("C", "Db", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B")
 
+#: A ``djmdKey`` name in Camelot notation ("alphanumeric" in Rekordbox's preferences).
+_CAMELOT_NAME = re.compile(r"(1[0-2]|[1-9])[AB]")
+
+#: Camelot code per ``analysis_engine`` key id, in id order: 1-12 major C..B, then
+#: 13-24 minor C..B. Must stay equal to the engine's ``_CAMELOT_MAP`` (test-enforced).
+_CAMELOT_BY_KEY_ID = (
+    "8B", "3B", "10B", "5B", "12B", "7B", "2B", "9B", "4B", "11B", "6B", "1B",
+    "5A", "12A", "7A", "2A", "9A", "4A", "11A", "6A", "1A", "8A", "3A", "10A",
+)  # fmt: skip
+
 
 class AnalysisDbUpdateError(RuntimeError):
     """master.db refused the analysis write (row missing, rbox error, bad value).
@@ -58,6 +70,60 @@ def rekordbox_key_name(key_id: Any) -> str | None:
         return None
     root = _REKORDBOX_PITCH_NAMES[(key_id - 1) % 12]
     return root if key_id <= 12 else f"{root}m"
+
+
+class KeyNotation(str, enum.Enum):
+    """How a Rekordbox library spells the key names in ``djmdKey``."""
+
+    CLASSIC = "classic"  # "Am", "Dbm", "F#": Rekordbox's default
+    CAMELOT = "camelot"  # "8A", "12A", "2B"
+
+
+def library_key_notation(key_names: Iterable[str | None]) -> KeyNotation:
+    """The notation most keyed tracks of a library use; tie or no keyed track = classic.
+
+    ``key_names``: one ``djmdKey`` name per track, ``None`` / ``""`` for a track without
+    a key. The vote is over tracks, not over ``djmdKey`` rows: a library that holds
+    the 24 rows of both notations would tie there, although 4900 of its 5000 tracks
+    are Camelot.
+    """
+    camelot = classic = 0
+    for name in key_names:
+        text = (name or "").strip()
+        if not text:
+            continue
+        if _CAMELOT_NAME.fullmatch(text):
+            camelot += 1
+        else:
+            classic += 1
+    return KeyNotation.CAMELOT if camelot > classic else KeyNotation.CLASSIC
+
+
+def library_key_name(key_id: Any, notation: KeyNotation, camelot: Any = None) -> str | None:
+    """The ``djmdKey`` name to write for a detected key, in the library's own notation.
+
+    Rekordbox sorts and filters its key column by that text, so a "Dm" written into a
+    library of "7A" rows (same key, other notation) breaks both for the track.
+
+    ``camelot`` is the code the analysis carries next to ``key_id``. It is written only
+    when it is the code of exactly that key; a missing, malformed or contradicting
+    code falls back to the classic name, which depends on ``key_id`` alone. None for a
+    ``key_id`` that names no key (nothing to write).
+    """
+    classic = rekordbox_key_name(key_id)
+    if classic is None or notation is not KeyNotation.CAMELOT:
+        return classic
+    code = _CAMELOT_BY_KEY_ID[key_id - 1]
+    return code if camelot == code else classic
+
+
+def detect_library_key_notation(master_db: Any) -> KeyNotation:
+    """``library_key_notation`` over every content row of an open ``rbox.MasterDb``.
+
+    Two full-table reads (``get_keys``, ``get_contents``): callers cache the answer.
+    """
+    names = {row.id: row.name for row in master_db.get_keys()}
+    return library_key_notation(names.get(item.key_id) for item in master_db.get_contents())
 
 
 def rekordbox_anlz_rel_path(content_uuid: str | None) -> str | None:
@@ -85,13 +151,35 @@ class AnalysisDBWriter:
             print(progress)
     """
 
-    def __init__(self, live_db):
+    def __init__(self, live_db: Any) -> None:
         """
         Args:
             live_db: LiveRekordboxDB instance (must be loaded and connected)
         """
         self.live_db = live_db
         self._executor: ProcessPoolExecutor | None = None
+        self._key_notation: KeyNotation | None = None
+
+    def key_notation(self) -> KeyNotation:
+        """The notation the library's keys are in, detected once per writer and cached.
+
+        Read from master.db through rbox, not from ``live_db.tracks``: that cache can be
+        partial, and its ``Key`` holds the Camelot code after every analysis write
+        (``_update_cache``) whatever master.db got. A failed read answers classic
+        (Rekordbox's default) and is not cached, so the next write tries again.
+        """
+        if self._key_notation is None:
+            try:
+                self._key_notation = detect_library_key_notation(self.live_db.db)
+            except Exception as e:  # rbox raises its own error types
+                logger.warning("op=detect_key_notation failed, writing classic names: %s", e)
+                return KeyNotation.CLASSIC
+            logger.info("op=detect_key_notation notation=%s", self._key_notation.value)
+        return self._key_notation
+
+    def forget_key_notation(self) -> None:
+        """Drop the cached notation: the library was reloaded and may have changed."""
+        self._key_notation = None
 
     def _get_executor(self) -> ProcessPoolExecutor:
         if self._executor is None:
@@ -310,7 +398,8 @@ class AnalysisDBWriter:
 
         Updates: bpm, key, analysed flag. Never ``analysis_data_path``: the
         caller only gets here for a track whose path master.db already records
-        and whose ANLZ files were just written there.
+        and whose ANLZ files were just written there. The key goes in under the
+        name the library's notation uses for it (``library_key_name``).
 
         Holds ``db_lock`` from the re-read to the last write: ``update_content``
         writes the whole row, so a row read outside the lock would clobber a
@@ -321,6 +410,8 @@ class AnalysisDBWriter:
         """
         from .database import db_lock
 
+        # Outside the lock: a library-wide read (first call only) must not hold up writers.
+        notation = self.key_notation()
         row_written = False
         try:
             with db_lock():
@@ -338,7 +429,9 @@ class AnalysisDBWriter:
                     f"analysed={REKORDBOX_ANALYSED}"
                 )
 
-                key_name = self._key_id_to_name(analysis.get("key_id", 0))
+                key_name = library_key_name(
+                    analysis.get("key_id", 0), notation, analysis.get("camelot")
+                )
                 if key_name:
                     self.live_db.db.update_content_key(str(track_id), key_name)
                     logger.info(f"Updated key for {track_id}: {key_name}")

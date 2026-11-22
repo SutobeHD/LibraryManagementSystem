@@ -26,6 +26,7 @@ SessionStart hook prints `feature_map.py --brief`: status counts, active constru
 - Decided against → `dropped` + reason in `notes` (keeps it from being re-proposed).
 - Code done, user must check it (every `unmerged`, or `shipped` with an untested main path) → `--mark testen <id>`.
 - User confirms it works / real end-to-end proof (real app, real library, real stick — not unit tests, not mocked preview) → `--mark getestet <id>` (sets `tested` = today). Unknown → leave untagged (= Fertig). Never `getestet` on a green type-check.
+- Check needs external hardware (CDJ, mixer, controller) → not a `todo` on the feature and no reason to hold back `getestet`: add the item to `cdj-hardware-validation` (0.5). A feature counts as `getestet` once it is proven on the PC — real app, real library, stick folder read back (user decision 2026-11-22).
 - Feature reworked (status back to `in_progress`) → `--mark fertig <id>` once done again; a stale `test` on unfinished status is a `--check` warning.
 - New feature entry → also put its id into a version in `docs/features/_roadmap.toml` (see Roadmap). Unsure which → `later`, never leave it silently ungeplant.
 - Before commit: `python scripts/feature_map.py --check` (CI runs it; fails on bad ids/refs or `shipped`/`partial` paths that match nothing).
