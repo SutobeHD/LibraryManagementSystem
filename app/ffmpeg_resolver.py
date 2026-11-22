@@ -6,14 +6,19 @@ list (user setting > env var > PATH default > well-known install locations >
 Electron ``ffmpeg-static`` bundles) and picks the first binary whose audio
 encoder set contains the encoder a target format requires.
 
+The same walk can pick a binary by input protocols (:func:`resolve_for_protocols`):
+a decode-only PATH build (e.g. Lexicon's ``--disable-network`` ffmpeg) cannot
+fetch an https HLS stream, so the SoundCloud downloader asks for one that can.
+
 ``ffprobe`` resolution is deliberately independent (:func:`resolve_ffprobe`):
 discovery candidates like Electron bundles ship **no** ffprobe sibling, so
 deriving ffprobe from the resolved ffmpeg would break sample-rate probing for
 every track. ffprobe derives only from the configured path / PATH default and
 falls back to bare ``ffprobe``.
 
-Used by ``app/library_format_swap.py`` (command building + export preflight)
-and ``GET /api/library/format-swap/capabilities`` in ``app/main.py``.
+Used by ``app/library_format_swap.py`` (command building + export preflight),
+``GET /api/library/format-swap/capabilities`` in ``app/main.py`` and
+``app/soundcloud_downloader.py`` (HLS mux + AIFF conversion).
 """
 
 from __future__ import annotations
@@ -40,6 +45,7 @@ _AUDIO_ENCODER_RE = re.compile(r"^\s*A[A-Z.]{5}\s+(\S+)")
 # Memoised probe results keyed on the candidate path string. A settings
 # change produces a new key -> natural invalidation. Failures cached too.
 _ENCODER_CACHE: dict[str, frozenset[str] | None] = {}
+_PROTOCOL_CACHE: dict[str, frozenset[str] | None] = {}
 
 
 @dataclass(frozen=True)
@@ -52,6 +58,7 @@ class ResolvedFfmpeg:
 
 def clear_probe_cache() -> None:
     _ENCODER_CACHE.clear()
+    _PROTOCOL_CACHE.clear()
 
 
 def configured_settings_ffmpeg() -> str:
@@ -186,6 +193,61 @@ def resolve_for_encoder(encoder: str) -> ResolvedFfmpeg:
         binary=None,
         source=None,
         reason=f"no '{encoder}' encoder found in {probed} probed binaries",
+    )
+
+
+def probe_input_protocols(path: str) -> frozenset[str] | None:
+    """Input protocol names of ``path`` (``ffmpeg -protocols``), or ``None`` when the probe fails.
+
+    The listing has an ``Input:`` and an ``Output:`` section; only the input
+    names count. Memoised (failures too) — :func:`clear_probe_cache` re-probes.
+    """
+    key = str(path)
+    if key in _PROTOCOL_CACHE:
+        return _PROTOCOL_CACHE[key]
+
+    protocols: frozenset[str] | None
+    try:
+        r = subprocess.run(
+            [key, "-hide_banner", "-protocols"],
+            capture_output=True,
+            text=True,
+            timeout=PROBE_TIMEOUT_SEC,
+        )
+        if r.returncode != 0:
+            protocols = None
+        else:
+            found: set[str] = set()
+            section = ""
+            for line in (r.stdout or "").splitlines():
+                name = line.strip()
+                if name.endswith(":"):
+                    section = name[:-1].lower()
+                elif name and section == "input":
+                    found.add(name)
+            protocols = frozenset(found)
+    except (subprocess.SubprocessError, OSError) as e:
+        logger.debug("ffmpeg_resolver: protocol probe failed for %s (%s)", key, e)
+        protocols = None
+
+    _PROTOCOL_CACHE[key] = protocols
+    return protocols
+
+
+def resolve_for_protocols(required: tuple[str, ...]) -> ResolvedFfmpeg:
+    """First candidate whose input protocols include every name in ``required`` wins."""
+    need = frozenset(required)
+    probed = 0
+    for path, source in candidate_binaries():
+        protocols = probe_input_protocols(path)
+        probed += 1
+        if protocols is not None and need <= protocols:
+            return ResolvedFfmpeg(available=True, binary=path, source=source)
+    return ResolvedFfmpeg(
+        available=False,
+        binary=None,
+        source=None,
+        reason=f"no ffmpeg with input protocols {sorted(need)} in {probed} probed binaries",
     )
 
 

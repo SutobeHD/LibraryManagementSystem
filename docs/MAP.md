@@ -171,7 +171,7 @@
 | `frontend/src/components/FormatConverterView.jsx` | FormatConverterView — Library-wide audio format converter UI. |
 | `frontend/src/components/GenreSuggestions.jsx` | Genre suggestions from the genre atlas for one library track. |
 | `frontend/src/components/ImportProgressBanner.jsx` | Sticky progress banner — visible on every screen while local-file or SoundCloud imports are running. |
-| `frontend/src/components/ImportView.jsx` | Recursively walk a DataTransferItemList, returning every File inside any dropped folder. |
+| `frontend/src/components/ImportView.jsx` | *(no module docstring)* |
 | `frontend/src/components/InsightsView.jsx` | InsightsView — DJ-Style Analytics Dashboard Datenbasierte Einblicke in den eigenen DJ-Stil und die Library: •… |
 | `frontend/src/components/LibraryView.jsx` | *(no module docstring)* |
 | `frontend/src/components/MatchInspectorModal.jsx` | *(no module docstring)* |
@@ -309,6 +309,7 @@
 | `tests/test_auth.py` | Tests for ``app/auth.py`` -- Bearer-token session authentication. |
 | `tests/test_batch_comment_route.py` | POST /api/tools/batch-comment. |
 | `tests/test_batch_worker.py` | Tests for app/batch_worker.py — the comment transform and the batch loop. |
+| `tests/test_bpm_regression_grid.py` | BPM from a regression line through all beats, uniform grid for steady tracks (B5). |
 | `tests/test_compare_rekordbox.py` | Unit tests for the pure comparison helpers in scripts/compare_rekordbox.py. |
 | `tests/test_cue_beatgrid_persistence.py` | Round-trip tests for the cue / beatgrid sidecar persistence. |
 | `tests/test_database.py` | Tests for `app/database.py`. |
@@ -318,12 +319,14 @@
 | `tests/test_download_registry.py` | Tests for app/download_registry.py — SoundCloud download dedup/history DB. |
 | `tests/test_duplicate_grouping.py` | Duplicate finder: O(n) digest grouping, parallel fingerprinting, location index. |
 | `tests/test_external_track_match.py` | external_track_match unit tests (external-track-match-unified-module T-3..T-9). |
+| `tests/test_ffmpeg_protocols.py` | Protocol-aware ffmpeg resolution and its use in the SoundCloud downloader (B18). |
 | `tests/test_folder_watcher.py` | Tests for app/folder_watcher.py — auto-import folder watcher. |
 | `tests/test_genre_atlas.py` | Tests for app.genre_atlas: matching logic on a synthetic atlas + integrity of the snapshot. |
 | `tests/test_genre_atlas_routes.py` | Route tests for the genre-atlas hints (app/main.py). |
 | `tests/test_import_dedup.py` | Import dedup — ``/api/library/import-paths``, ``/api/library/scan-folder`` and |
 | `tests/test_import_tracker.py` | Tests for app/import_tracker.py — live import-progress tracker. |
 | `tests/test_library_format_swap.py` | Tests for app.library_format_swap. |
+| `tests/test_library_quality_stats.py` | GET /api/library/quality-stats — lossless/lossy counts by file extension (B16). |
 | `tests/test_library_source.py` | Tests for app/library_source.py — the Live/XML normalization layer. |
 | `tests/test_library_tracks_light.py` | GET /api/library/tracks — the optional ``light`` projection (app/main.py). |
 | `tests/test_librosa_lazy_import.py` | Booting the sidecar (``import app.main``) must not import librosa / numpy. |
@@ -331,6 +334,7 @@
 | `tests/test_live_import_analysis.py` | An imported track's analysis must reach master.db (B4, 0.1 core-loop test). |
 | `tests/test_live_playlist_b11.py` | Live playlist operations end to end against an rbox stand-in (B11, 0.1 core-loop test). |
 | `tests/test_live_playlist_ops.py` | Tests for the live-mode playlist primitives in `app/live_database.py`. |
+| `tests/test_live_stock_date.py` | StockDate in live track dicts: a missing date must not become the string "None" (B17). |
 | `tests/test_logging_redaction.py` | Unit tests for `app.logging_utils.RedactingFormatter`. |
 | `tests/test_main_route_table.py` | app/main.py defines each top-level name once, so no request model or handler is shadowed. |
 | `tests/test_main_security.py` | Regression tests for ``POST /api/file/reveal`` sandbox. |

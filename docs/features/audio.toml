@@ -22,10 +22,12 @@ id = "audio-stream-route"
 group = "Playback"
 name = "Audio-Streaming-Route"
 status = "shipped"
+test = "testen"
 desc = "Range-Request-Streaming, sandboxed via validate_audio_path, MIME pro Endung; AIFF geht als on-the-fly-WAV raus (Chromium/WebView2 dekodiert kein AIFF)."
 paths = ["app/playable_audio.py", "tests/test_playable_audio.py", "tests/test_stream_unicode_filename.py"]
 routes = ["/api/stream", "/api/audio/stream"]
 depends_on = ["audio-path-sandbox"]
+notes = "Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): ok."
 
 # ── Waveform ──────────────────────────────────────────────────────────────
 
@@ -34,11 +36,13 @@ id = "multiband-waveform-data"
 group = "Waveform"
 name = "3-Band-Waveform-Daten"
 status = "shipped"
+test = "getestet"
+tested = "2026-11-14"
 desc = "Backend low/mid/high-Waveform + Client-Bandsplit."
 paths = ["frontend/src/utils/AudioBandAnalyzer.js"]
 routes = ["/api/audio/waveform"]
 related = ["waveform-generation"]
-notes = "Backend-Teil: AudioEngine.generate_multiband_waveform in services.py (Hub). Decode blockiert den Event-Loop."
+notes = "Backend-Teil: AudioEngine.generate_multiband_waveform in services.py (Hub). Decode blockiert den Event-Loop. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): ok."
 
 [[feature]]
 id = "wavesurfer-waveform-editor"
