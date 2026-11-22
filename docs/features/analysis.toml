@@ -160,14 +160,13 @@ notes = "Windows-Konsolen-Fix d96309f liegt nur auf Backup / 485cbfe."
 [[feature]]
 id = "analysis-real-world-validation"
 group = "Validierung"
-name = "Echt-Library- & CDJ-Test"
+name = "Echt-Library-Test (PC)"
 status = "idea"
-desc = "A/B über 10-50 echte Tracks, Live-master.db-Write mit User-DB, echter Stick im CDJ-3000."
-related = ["analysis-accuracy-harness", "usb-onelibrary-export"]
+desc = "A/B gegen Rekordbox über 50 echte Tracks und Schreibtest in eine Kopie der master.db. Ohne Hardware."
+related = ["analysis-accuracy-harness", "usb-onelibrary-export", "cdj-hardware-validation"]
+notes = "B15 gefixt: compare_rekordbox.py liest Grids per pyrekordbox (app.anlz_safe) und Keys über die djmdKey-Tabelle (Camelot oder Notenname)."
 
 # ── Ideen ─────────────────────────────────────────────────────────────────
-todo = ["CDJ-3000-Test durch Nutzer: BPM/Länge, Cover, Waveform, Grid auf dem Kick, Cues, Sync-Drift"]
-notes = "B15 gefixt: compare_rekordbox.py liest Grids per pyrekordbox (app.anlz_safe) und Keys über die djmdKey-Tabelle (Camelot oder Notenname)."
 
 [[feature]]
 id = "bpm-octave-disambiguation"
