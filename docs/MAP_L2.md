@@ -861,7 +861,7 @@ Log redaction helpers — scrub absolute paths from log lines + tracebacks.
 - `get_cues()`
 - `get_beatgrid()`
 - `analyze_track()` — Analyzes a track to detect BPM and beat grid if missing from XML
-- `stream_audio_file()` — Streams an audio file from the local filesystem
+- `stream_audio_file()` — Streams an audio file from the local filesystem (AIFF as WAV, see /api/stream).
 - `MyTagCreateReq`
 - `TrackMyTagsReq`
 - `list_mytags()`
@@ -1118,6 +1118,22 @@ phrase_generator.py — Phrase & Auto-Cue Generator
 - `resolve_anlz_dir()` — Find the existing ANLZ directory for a track via rbox, or None if the track
 - `resolve_anlz_dirs()` — Resolve the ANLZ directory of many tracks with ONE master.db open.
 - `commit_phrase_cues()` — Write phrase markers as Rekordbox MEMORY cues into the track's existing
+
+### `app/playable_audio.py`
+
+Browser-playable view of AIFF files: a virtual WAV computed from the source.
+
+- `WavViewError` — Source cannot be presented as WAV (unreadable, unsupported or too large).
+- `WavView`
+- `  WavView.frame_bytes()`
+- `  WavView.data_bytes()`
+- `  WavView.size()`
+- `  WavView.header()`
+- `needs_wav_view()` — True for files the browser cannot decode and the stream routes serve as WAV.
+- `wav_filename()` — ``Track.aiff`` -> ``Track.wav`` for the response's Content-Disposition.
+- `describe()` — Read the source header and lay out the WAV view.
+- `parse_range()` — ``Range`` header -> inclusive ``(start, end)``, per RFC 7233.
+- `iter_range()` — Bytes ``start..end`` (inclusive) of the WAV view, in ~1 MiB chunks.
 
 ### `app/playcount_sync.py`
 
@@ -4622,6 +4638,35 @@ Unit tests for app/phrase_db_writer.py (djmdCue memory-cue writer).
 - `  TestMasterDbWriteLock.test_snapshot_is_taken_under_the_lock()` — Outside it, another writer can commit between copy and write.
 - `  TestMasterDbWriteLock.test_restore_mutations_are_under_the_lock()`
 - `test_pyrekordbox_is_imported_quietly()` — A bare import drops the root logger to NOTSET — see pyrekordbox_compat.
+
+### `tests/test_playable_audio.py`
+
+AIFF served as a virtual WAV (app/playable_audio.py + both stream routes).
+
+- `test_wav_view_is_bit_exact()`
+- `test_header_parses_with_stdlib_wave()`
+- `test_aifc_sowt_little_endian()`
+- `test_rare_encodings_widen_to_pcm16()`
+- `test_double_narrows_to_float32()`
+- `test_every_range_matches_the_full_wav()`
+- `test_short_source_is_padded_to_the_announced_size()`
+- `test_range_past_the_shrunk_source_is_silence()`
+- `test_vanished_source_is_silence()`
+- `test_no_file_handle_outlives_a_chunk()`
+- `test_unreadable_source_raises()`
+- `test_unsupported_encoding_raises()`
+- `test_parse_range()`
+- `test_parse_range_unsatisfiable()`
+- `test_parse_range_ignores_malformed()`
+- `test_suffix_and_filename_helpers()`
+- `sandbox_root()`
+- `test_route_serves_aiff_as_wav()`
+- `test_route_range_on_converted_file()`
+- `test_route_unsupported_encoding_is_415()`
+- `test_route_unreadable_aiff_is_415()`
+- `test_route_keeps_sandbox_for_aiff()`
+- `test_route_other_formats_unchanged()`
+- `test_route_reads_aiff_off_the_event_loop()`
 
 ### `tests/test_playcount_sync.py`
 

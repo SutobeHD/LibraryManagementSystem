@@ -61,7 +61,8 @@ def sandbox_root(tmp_path: Path) -> Iterator[Path]:
 @pytest.fixture
 def audio(sandbox_root: Path) -> tuple[Path, bytes]:
     data = os.urandom(3 * MiB + 12345)
-    p = sandbox_root / "big.aiff"
+    # Raw-bytes path; AIFF goes out as WAV instead (tests/test_playable_audio.py).
+    p = sandbox_root / "big.mp3"
     p.write_bytes(data)
     return p, data
 

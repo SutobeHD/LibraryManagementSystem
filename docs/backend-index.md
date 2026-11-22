@@ -93,8 +93,8 @@ Marker convention in the route tables below:
 ### Audio Endpoints
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/stream` | Stream audio file (range-request, sandboxed, query param `path`) |
-| GET | `/api/audio/stream` | Same sandboxed path check, plain `FileResponse` (handler `stream_audio_file`; used by `DawEngine.js`) |
+| GET | `/api/stream` | Stream audio file (range-request, sandboxed, query param `path`). AIFF goes out as WAV computed on the fly (`app/playable_audio.py`; Chromium/WebView2 decode no AIFF), 415 for encodings it cannot serve |
+| GET | `/api/audio/stream` | Same sandboxed path check, plain `FileResponse` (handler `stream_audio_file`; used by `DawEngine.js`); AIFF as WAV like `/api/stream` |
 | GET | `/api/audio/waveform` | Multiband waveform data (`pps` >= 1, points-per-second); computed off-loop, disk-cached per (file mtime+size, pps) |
 | POST | `/api/audio/analyze` `[AUTH]` | Start async BPM/key analysis → returns `{ task_id }` |
 | GET | `/api/audio/analyze/{task_id}` | Poll analysis result: `{ status, bpm, key, confidence }` |
