@@ -11,6 +11,7 @@ integer columns reject C-long overflow like rbox does.
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -43,6 +44,17 @@ class _MasterDb:
         self.row = _Row("1")
         self.writes: list[tuple[str, Any]] = []
         self.refuse_update = False
+        #: One ``djmdKey`` name per track already in the library (None = no key).
+        self.library_keys: list[str | None] = []
+        self.scans = 0
+
+    def get_keys(self) -> list[SimpleNamespace]:
+        names = sorted({k for k in self.library_keys if k})
+        return [SimpleNamespace(id=f"k-{name}", name=name) for name in names]
+
+    def get_contents(self) -> list[SimpleNamespace]:
+        self.scans += 1
+        return [SimpleNamespace(key_id=f"k-{k}" if k else None) for k in self.library_keys]
 
     def create_content(self, path: str) -> _Row:
         self.row.folder_path = path
@@ -123,6 +135,97 @@ def test_import_key_is_stored_in_rekordbox_spelling(
     live.add_track({**_TRACK, "Key": key, "KeyID": key_id})
     keys = [v for name, v in master.writes if name == "update_content_key"]
     assert keys == ([expected] if expected else [])
+
+
+# A real library stored its keys in Camelot ("8A": 4900 of 5000 tracks); the import
+# wrote the classic name of the same key next to them, and Rekordbox sorts and filters
+# the key column by that text.
+_CAMELOT_LIBRARY: list[str | None] = ["8A"] * 8 + ["7A", "Am", None]
+
+
+def _key_writes(master: _MasterDb) -> list[str]:
+    return [v for name, v in master.writes if name == "update_content_key"]
+
+
+def test_import_into_a_camelot_library_stores_the_camelot_code(
+    live: LiveRekordboxDB, master: _MasterDb
+) -> None:
+    master.library_keys = list(_CAMELOT_LIBRARY)
+
+    live.add_track({**_TRACK, "Camelot": "8A"})
+
+    assert _key_writes(master) == ["8A"]
+    assert live.tracks["1"]["Key"] == "8A"
+
+
+def test_import_into_a_classic_library_keeps_the_classic_name(
+    live: LiveRekordboxDB, master: _MasterDb
+) -> None:
+    master.library_keys = ["Am", "Dm", "F#", "8A", None]
+
+    live.add_track({**_TRACK, "Camelot": "8A"})
+
+    assert _key_writes(master) == ["Am"]
+    assert live.tracks["1"]["Key"] == "Am"
+
+
+@pytest.mark.parametrize("camelot", [None, "", "8", "8a", "7A"])
+def test_import_without_a_usable_camelot_code_stores_the_classic_name(
+    live: LiveRekordboxDB, master: _MasterDb, camelot: str | None
+) -> None:
+    master.library_keys = list(_CAMELOT_LIBRARY)
+
+    live.add_track({**_TRACK, "Camelot": camelot})  # key id 22 = A minor = "8A"
+
+    assert _key_writes(master) == ["Am"]
+
+
+def test_import_key_read_from_the_text_follows_the_notation_too(
+    live: LiveRekordboxDB, master: _MasterDb
+) -> None:
+    master.library_keys = list(_CAMELOT_LIBRARY)
+
+    live.add_track({**_TRACK, "Key": "C#m", "KeyID": 0, "Camelot": "12A"})
+
+    assert _key_writes(master) == ["12A"]
+
+
+def test_imports_and_a_reanalysis_read_the_library_notation_once(
+    live: LiveRekordboxDB, master: _MasterDb
+) -> None:
+    master.library_keys = list(_CAMELOT_LIBRARY)
+
+    live.add_track({**_TRACK, "Camelot": "8A"})
+    live.add_track({**_TRACK, "Camelot": "8A"})
+    live.get_analysis_writer()._update_db("1", {"bpm": 126.0, "key_id": 15, "camelot": "7A"})
+
+    assert _key_writes(master) == ["8A", "8A", "7A"]
+    assert master.scans == 1  # not one 5000-row read per track
+
+
+def test_library_reload_reads_the_notation_again(
+    live: LiveRekordboxDB, master: _MasterDb, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    for step in (
+        "_load_metadata_maps",
+        "_load_mytags",
+        "_load_tracks",
+        "_load_playlists",
+        "_load_playlist_tracks",
+        "_load_cues",
+        "_finalize_ui_metadata",
+        "_start_beatgrid_background_load",
+    ):
+        monkeypatch.setattr(LiveRekordboxDB, step, lambda self: None)
+    master.library_keys = list(_CAMELOT_LIBRARY)
+    live.add_track({**_TRACK, "Camelot": "8A"})
+
+    master.library_keys = ["Am", "Dm"]  # re-analysed in Rekordbox under the other notation
+    assert live.load() is True
+    live.add_track({**_TRACK, "Camelot": "8A"})
+
+    assert _key_writes(master) == ["8A", "Am"]
+    assert master.scans == 2
 
 
 def test_refused_analysis_write_leaves_the_cache_at_what_master_db_holds(
