@@ -38,6 +38,7 @@ superseded_by: []
 - 2026-11-17 — `implement/review_` — Plan-Reviewer round 4: REWORK (threat model, window fallback vs resume key, pass table, "open hats", summary counts) → revision 4.1 applied; own correction: hats energy = plain band share (HPSS cost was missing from the figure)
 - 2026-11-17 — `implement/approvalgate_` — Plan-Reviewer round 5: PASS on revision 4.1, non-blocking notes applied; Approval Summary + mockup current; back at the gate with 8 decisions — waiting for the user (`/approve` or `/reject`)
 - 2026-11-22 — `implement/approvalgate_` — user confirmed the recommended default for all 8 gate decisions ("Ja, wie empfohlen"); recorded as Open Questions 13; formal `/approve` and the user inputs (pairs, PSSI 3-track check, B3 examples) still open
+- 2026-11-22 — `implement/rework_` — user answered "Ja, freigeben", then stopped the move and added: "da müssen noch ein paar mehr Features gewonnen werden können aus den Informationen, die wir sammeln. Aber an sich ist der Plan schon mal gut. Wenn du selber noch Sachen verbessern kannst, verbessere sie im Plan." → approval **not** executed. Rework agenda (agent's reading): (1) which further values / similarity kinds fall out of data the two scans already compute — measured on the existing rework-A rows and the library's phrase data, no new dependency; (2) own improvements to the plan; then revision 5 → Plan-Reviewer → gate
 
 ## Original Idea (verbatim — never edit)
 
