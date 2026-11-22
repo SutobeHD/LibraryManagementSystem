@@ -90,7 +90,7 @@ test = "testen"
 desc = "Abnahme am echten Player: Stick aus der App laden und am CDJ-3000 prüfen. Checkliste und Track-Auswahl: python scripts/validate_real_world.py checklist."
 depends_on = ["analysis-real-world-validation", "usb-onelibrary-export"]
 related = ["usb-onelibrary-track-limit", "usb-legacy-pdb"]
-todo = ["Tempo und Länge am Player wie in der App", "Cover und Waveform (Übersicht + Zoom) sichtbar", "Grid sitzt auf dem Kick: Anfang, Mitte, Ende (B5)", "Hot Cues und Memory Cues an der richtigen Stelle", "Sync-Drift: zwei Tracks 5 Minuten im Beat-Sync", "Stick mit mehr als 16 Tracks: alle Tracks und Playlists da (B9)", "Hot-Cue-Bänke A..P am Player (nach Merge von hot-cue-16-limits)", "AIFF aus dem SC-Download (AIFF-C sowt) spielt am Player", "Waveform-Farben am Player wie in Rekordbox", "Legacy export.pdb lädt an einem alten CDJ"]
+todo = ["Tempo und Länge am Player wie in der App", "Cover und Waveform (Übersicht + Zoom) sichtbar", "Grid sitzt auf dem Kick: Anfang, Mitte, Ende (B5)", "Hot Cues und Memory Cues an der richtigen Stelle", "Sync-Drift: zwei Tracks 5 Minuten im Beat-Sync", "Stick mit mehr als 16 Tracks: alle Tracks und Playlists da (B9)", "Hot-Cue-Bänke A..P am Player (nach Merge von hot-cue-16-limits)", "AIFF aus dem SC-Download (AIFF-C sowt) spielt am Player", "Waveform-Farben am Player wie in Rekordbox", "Legacy export.pdb lädt an einem alten CDJ", "Grid-Phase nach Gehör/am Player: War Cry, Heimweh, City's Sleep, If I Only Knew - liegt LMS oder Rekordbox auf dem Kick?"]
 notes = "Zurückgestellt 2026-11-22 (Nutzer): Tests mit externer Hardware erst in einer späteren Phase. Bis dahin zählt für die einzelnen Features der Test am PC. Kein eigener Code - die Checkliste gehört zu analysis-real-world-validation."
 
 [[feature]]
