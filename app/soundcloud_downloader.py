@@ -71,7 +71,8 @@ from urllib.parse import urlparse
 import requests
 
 from . import download_registry as registry
-from .config import FFMPEG_BIN, MUSIC_DIR
+from .config import MUSIC_DIR
+from .ffmpeg_resolver import resolve_for_encoder, resolve_for_protocols
 
 if TYPE_CHECKING:
     from .artist_store.recognizer import Recognition
@@ -115,6 +116,8 @@ _SC_FIRST_PARTY_HOST_SUFFIXES = (
 # ffmpeg's default protocol set includes `file:` and `concat:`. A hostile
 # m3u8 from a compromised CDN could read local files — pin to network only.
 _FFMPEG_PROTOCOL_WHITELIST = "https,tls,tcp,crypto,httpproxy"
+# What an HLS fetch cannot do without; crypto/httpproxy stay optional.
+_HLS_REQUIRED_PROTOCOLS = ("https", "tls", "tcp")
 
 # v2 API — needed for `media.transcodings[]`. The public v1 (api.soundcloud.com)
 # doesn't expose the transcoding URLs used by the web player.
@@ -655,6 +658,17 @@ def _download_hls_to_temp(
         logger.warning("[SC-DL] HLS m3u8 URL rejected by CDN allowlist")
         return None
 
+    # The PATH ffmpeg can be a decode-only build without network protocols
+    # (Lexicon ships one) — pick a binary that can actually fetch https.
+    ffmpeg = resolve_for_protocols(_HLS_REQUIRED_PROTOCOLS)
+    if not ffmpeg.available or not ffmpeg.binary:
+        logger.error(
+            "[SC-DL] HLS download needs an ffmpeg with network support (%s). "
+            "Set 'ffmpeg_path' in Settings to a full ffmpeg build.",
+            ffmpeg.reason,
+        )
+        return None
+
     with tempfile.NamedTemporaryFile(prefix="rbpro_sc_", suffix=ext, delete=False) as tf:
         out_path = Path(tf.name)
 
@@ -664,7 +678,7 @@ def _download_hls_to_temp(
     # We pin to TLS/TCP only — exactly enough for an https HLS stream.
     # ``-fflags +nobuffer`` keeps memory bounded on long playlists.
     cmd = [
-        FFMPEG_BIN,
+        ffmpeg.binary,
         "-hide_banner",
         "-loglevel",
         "error",
@@ -990,9 +1004,14 @@ def _convert_to_aiff(src_path: Path) -> Path | None:
     if src_path.suffix.lower() in (".aiff", ".aif"):
         return src_path  # already AIFF
 
+    ffmpeg = resolve_for_encoder("pcm_s16le")
+    if not ffmpeg.available or not ffmpeg.binary:
+        logger.error("[SC-DL] AIFF conversion skipped, no usable ffmpeg: %s", ffmpeg.reason)
+        return None
+
     aiff_path = src_path.with_suffix(".aiff")
     cmd = [
-        FFMPEG_BIN,
+        ffmpeg.binary,
         "-hide_banner",
         "-loglevel",
         "error",

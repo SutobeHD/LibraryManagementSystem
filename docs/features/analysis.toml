@@ -11,19 +11,24 @@ id = "analysis-engine"
 group = "DSP-Engine"
 name = "Analyse-Engine BPM/Key/Beatgrid"
 status = "shipped"
+test = "testen"
 desc = "madmom-RNN-Beats mit Oktav-Prior, essentia-Key, Downbeat, Tempo-Wechsel, LUFS/ReplayGain, Genre-Hint."
 paths = ["app/analysis_engine.py"]
 depends_on = ["analysis-settings", "analysis-cache"]
 related = ["genre-definition-schema"]
+todo = ["Key nur 2/8 exakt gleich Rekordbox; essentia in .venv/Bundle nicht installiert -> K-S-Fallback", "Tempo-Anker (detect_tempo_changes, librosa) passen nicht zum gleichmäßigen Grid; XML-Export setzt den Anker bei 0.0 (Inizio=0) -> Grid-Phase falsch. Bei grid_mode uniform einen Anker am Downbeat schreiben (wie rekordbox_export.py)", "A/B 2026-11-21: Razor ~210 ms (halbe Periode) und Feel Alive ~58 ms Versatz zu Rekordbox - Phase/Downbeat prüfen (unverändert gegenüber main)"]
+notes = "B5 gefixt: BPM aus einer Regressionsgeraden über alle Beats (statt Median-Abstand im 10-ms-Raster), ganze Zahl nur bei <=0,05 BPM und <=10 ms Drift; stabile Tracks bekommen ein gleichmäßiges Grid wie Rekordbox (grid_mode uniform), schwankende behalten die erkannten Beats. A/B 2026-11-21 an 11 echten Tracks gegen Rekordbox: BPM exakt 1/11 -> 8/11, Grid-Abweichung Median 13,0 -> 9,7 ms. Analyse-Cache auf Version 4."
 
 [[feature]]
 id = "analysis-settings"
 group = "DSP-Engine"
 name = "Analyse-Einstellungen"
 status = "shipped"
+test = "getestet"
+tested = "2026-11-14"
 desc = "Tunables (BPM-Range, Cue-Limits, Memory-Grid, Samplerate) per RB_ANALYSIS_-Env, Settings-Tab Analysis."
 paths = ["app/analysis_settings.py", "frontend/src/components/settings/SettingsAnalysis.jsx"]
-notes = "DSP-Tunables nur per Env (get_settings liest kein settings.json). Der tote UI-Preset analysis_quality ist seit 2026-11-09 durch analysis_depth ersetzt (siehe analysis-depth)."
+notes = "DSP-Tunables nur per Env (get_settings liest kein settings.json). Der tote UI-Preset analysis_quality ist auf feat/library-measure (PR #78) seit 2026-11-09 durch analysis_depth ersetzt (siehe analysis-depth). Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): ok."
 
 [[feature]]
 id = "analysis-depth"
@@ -36,7 +41,7 @@ paths = ["app/analysis_extras.py", "tests/test_analysis_extras.py", "tests/test_
 parent = "analysis-settings"
 desc = "Einstellbar, wie tief ein Track analysiert wird: Rekordbox-Level (BPM, Key, Grid, Waveforms, Phrasen, Cues) oder Hoch (zusätzlich Lautheit, Stereo, Stimmung, Frequenzgrenze, Clipping, Dynamik, Bass-Anteil)."
 related = ["analysis-engine", "analysis-cache", "analysis-api-manual", "library-analysis-report"]
-notes = "Wunsch 2026-11-08, gebaut 2026-11-09 auf feat/library-measure (Handover §3.6.2): run_full_analysis(depth=) als letzter kwarg, Rekordbox-Stufe = Rekordbox-Daten + LUFS/Peak, Hoch = plus Stereo/Mood/Genre-Hint/Extras E1-E8 (app/analysis_extras.py); Cache ANALYSIS_VERSION 4 mit Tiefen-Rang, kein Downgrade eines high-Eintrags, Cue-Toggles werden bei Cache-Treffer neu angewendet; Setting analysis_depth (Default rekordbox) über /api/settings, analysis_quality wird beim Laden verworfen; audio_analyzer-Regler mode entfernt; depth-Feld an /api/track/{tid}/analyze, analyze-full, /api/library/analyze-batch, /api/audio/analyze; UI: Settings-Karten + Pro-Lauf-Dialog (ConfirmModal mit Radios) im Kontextmenü Analysieren... und beim Drop-Detect. 1-Track-Smoke: rekordbox 30.7 s, high 29.6 s (+2.3 s Extras, Kaltstart-Rauschen)."
+notes = "Wunsch 2026-11-08, gebaut 2026-11-09 auf feat/library-measure (Handover §3.6.2): run_full_analysis(depth=) als letzter kwarg, Rekordbox-Stufe = Rekordbox-Daten + LUFS/Peak, Hoch = plus Stereo/Mood/Genre-Hint/Extras E1-E8 (app/analysis_extras.py); Cache ANALYSIS_VERSION 5 mit Tiefen-Rang (4 war doppelt vergeben: main B5 Regressions-BPM + diese Tiefe, beim Merge 2026-11-22 auf 5 gesetzt), kein Downgrade eines high-Eintrags, Cue-Toggles werden bei Cache-Treffer neu angewendet; Setting analysis_depth (Default rekordbox) über /api/settings, analysis_quality wird beim Laden verworfen; audio_analyzer-Regler mode entfernt; depth-Feld an /api/track/{tid}/analyze, analyze-full, /api/library/analyze-batch, /api/audio/analyze; UI: Settings-Karten + Pro-Lauf-Dialog (ConfirmModal mit Radios) im Kontextmenü Analysieren... und beim Drop-Detect. 1-Track-Smoke: rekordbox 30.7 s, high 29.6 s (+2.3 s Extras, Kaltstart-Rauschen)."
 todo = ["Stufen-Zeiten beider Level an 50 Tracks messen (bisher 1-Track-Smoke)", "process_import liest das Setting pro Datei statt pro Job (Folder-Scan-Loops in main.py)", "Batch-Analyse hat kein UI (analyze-batch streamt NDJSON, braucht fetch-Consumer); askAnalysisDepth({count}) ist vorbereitet", "/api/audio/analyze prüft file_path nur auf Existenz, kein validate_audio_path (vorbestehend, security-api-auth-hardening)"]
 
 [[feature]]
@@ -44,24 +49,30 @@ id = "analysis-cache"
 group = "DSP-Engine"
 name = "AnalysisCache"
 status = "shipped"
+test = "getestet"
+tested = "2026-11-14"
 desc = "Ergebnis-Cache auf Platte per Content-Hash."
 paths = ["app/analysis_cache.py"]
-notes = "clear()/invalidate() evtl. Dead Code."
+notes = "clear()/invalidate() evtl. Dead Code. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): ok."
 
 [[feature]]
 id = "auto-cues-phrases"
 group = "DSP-Engine"
 name = "Auto-Cues & Phrasen"
 status = "shipped"
+test = "getestet"
+tested = "2026-11-14"
 desc = "Auto-Hot-Cues, Memory-Cues oder 16-Bar-Grid, Phrasenerkennung mit PSSI-Mood-IDs."
 depends_on = ["analysis-engine", "anlz-writer"]
 related = ["phrase-cue-generator", "hot-cue-16-limits"]
+notes = "Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): ok."
 
 [[feature]]
 id = "waveform-generation"
 group = "DSP-Engine"
 name = "ANLZ-Waveforms erzeugen"
 status = "partial"
+test = "testen"
 desc = "Rekordbox-Waveforms PWAV..PWV7 für die ANLZ-Dateien."
 depends_on = ["analysis-engine", "anlz-writer"]
 related = ["multiband-waveform-data"]
@@ -75,21 +86,25 @@ id = "analysis-on-import"
 group = "Pipelines"
 name = "Auto-Analyse beim Import"
 status = "shipped"
+test = "getestet"
+tested = "2026-11-14"
 desc = "Import und SC-Download starten Vollanalyse und schreiben Companion-ANLZ."
 depends_on = ["analysis-engine", "anlz-writer"]
 related = ["import-manager", "sc-download-pipeline"]
+notes = "Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): ok."
 
 [[feature]]
 id = "analysis-api-manual"
 group = "Pipelines"
 name = "Manuelle (Re-)Analyse & Batch"
 status = "partial"
+test = "testen"
 desc = "Async-Task, Einzel-Track, analyze-full (ANLZ + master.db), NDJSON-Batch, Status."
 paths = ["app/audio_analyzer.py", "app/analysis_db_writer.py"]
 routes = ["/api/audio/analyze", "/api/track/{tid}/analyze", "/api/track/{tid}/analyze-full", "/api/library/analyze-batch"]
 depends_on = ["analysis-engine", "anlz-writer", "live-master-db"]
 related = ["db-write-lock-retrofit"]
-notes = "Kein Frontend ruft die Routen. Schreibt unter db_lock analysed=105 + Key in Rekordbox-Schreibweise (Am, Dbm, F#); ein abgelehnter master.db-Write ist db_update_failed -> 500, nie still ok (B6, fix/kernloop-0.1-bugs)."
+notes = "Kein Frontend ruft die Routen. Schreibt unter db_lock analysed=105 + Key in Rekordbox-Schreibweise (Am, Dbm, F#); ein abgelehnter master.db-Write ist db_update_failed -> 500, nie still ok (B6, fix/kernloop-0.1-bugs). Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): B6 (analyze-full meldete ok trotz gescheitertem master.db-Write) in PR #82 gefixt - neu prüfen."
 
 # ── Matching & Klassifikation ─────────────────────────────────────────────
 
@@ -163,6 +178,8 @@ name = "Echt-Library- & CDJ-Test"
 status = "idea"
 desc = "A/B über 10-50 echte Tracks, Live-master.db-Write mit User-DB, echter Stick im CDJ-3000."
 related = ["analysis-accuracy-harness", "usb-onelibrary-export"]
+todo = ["CDJ-3000-Test durch Nutzer: BPM/Länge, Cover, Waveform, Grid auf dem Kick, Cues, Sync-Drift"]
+notes = "B15 gefixt: compare_rekordbox.py liest Grids per pyrekordbox (app.anlz_safe) und Keys über die djmdKey-Tabelle (Camelot oder Notenname)."
 
 [[feature]]
 id = "library-analysis-report"

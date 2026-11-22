@@ -27,7 +27,7 @@ import logging
 import os
 import warnings
 from concurrent.futures import Future, ProcessPoolExecutor
-from typing import Any
+from typing import Any, NamedTuple
 
 import numpy as np
 
@@ -720,6 +720,130 @@ def _compute_beat_confidence(
     return confidences
 
 
+# Beat-grid regression (B5). madmom's DBN runs at 100 fps, so every beat time sits
+# on a 10 ms grid and a median inter-beat interval can only take values like 0.46
+# or 0.47 s — 128 BPM came out as 127.66. A least-squares line through all beats
+# averages that jitter away. A track counts as steady (one tempo, uniform grid)
+# when the fit leaves an RMS residual of at most _GRID_STEADY_RMS_S, no quarter
+# of the track sits more than _GRID_STEADY_QUARTER_BIAS_S off the line on
+# average (a slow tempo drift bends the beats away from a straight line while
+# beat-tracker jitter averages out), and at least _GRID_MIN_INLIER_FRAC of the
+# beats are inliers; anything else keeps the tracked beats.
+_GRID_MIN_BEATS = 8
+_GRID_OUTLIER_FRAC = 0.25  # of one beat period
+_GRID_STEADY_RMS_S = 0.015
+_GRID_STEADY_QUARTER_BIAS_S = 0.010
+_GRID_MIN_INLIER_FRAC = 0.9
+_BPM_INTEGER_SNAP = 0.05
+# A whole-number BPM may move a uniform grid away from the fitted line by at
+# most this much at the ends of the track; beyond it the fitted BPM stays.
+_GRID_MAX_SNAP_DRIFT_S = 0.010
+
+
+class _GridFit(NamedTuple):
+    period: float  # seconds per tracked beat
+    anchor: float  # fitted time of the beat index nearest the inlier centroid
+    rms: float  # RMS residual of the inliers, seconds
+    quarter_bias: float  # largest |mean signed residual| over the four quarters, seconds
+    inlier_frac: float
+    first: float  # first / last inlier beat time, seconds
+    last: float
+
+    @property
+    def steady(self) -> bool:
+        return (
+            self.rms <= _GRID_STEADY_RMS_S
+            and self.quarter_bias <= _GRID_STEADY_QUARTER_BIAS_S
+            and self.inlier_frac >= _GRID_MIN_INLIER_FRAC
+        )
+
+
+def _fit_beat_grid(beat_times: np.ndarray) -> _GridFit | None:
+    """Least-squares tempo line through tracked beats.
+
+    Each beat gets an integer index counted from the last kept beat (so a
+    dropped beat keeps the count right), then ``t = intercept + period * k`` is
+    fitted, beats further than a quarter period off the line are dropped and
+    the line refitted. ``anchor`` is the fitted time of the beat index nearest
+    the middle of the inliers, which keeps drift from a slightly off period
+    smallest across the track.
+
+    Returns ``None`` for fewer than ``_GRID_MIN_BEATS`` beats.
+    """
+    t = np.asarray(beat_times, dtype=float)
+    if len(t) < _GRID_MIN_BEATS:
+        return None
+    gaps = np.diff(t)
+    med = float(np.median(gaps))
+    if med <= 0:
+        return None
+    # Count beats from the last kept beat: the 10 ms-quantised median is off by
+    # up to ~1 %, which over a whole track would shift a global index by several
+    # beats. A beat closer than half a period to the last kept one is a stray
+    # (no index of its own) and never counts as an inlier.
+    k = np.zeros(len(t))
+    stray = np.zeros(len(t), dtype=bool)
+    last_t, last_k = float(t[0]), 0.0
+    for i in range(1, len(t)):
+        steps = round((t[i] - last_t) / med)
+        if steps < 1:
+            stray[i] = True
+            k[i] = last_k
+            continue
+        last_k += steps
+        last_t = float(t[i])
+        k[i] = last_k
+    mask = ~stray
+    period = med
+    intercept = float(t[0])
+    for _ in range(3):
+        period, intercept = (float(v) for v in np.polyfit(k[mask], t[mask], 1))
+        if period <= 0:
+            return None
+        resid = t - (intercept + period * k)
+        new_mask = (np.abs(resid) <= _GRID_OUTLIER_FRAC * period) & ~stray
+        if int(new_mask.sum()) < _GRID_MIN_BEATS:
+            return None
+        if np.array_equal(new_mask, mask):
+            break
+        mask = new_mask
+    resid = (t - (intercept + period * k))[mask]
+    k_anchor = float(np.round(np.mean(k[mask])))
+    quarter_bias = max(float(abs(np.mean(q))) for q in np.array_split(resid, 4))
+    return _GridFit(
+        period=period,
+        anchor=intercept + period * k_anchor,
+        rms=float(np.sqrt(np.mean(resid**2))),
+        quarter_bias=quarter_bias,
+        inlier_frac=float(mask.mean()),
+        first=float(t[mask][0]),
+        last=float(t[mask][-1]),
+    )
+
+
+def _uniform_beats(anchor: float, period: float, first: float, last: float) -> np.ndarray:
+    """Beat times ``anchor + m * period`` covering ``[first, last]`` (half a period slack)."""
+    m_lo = int(np.ceil((first - 0.5 * period - anchor) / period))
+    m_hi = int(np.floor((last + 0.5 * period - anchor) / period))
+    return anchor + period * np.arange(m_lo, m_hi + 1, dtype=float)
+
+
+def _snap_bpm(bpm: float, half_span_s: float = 0.0) -> float:
+    """Whole-number BPM when within ``_BPM_INTEGER_SNAP``, else two decimals.
+
+    ``half_span_s`` is the time from a uniform grid's anchor to its farthest
+    beat. A snapped tempo shifts that beat by ``|1 - bpm/nearest| * half_span_s``;
+    when that exceeds ``_GRID_MAX_SNAP_DRIFT_S`` the fitted BPM stays (a 6-min
+    track at 127.96 BPM would otherwise end ~56 ms off its beats).
+    """
+    nearest = round(bpm)
+    if nearest > 0 and abs(bpm - nearest) <= _BPM_INTEGER_SNAP:
+        drift = abs(1.0 - bpm / nearest) * half_span_s
+        if drift <= _GRID_MAX_SNAP_DRIFT_S:
+            return float(nearest)
+    return round(bpm, 2)
+
+
 def detect_beats_madmom(
     y: np.ndarray,
     sr: int,
@@ -776,35 +900,63 @@ def detect_beats_madmom(
             if len(beats_madmom) < 4:
                 return None
 
-            # Compute BPM from median inter-beat interval
-            ibis = np.diff(beats_madmom)
-            median_ibi = float(np.median(ibis))
-            bpm_raw = 60.0 / median_ibi if median_ibi > 0 else 128.0
+            # Tempo from a regression line through all beats (steady tracks),
+            # else from the median 8-beat span (an 8x finer step than one
+            # 10 ms-quantised gap).
+            fit = _fit_beat_grid(beats_madmom)
+            steady = fit is not None and fit.steady
+            if steady and fit is not None:
+                tracked_period = fit.period
+            elif len(beats_madmom) >= 16:
+                tracked_period = float(np.median(beats_madmom[8:] - beats_madmom[:-8])) / 8.0
+            else:
+                tracked_period = float(np.median(np.diff(beats_madmom)))
+            tracked_bpm = 60.0 / tracked_period if tracked_period > 0 else 128.0
 
             # Onset-density disambiguation (correct half-/double-time misreads)
-            bpm_raw = _onset_density_disambiguate(bpm_raw, onset_env, sr, HOP_OE)
+            bpm_raw = _onset_density_disambiguate(tracked_bpm, onset_env, sr, HOP_OE)
 
             # Octave correction
             bpm_raw = _octave_correct(bpm_raw)
 
-            # Snap if close to integer
-            bpm_snapped = round(bpm_raw)
-            if abs(bpm_raw - bpm_snapped) < 0.2:
-                bpm = float(bpm_snapped)
+            # Steady track: rebuild the grid as one tempo from the fitted anchor,
+            # like Rekordbox does. Only when the output tempo equals the tracked
+            # one or doubles it — doubling inserts a beat between two tracked
+            # beats, so the phase stays on them. Halving would have to pick one
+            # of two phases, so that case keeps the tracked beats.
+            octave = bpm_raw / tracked_bpm if tracked_bpm > 0 else 0.0
+            uniform = (
+                steady
+                and fit is not None
+                and (abs(octave - 1.0) < 0.01 or abs(octave - 2.0) < 0.02)
+            )
+            if uniform and fit is not None:
+                half_span = max(fit.anchor - fit.first, fit.last - fit.anchor)
+                bpm = _snap_bpm(bpm_raw, half_span)
+                grid_times = _uniform_beats(
+                    fit.anchor, 60.0 / bpm, float(beats_madmom[0]), float(beats_madmom[-1])
+                )
+                grid_mode = "uniform"
             else:
-                bpm = round(bpm_raw, 2)
+                bpm = _snap_bpm(bpm_raw)
+                grid_times = beats_madmom
+                grid_mode = "tracked"
 
-            # Per-beat confidence on RAW madmom beats (before any shifts)
-            raw_confidences = _compute_beat_confidence(beats_madmom, onset_env, sr, HOP_OE)
+            # Per-beat confidence on the grid beats (before any shifts)
+            raw_confidences = _compute_beat_confidence(grid_times, onset_env, sr, HOP_OE)
 
             # Format-aware encoder-delay compensation (0 for FLAC/WAV, ~22.5ms for MP3)
-            beat_times = beats_madmom + encoder_delay
+            beat_times = grid_times + encoder_delay
             n_orig = len(beat_times)
 
-            # Skip beats inside leading silence
+            # Skip beats inside leading silence, and a uniform grid's beat that
+            # landed before 0 s (it would shift every downbeat count by one).
+            # Both cut only from the front, so n_skipped stays the offset into
+            # raw_confidences.
             if first_signal_t > 0:
                 mask = beat_times >= first_signal_t - (60.0 / max(bpm, 1.0)) * 0.5
                 beat_times = beat_times[mask]
+            beat_times = beat_times[beat_times >= 0]
             n_skipped = n_orig - len(beat_times)
 
             # Build PQTZ-format beat grid
@@ -840,6 +992,7 @@ def detect_beats_madmom(
                 "downbeat_index": downbeat_idx,
                 "beat_count": len(beats),
                 "grid_confidence": round(mean_conf, 3),
+                "grid_mode": grid_mode,
                 "method": "madmom RNN + DBN",
             }
         finally:
@@ -876,6 +1029,7 @@ def detect_beats(
             "downbeat_index": 0,
             "beat_count": 0,
             "grid_confidence": 0.0,
+            "grid_mode": "tracked",
             "method": "empty-input",
         }
 
@@ -937,11 +1091,7 @@ def detect_beats(
     )
 
     # 7. BPM snapping (Pioneer style)
-    bpm_snapped = round(bpm_refined)
-    if abs(bpm_refined - bpm_snapped) < 0.2:
-        bpm = float(bpm_snapped)
-    else:
-        bpm = round(bpm_refined, 2)
+    bpm = _snap_bpm(bpm_refined)
 
     # 8. Convert to times
     beat_times = librosa.frames_to_time(beat_frames, sr=sr, hop_length=HOP)
@@ -1018,6 +1168,7 @@ def detect_beats(
         "downbeat_index": downbeat_idx,
         "beat_count": len(beats),
         "grid_confidence": round(mean_conf, 3),
+        "grid_mode": "tracked",
         "method": "librosa + parabolic interpolation",
     }
 

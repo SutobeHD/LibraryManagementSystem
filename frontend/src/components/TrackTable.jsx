@@ -754,7 +754,7 @@ const TrackRow = memo(function TrackRow({
             )}
             {visible.has('DateAdded') && (
                 <td className="p-1 text-ink-muted text-right pr-2 text-[10px] font-mono">
-                    {t.DateAdded || '-'}
+                    {String(t.DateAdded || t.StockDate || '').slice(0, 10) || '-'}
                 </td>
             )}
             {customColumns &&

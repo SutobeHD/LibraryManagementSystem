@@ -103,7 +103,7 @@ from .artist_store import schema as artist_schema
 from .artist_store import sync as artist_sync
 from .audio_analyzer import LIBROSA_AVAILABLE, AudioAnalyzer, fingerprint_pcm_md5
 from .config import EXPORT_DIR, LOG_DIR, MUSIC_DIR, TEMP_DIR
-from .database import db, db_lock
+from .database import _STREAMING_PREFIXES, db, db_lock
 from .genre_atlas import get_atlas, library_spelling
 from .metadata_fixer import schema as fixer_log
 from .phrase_generator import (
@@ -4270,6 +4270,29 @@ def get_lib_status():
         if db.active_db
         else "Idle",
     }
+
+
+@app.get("/api/library/quality-stats")
+def get_library_quality_stats() -> dict[str, int]:
+    """Lossless/lossy track counts of the loaded library, by file extension.
+
+    Extension only, no file I/O: ``.m4a`` counts as lossy even when it holds ALAC.
+    Streaming entries and unknown extensions count as neither.
+    """
+    from app.library_format_swap import LOSSLESS_SOURCE_EXTS, LOSSY_SOURCE_EXTS
+
+    lossless = lossy = 0
+    if db.loaded:
+        for t in db.get_all_tracks():
+            p = str(t.get("path") or t.get("Location") or "")
+            if not p or p.startswith(_STREAMING_PREFIXES):
+                continue
+            ext = Path(p).suffix.lower()
+            if ext in LOSSLESS_SOURCE_EXTS:
+                lossless += 1
+            elif ext in LOSSY_SOURCE_EXTS:
+                lossy += 1
+    return {"lossless": lossless, "lossy": lossy, "total": lossless + lossy}
 
 
 @app.post("/api/library/mode", dependencies=[Depends(require_session)])
