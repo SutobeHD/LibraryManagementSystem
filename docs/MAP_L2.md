@@ -4445,6 +4445,16 @@ MusicBrainz client tests (T-22, Threat T14 — app/musicbrainz_client.py).
 - `test_search_escapes_lucene_syntax_and_sorts_by_score()`
 - `test_blank_search_costs_nothing()`
 
+### `tests/test_onelibrary_track_limit.py`
+
+B9 regression: a USB sync writes EVERY selected track, not just the 16 template slots.
+
+- `no_analysis()`
+- `test_sync_writes_every_track()`
+- `test_small_sync_uses_template_slots_only()`
+- `test_failed_slot_repair_leaves_no_broken_row()` — A half-written row left behind makes every later content read fail.
+- `test_failed_growth_falls_back_to_template_cap()`
+
 ### `tests/test_onelibrary_wal_flush.py`
 
 End-to-end regression test for OneLibraryUsbWriter — runs the FULL
@@ -4507,6 +4517,7 @@ PDB writer structural test against F: drive Pioneer reference.
 - `make_synthetic_input()` — Mimic the data shape that OneLibraryUsbWriter._write_pdb_from_db
 - `main()`
 - `test_export_pdb_invariants()` — pytest entry point — all export.pdb byte invariants must hold.
+- `test_playlist_entry_pages_hold_at_most_255_rows()` — 12-byte entries would fit ~284 per page; the >255-row header shape is
 
 ### `tests/test_phrase_anlz_dirs.py`
 
