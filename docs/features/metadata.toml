@@ -30,8 +30,8 @@ test = "testen"
 desc = "Felder ablehnen, die Live/XML nicht speichern kann; XML-Save atomar; 400/422 statt stillem 200."
 paths = ["app/track_fields.py", "tests/test_track_metadata_fields.py"]
 related = ["db-write-lock", "artist-merge"]
-todo = ["Backup vor Merge inkl. masterPlaylists6.xml", "Datei-Backup vor Tag-Writes (Revert stellt nur den Tag-String her)"]
-notes = "Routen-Teil (400/422/500 statt 200) aus dem alten Worktree wf_1fefdec9-6fc-2 (Branch claude/fix-track-metadata-fields) auf fix/kern-loop-backend-b12-b14 portiert; der alte Worktree ist danach überholt."
+todo = ["Backup vor Merge inkl. masterPlaylists6.xml", "Datei-Backup vor Tag-Writes (Revert stellt nur den Tag-String her)", "PATCH /api/tracks/batch nicht atomar: [gültig, unbekannt] -> 500, gültige Zeile schon geschrieben (live_database.py:1463)", "Unbekannte Track-ID -> 500 statt 404"]
+notes = "PC-Test 2026-11-22: 13 verbotene Felder/Werte -> 400/422 ohne Änderung; gültige Edits ändern nur ihre Spalten. Routen-Teil (400/422/500 statt 200) aus dem alten Worktree wf_1fefdec9-6fc-2 (Branch claude/fix-track-metadata-fields) auf fix/kern-loop-backend-b12-b14 portiert; der alte Worktree ist danach überholt."
 
 [[feature]]
 id = "file-tag-writeback"
@@ -42,7 +42,8 @@ test = "testen"
 desc = "Mutagen schreibt ID3/FLAC/MP4/Vorbis/AIFF/WAV inkl. Cover (Setting write_tags_to_files)."
 paths = ["app/audio_tags.py"]
 depends_on = ["track-metadata-update"]
-notes = "src-tauri/src/audio/metadata.rs (lofty) ist toter Code."
+todo = ["Route mit write_tags_to_files=true nicht im PC-Test (nur write_tags direkt auf Kopien)", "PATCH /api/tracks/batch (Title/Artist/Album aus TrackTable) schreibt nie Tags in die Datei"]
+notes = "PC-Test 2026-11-22: write_tags auf Kopien in 5 Containern, Tags + Cover per mutagen zurückgelesen, PCM-md5 unverändert. src-tauri/src/audio/metadata.rs (lofty) ist toter Code."
 
 [[feature]]
 id = "native-tag-read"

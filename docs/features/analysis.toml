@@ -62,8 +62,8 @@ test = "testen"
 desc = "Rekordbox-Waveforms PWAV..PWV7 für die ANLZ-Dateien."
 depends_on = ["analysis-engine", "anlz-writer"]
 related = ["multiband-waveform-data"]
-todo = ["PWV5 R/B tauschen (R=low)", "PWV4 Byte-Order + 7-bit", "PWV2 ohne Whiteness, Höhe 1..15", "PWV6/7 0..127", "Crossover 2 kHz vereinheitlichen (Python/services/Rust)"]
-notes = "Abweichungen laut rbxport-Studie: docs/reference/rbxport/waveform.md §8."
+todo = ["PWV5 R/B tauschen (R=low)", "PWV4 Byte-Order + 7-bit", "PWV2 ohne Whiteness, Höhe 1..15", "PWV6/7 0..127", "Crossover 2 kHz vereinheitlichen (Python/services/Rust)", "Höhenkurve dB-log RMS statt ~31*Peak^2: Korrelation zu Rekordbox 0,45-0,77 (Ziel >= 0,9), ~2x zu hoch (analysis_engine.py:1303-1313)", "Vorschau-Reduktion tastet Punkte ab statt zu poolen (_resample_array :1427)", "PWVC-Payload immer 0; MP3-Waveform startet 27-53 ms zu früh"]
+notes = "PC-Test 2026-11-22 (5 Tracks vs Rekordbox-ANLZ, tmp/wf): alle 8 Tags da, Struktur byte-gleich; bestätigt: PWV5 R/B vertauscht, PWV4 Byte-Reihenfolge/7-Bit, PWV2 > 15, PWV6/7 > 127. Abweichungen laut rbxport-Studie: docs/reference/rbxport/waveform.md §8."
 
 # ── Pipelines ─────────────────────────────────────────────────────────────
 
@@ -84,13 +84,15 @@ id = "analysis-api-manual"
 group = "Pipelines"
 name = "Manuelle (Re-)Analyse & Batch"
 status = "partial"
-test = "testen"
+test = "getestet"
+tested = "2026-11-22"
 desc = "Async-Task, Einzel-Track, analyze-full (ANLZ + master.db), NDJSON-Batch, Status."
 paths = ["app/audio_analyzer.py", "app/analysis_db_writer.py"]
 routes = ["/api/audio/analyze", "/api/track/{tid}/analyze", "/api/track/{tid}/analyze-full", "/api/library/analyze-batch"]
 depends_on = ["analysis-engine", "anlz-writer", "live-master-db"]
 related = ["db-write-lock-retrofit"]
-notes = "Kein Frontend ruft die Routen. Schreibt unter db_lock analysed=105 + Key in Rekordbox-Schreibweise (Am, Dbm, F#); ein abgelehnter master.db-Write ist db_update_failed -> 500, nie still ok (B6, fix/kernloop-0.1-bugs). Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): B6 (analyze-full meldete ok trotz gescheitertem master.db-Write) in PR #82 gefixt - neu prüfen."
+todo = ["ANLZ0000.3EX wird nicht neu geschrieben (alte Rekordbox-Datei bleibt)", "NDJSON-Zeilen enthalten absolute Pfade", "/api/audio/analyze ohne validate_audio_path"]
+notes = "PC-Test 2026-11-22 (Kopie der Library, main f3ce85d): analyze-full (force/skip/404), analyze-batch NDJSON + 409 Single-Flight, /api/audio/analyze async; Key in Camelot, .bak-Sicherungen. B6 nur per Unit-Test. Kein Frontend ruft die Routen. Schreibt unter db_lock analysed=105 + Key in Rekordbox-Schreibweise (Am, Dbm, F#); ein abgelehnter master.db-Write ist db_update_failed -> 500, nie still ok (B6, fix/kernloop-0.1-bugs). Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): B6 (analyze-full meldete ok trotz gescheitertem master.db-Write) in PR #82 gefixt - neu prüfen."
 
 # ── Matching & Klassifikation ─────────────────────────────────────────────
 
