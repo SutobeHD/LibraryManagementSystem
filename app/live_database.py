@@ -59,6 +59,9 @@ class LiveRekordboxDB:
             _ = self.db
             logger.info(f"Successfully opened live database at {self.db_path}")
 
+            # A reload can follow a re-analysis in Rekordbox under another key notation.
+            self.get_analysis_writer().forget_key_notation()
+
             # Pre-load metadata maps for performance
             self._load_metadata_maps()
 
@@ -1013,13 +1016,13 @@ class LiveRekordboxDB:
             raise e
 
     @staticmethod
-    def _import_key_name(track_data: dict[str, Any]) -> str | None:
-        """Rekordbox key name ("Am", "Dbm", "F#") for an import's analysis, else None."""
+    def _import_key_id(track_data: dict[str, Any]) -> int | None:
+        """Engine key id (1-12 major, 13-24 minor) for an import's analysis, else None."""
         from .analysis_db_writer import rekordbox_key_name
 
-        name = rekordbox_key_name(track_data.get("KeyID"))
-        if name:
-            return name
+        key_id = track_data.get("KeyID")
+        if rekordbox_key_name(key_id):
+            return key_id
         # Fallback: the engine's short key ("C#m", "A"), sharps as the engine spells them.
         m = re.fullmatch(r"([A-G])(#?)(m?)", str(track_data.get("Key") or "").strip())
         if not m:
@@ -1028,7 +1031,21 @@ class LiveRekordboxDB:
         root = m.group(1) + m.group(2)
         if root not in pitch:  # "E#", "B#"
             return None
-        return rekordbox_key_name(pitch.index(root) + 1 + (12 if m.group(3) else 0))
+        return pitch.index(root) + 1 + (12 if m.group(3) else 0)
+
+    def _import_key_name(self, track_data: dict[str, Any]) -> str | None:
+        """Key name for an import's analysis as the library spells it ("Am" or "8A"), else None.
+
+        Notation and name come from the analysis writer (``library_key_name``), so an
+        import and a later re-analysis store the same text for the same key.
+        """
+        from .analysis_db_writer import library_key_name
+
+        key_id = self._import_key_id(track_data)
+        if key_id is None:
+            return None
+        notation = self.get_analysis_writer().key_notation()
+        return library_key_name(key_id, notation, track_data.get("Camelot"))
 
     def _write_import_analysis_columns(
         self, tid: str, track_data: dict[str, Any]

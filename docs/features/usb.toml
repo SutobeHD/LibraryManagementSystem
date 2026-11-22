@@ -73,14 +73,25 @@ id = "usb-onelibrary-track-limit"
 group = "Export-Formate"
 parent = "usb-onelibrary-export"
 name = "16-Track-Grenze aufheben"
-status = "unmerged"
+status = "shipped"
 test = "testen"
-branch = "fix/usb-onelibrary-track-limit"
 research = "usb-onelibrary-track-limit"
 desc = "Stick-Export schreibt alle gewählten Tracks in exportLibrary.db und export.pdb (vorher max. 16 Template-Slots, B9)."
 paths = ["tests/test_onelibrary_track_limit.py"]
 related = ["pyrekordbox-upgrade", "rbox-upgrade", "rekordbox-free-workflow-toggles"]
-notes = "B9 belegt 2026-11-14: 20-Track-Playlist -> exportLibrary.db und export.pdb je 16 Zeilen, rekordbox.xml 20; gefixt auf fix/usb-onelibrary-track-limit (PR #88). Template-Slots wachsen zur Laufzeit (rbox 0.1.7: create_content-Halbzeile + update_content-Reparatur, _grow_slots). Scheitert das, alte 16er-Kappung mit Warnung. Neue Slots erben Template-Spalten (Datum, Samplerate, master ids) wie die 16 alten - master_content_id wiederholt sich alle 16 Zeilen. ~500-Track-PDB-Limit unbelegt (Docstring-Annahme, kein Writer-Limit). Langfristig DB aus Schema bauen wie rbxport: docs/reference/rbxport/export.md §3."
+notes = "B9 belegt 2026-11-14: 20-Track-Playlist -> exportLibrary.db und export.pdb je 16 Zeilen, rekordbox.xml 20; gefixt in PR #88 (gemergt 2026-11-22), Prüfung am CDJ: cdj-hardware-validation. Template-Slots wachsen zur Laufzeit (rbox 0.1.7: create_content-Halbzeile + update_content-Reparatur, _grow_slots). Scheitert das, alte 16er-Kappung mit Warnung. Neue Slots erben Template-Spalten (Datum, Samplerate, master ids) wie die 16 alten - master_content_id wiederholt sich alle 16 Zeilen. ~500-Track-PDB-Limit unbelegt (Docstring-Annahme, kein Writer-Limit). Langfristig DB aus Schema bauen wie rbxport: docs/reference/rbxport/export.md §3."
+
+[[feature]]
+id = "cdj-hardware-validation"
+group = "Validierung"
+name = "Hardware-Test am CDJ-3000"
+status = "shipped"
+test = "testen"
+desc = "Abnahme am echten Player: Stick aus der App laden und am CDJ-3000 prüfen. Checkliste und Track-Auswahl: python scripts/validate_real_world.py checklist."
+depends_on = ["analysis-real-world-validation", "usb-onelibrary-export"]
+related = ["usb-onelibrary-track-limit", "usb-legacy-pdb"]
+todo = ["Tempo und Länge am Player wie in der App", "Cover und Waveform (Übersicht + Zoom) sichtbar", "Grid sitzt auf dem Kick: Anfang, Mitte, Ende (B5)", "Hot Cues und Memory Cues an der richtigen Stelle", "Sync-Drift: zwei Tracks 5 Minuten im Beat-Sync", "Stick mit mehr als 16 Tracks: alle Tracks und Playlists da (B9)", "Hot-Cue-Bänke A..P am Player (nach Merge von hot-cue-16-limits)", "AIFF aus dem SC-Download (AIFF-C sowt) spielt am Player", "Waveform-Farben am Player wie in Rekordbox", "Legacy export.pdb lädt an einem alten CDJ"]
+notes = "Zurückgestellt 2026-11-22 (Nutzer): Tests mit externer Hardware erst in einer späteren Phase. Bis dahin zählt für die einzelnen Features der Test am PC. Kein eigener Code - die Checkliste gehört zu analysis-real-world-validation."
 
 [[feature]]
 id = "usb-legacy-pdb"

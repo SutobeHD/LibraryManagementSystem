@@ -39,8 +39,14 @@ LibraryManagementSystem -- Analysis-to-Database Writer
 
 - `AnalysisDbUpdateError` — master.db refused the analysis write (row missing, rbox error, bad value).
 - `rekordbox_key_name()` — Rekordbox key name for an ``analysis_engine`` key id (1-12 major, 13-24 minor).
+- `KeyNotation` — How a Rekordbox library spells the key names in ``djmdKey``.
+- `library_key_notation()` — The notation most keyed tracks of a library use; tie or no keyed track = classic.
+- `library_key_name()` — The ``djmdKey`` name to write for a detected key, in the library's own notation.
+- `detect_library_key_notation()` — ``library_key_notation`` over every content row of an open ``rbox.MasterDb``.
 - `rekordbox_anlz_rel_path()` — The ``AnalysisDataPath`` Rekordbox records for a content row, from its uuid.
 - `AnalysisDBWriter` — Writes analysis results into the Rekordbox live database.
+- `  AnalysisDBWriter.key_notation()` — The notation the library's keys are in, detected once per writer and cached.
+- `  AnalysisDBWriter.forget_key_notation()` — Drop the cached notation: the library was reloaded and may have changed.
 - `  AnalysisDBWriter.shutdown()`
 - `  AnalysisDBWriter.analyze_and_save()` — Full pipeline: analyze a track and write results to Rekordbox DB + ANLZ files.
 - `  AnalysisDBWriter.analyze_batch()` — Analyze multiple tracks sequentially, yielding progress after each.
@@ -2726,6 +2732,18 @@ Unit tests for AnalysisDBWriter — the values it writes into Rekordbox master.d
 - `test_key_failure_after_the_row_write_keeps_the_cache_on_the_new_bpm()`
 - `test_the_worker_gets_the_requested_depth()`
 - `test_batch_depth_reaches_every_track_without_a_settings_read()` — The route resolves depth once; the writer only threads it through.
+- `test_camelot_codes_match_the_engine_for_every_key_id()` — The code written is checked against the writer's own key-id table, so that table
+- `test_library_key_notation_is_the_majority_of_the_keyed_tracks()`
+- `test_library_key_name_falls_back_to_classic_without_a_usable_camelot_code()` — Key id 15 is D minor = "7A".
+- `test_library_key_name_follows_the_notation()`
+- `test_update_db_writes_the_key_in_the_notation_of_the_library()`
+- `test_camelot_library_gets_the_classic_name_when_the_code_is_unusable()`
+- `test_camelot_library_gets_the_classic_name_when_the_code_is_missing()`
+- `test_unknown_key_writes_no_key_in_either_notation()`
+- `test_notation_is_detected_once_for_a_batch_of_writes()` — One ``get_contents`` per track would read 5000 rows 5000 times in a full re-analysis.
+- `test_failed_notation_read_writes_classic_and_is_retried()`
+- `test_forgetting_the_notation_reads_the_library_again()`
+- `test_notation_does_not_come_from_the_partial_track_cache()` — The cache may hold only the tracks being written, and its ``Key`` is the Camelot
 
 ### `tests/test_analysis_depth_settings.py`
 
@@ -4480,6 +4498,12 @@ An imported track's analysis must reach master.db (B4, 0.1 core-loop test).
 - `live()`
 - `test_add_track_writes_bpm_length_and_key()`
 - `test_import_key_is_stored_in_rekordbox_spelling()`
+- `test_import_into_a_camelot_library_stores_the_camelot_code()`
+- `test_import_into_a_classic_library_keeps_the_classic_name()`
+- `test_import_without_a_usable_camelot_code_stores_the_classic_name()`
+- `test_import_key_read_from_the_text_follows_the_notation_too()`
+- `test_imports_and_a_reanalysis_read_the_library_notation_once()`
+- `test_library_reload_reads_the_notation_again()`
 - `test_refused_analysis_write_leaves_the_cache_at_what_master_db_holds()`
 - `test_attach_import_anlz_uses_rekordbox_share_layout()`
 - `test_attach_import_anlz_records_nothing_without_a_dat()`
@@ -5700,6 +5724,45 @@ Tests for the USB relocation pass (`app/usb_one_library.py`).
 - `TestSlotPruning` — Stage 3 deletes the placeholder slots nothing was written into.
 - `  TestSlotPruning.test_a_failed_slot_does_not_delete_a_populated_row()`
 
+### `tests/test_validate_real_world.py`
+
+Unit tests for the pure helpers in scripts/validate_real_world.py.
+
+- `row()`
+- `test_split_chunks_deals_round_robin()`
+- `test_split_chunks_never_returns_empty_chunks()`
+- `test_percentile_interpolates()`
+- `test_drift_is_relative_tempo_error_over_the_window()`
+- `test_bpm_exact_compares_at_two_decimals()`
+- `test_summarise_counts_and_grid_stats()`
+- `test_summarise_without_comparable_rows()`
+- `test_thresholds_pass_on_a_clean_run()`
+- `test_thresholds_name_every_missed_floor()`
+- `test_thresholds_flag_the_grid_median()`
+- `test_thresholds_fail_when_nothing_compared()`
+- `test_picks_are_disjoint_and_ordered()`
+- `test_picks_handle_an_empty_report()`
+- `content()`
+- `test_is_within()`
+- `test_diff_table_reports_added_removed_and_changed_columns()`
+- `test_db_diff_passes_when_only_written_rows_change_writer_columns()`
+- `test_db_diff_flags_a_row_nobody_wrote()`
+- `test_db_diff_flags_columns_beyond_the_writer()`
+- `test_db_diff_flags_lost_rows_and_foreign_tables()`
+- `test_written_row_passes_when_db_and_dat_match_the_writer()`
+- `test_written_row_reports_each_mismatch()`
+- `test_written_row_reports_writer_errors_and_missing_grid()`
+- `test_copy_library_takes_wal_files_and_adds_share()`
+- `test_db_write_refuses_a_work_dir_inside_the_library()`
+- `test_db_write_refuses_while_rekordbox_runs()`
+- `test_checklist_command_reads_a_report()`
+- `test_usable_ids_skips_streaming_and_missing_files()`
+- `test_table_getters_keeps_only_whole_table_listings()`
+- `test_library_key_notation_follows_the_majority()`
+- `test_snapshot_tables_reports_unreadable_tables_instead_of_dropping_them()`
+- `test_snapshot_tables_walks_membership_tables_per_parent()`
+- `test_db_diff_accepts_only_the_usn_counter_in_the_registry()`
+
 ### `tests/test_variant_detector.py`
 
 variant_schema + variant_detector tests (analysis-remix-detector T-2, T-3).
@@ -6793,6 +6856,37 @@ Vendor a slim snapshot of the genre-atlas repo into app/data/genre_atlas.json.
 Add app to path
 
 - `test_xml_generation()`
+
+### `scripts/validate_real_world.py`
+
+validate_real_world.py — real-library validation run for the analysis engine.
+
+- `split_chunks()` — Deal ids round-robin into at most `workers` non-empty chunks.
+- `percentile()` — Linear-interpolated percentile, q in 0..100.
+- `drift_ms()` — How far two decks run apart over `window_s` if one plays at our BPM and
+- `bpm_exact()` — Same BPM as Rekordbox at the two decimals Rekordbox stores.
+- `summarise()` — Aggregate compare_rekordbox rows into one report block.
+- `check_thresholds()` — Return one line per missed floor; empty list = pass.
+- `pick_cdj_tracks()` — Choose the tracks a CDJ check should load.
+- `is_within()` — True when `path` resolves to `root` or something below it.
+- `diff_table()` — Row-level diff of two {row id: column dict} snapshots.
+- `judge_db_diff()` — Turn table diffs into failures.
+- `table_getters()` — Table names behind rbox's no-argument listing getters (`get_playlists` -> `playlists`).
+- `library_key_notation()` — 'camelot' or 'classic': the notation most keyed tracks carry.
+- `judge_written_row()` — Check one written track: what the writer reported is what master.db and the .DAT hold.
+- `usable_ids()` — First n candidates whose audio file is on disk (streaming tracks have none).
+- `run_ab()` — Run compare_rekordbox.py over `ids` in parallel worker processes.
+- `print_summary()`
+- `print_checklist()`
+- `cmd_ab()`
+- `rekordbox_running()` — rbox refuses every write while Rekordbox runs — on a copy too.
+- `file_fingerprint()` — (size, sha256) of a file, None when it does not exist.
+- `copy_library()` — Copy master.db with its WAL files into `work` next to an empty share/.
+- `snapshot_tables()` — Every table rbox can list: ({table: {row id: column dict}}, {table: why it was skipped}).
+- `run_db_write()` — Write analysis results for a few tracks into a copy of master.db and audit the copy.
+- `cmd_db_write()`
+- `cmd_checklist()`
+- `main()`
 
 ### `scripts/validate_research_docs.py`
 
