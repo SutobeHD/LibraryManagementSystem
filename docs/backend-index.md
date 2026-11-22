@@ -120,6 +120,7 @@ Marker convention in the route tables below:
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/library/status` | Library load state, mode (XML/live), path |
+| GET | `/api/library/quality-stats` | Lossless/lossy track counts of the loaded library by file extension (`LOSSLESS_SOURCE_EXTS` / `LOSSY_SOURCE_EXTS`, `library_format_swap`). Returns `{lossless, lossy, total}`, `total = lossless + lossy`; streaming entries and unknown extensions (e.g. `.wma`) count as neither; `.m4a` = lossy (ALAC not detected). Zeros when no library is loaded. Called by `ImportView` |
 | POST | `/api/library/mode` `[AUTH]` | Switch between XML and live (SQLite) mode |
 | POST | `/api/library/load` `[AUTH]` | Load a Rekordbox XML file into memory |
 | POST | `/api/library/unload` `[AUTH]` | Unload current library |

@@ -14,6 +14,7 @@ status = "shipped"
 desc = "<audio>-Player: Play/Pause/Volume, Drag-Seek, amber Mirror-Scrubber."
 paths = ["frontend/src/components/Player.jsx", "frontend/src/components/shared/seededWaveform.js"]
 depends_on = ["audio-stream-route"]
+todo = ["B10: AIFF spielt nicht (Chromium MediaError 4), Player zeigt trotzdem 'spielt' - 2911/4906 Tracks sind AIFF; kein onError am <audio>"]
 notes = "Scrubber-Waveform ist eine seeded Pseudo-Kurve, keine echte Analyse."
 
 [[feature]]
@@ -21,23 +22,28 @@ id = "audio-stream-route"
 group = "Playback"
 name = "Audio-Streaming-Route"
 status = "shipped"
+test = "getestet"
+tested = "2026-11-14"
 desc = "Range-Request-Streaming, sandboxed via validate_audio_path, MIME pro Endung."
 paths = ["tests/test_stream_unicode_filename.py"]
 routes = ["/api/stream", "/api/audio/stream"]
 depends_on = ["audio-path-sandbox"]
 
 # ── Waveform ──────────────────────────────────────────────────────────────
+notes = "Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): ok."
 
 [[feature]]
 id = "multiband-waveform-data"
 group = "Waveform"
 name = "3-Band-Waveform-Daten"
 status = "shipped"
+test = "getestet"
+tested = "2026-11-14"
 desc = "Backend low/mid/high-Waveform + Client-Bandsplit."
 paths = ["frontend/src/utils/AudioBandAnalyzer.js"]
 routes = ["/api/audio/waveform"]
 related = ["waveform-generation"]
-notes = "Backend-Teil: AudioEngine.generate_multiband_waveform in services.py (Hub). Decode blockiert den Event-Loop."
+notes = "Backend-Teil: AudioEngine.generate_multiband_waveform in services.py (Hub). Decode blockiert den Event-Loop. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): ok."
 
 [[feature]]
 id = "wavesurfer-waveform-editor"

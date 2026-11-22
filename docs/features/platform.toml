@@ -11,29 +11,31 @@ id = "tauri-sidecar-supervisor"
 group = "Desktop-Runtime"
 name = "Sidecar-Supervisor"
 status = "shipped"
-test = "getestet"
-tested = "2026-09-04"
+test = "testen"
 desc = "Startet die Python-Sidecar, fängt das Token aus stdout ab und filtert es, Kill bei Exit, Dev-Autospawn."
 related = ["bearer-session-auth", "pyinstaller-backend-bundle"]
-notes = "Code in src-tauri/src/main.rs (Hub). Test: testen - 2026-11-14 Release-Sidecar-Name auf RB_Backend vereinheitlicht (SIDECAR_NAME, war rb-backend -> Release-EXE panicte os error 2; Branch fix/release-sidecar-cors). Release-Build kompilierte auf main gar nicht (Release-only-Imports von f92de03 als unused entfernt) - Fix 59d0c34 aus PR #60 übernommen. get_session_token las im Release vor Sidecar-Boot den Token des Vorlaufs aus .session-token -> Frontend cachte ihn -> 401 auf allen Mutationen; Datei-Fallback jetzt nur Debug. Installierte App (MSI/NSIS) vom User prüfen."
+notes = "Code in src-tauri/src/main.rs (Hub). Test: testen - 2026-11-14 Release-Sidecar-Name auf RB_Backend vereinheitlicht (SIDECAR_NAME, war rb-backend -> Release-EXE panicte os error 2; Branch fix/release-sidecar-cors). Release-Build kompilierte auf main gar nicht (Release-only-Imports von f92de03 als unused entfernt) - Fix 59d0c34 aus PR #60 übernommen. get_session_token las im Release vor Sidecar-Boot den Token des Vorlaufs aus .session-token -> Frontend cachte ihn -> 401 auf allen Mutationen; Datei-Fallback jetzt nur Debug. Installierte App (MSI/NSIS) vom User prüfen. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): B1 (Release-EXE startete Sidecar unter falschem Namen) in PR #80 gefixt - installierte App neu prüfen."
 
 [[feature]]
 id = "pyinstaller-backend-bundle"
 group = "Desktop-Runtime"
 name = "Backend-Bundle (PyInstaller)"
 status = "shipped"
+test = "getestet"
+tested = "2026-11-14"
 desc = "backend_entry + backend.spec -> RB_Backend-Binary als Tauri externalBin."
 paths = ["backend_entry.py", "backend.spec"]
-notes = "Sidecar-Name überall RB_Backend (backend.spec, externalBin, Capability, main.rs SIDECAR_NAME); cargo test sidecar_name_tests hält das synchron."
+notes = "Sidecar-Name überall RB_Backend (backend.spec, externalBin, Capability, main.rs SIDECAR_NAME); cargo test sidecar_name_tests hält das synchron. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): ok."
 
 [[feature]]
 id = "tauri-capabilities"
 group = "Desktop-Runtime"
 name = "Tauri-Capabilities"
 status = "partial"
+test = "testen"
 desc = "Rechte: shell (Sidecar-Spawn), dialog, fs read/write/mkdir."
 paths = ["src-tauri/capabilities/main.json"]
-notes = "shell:allow-execute steht auf main noch drin (main.json:19) - entfernt auf PR #58 (1af45ae)."
+notes = "shell:allow-execute steht auf main noch drin (main.json:19) - entfernt auf PR #58 (1af45ae). Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): B1 (Capability-Scope binaries/rb-backend vs RB_Backend) in PR #80 gefixt - installierte App neu prüfen."
 
 # ── Auth & Security ───────────────────────────────────────────────────────
 
@@ -42,49 +44,59 @@ id = "bearer-session-auth"
 group = "Auth & Security"
 name = "Bearer-Session-Auth (Phase 1)"
 status = "shipped"
+test = "getestet"
+tested = "2026-11-14"
 research = "security-api-auth-hardening"
 desc = "Token beim Boot, require_session auf allen Mutationen, Übergabe per stdout/Datei/dev-token."
 paths = ["app/auth.py", "frontend/src/store/authStore.js", "tests/test_auth.py"]
 depends_on = ["tauri-sidecar-supervisor"]
-notes = "Token nie loggen. Rotiert nur bei Sidecar-Neustart. Test-Isolation: plain pytest überschreibt den echten Session-Token (Fix auf PR #58)."
+notes = "Token nie loggen. Rotiert nur bei Sidecar-Neustart. Test-Isolation: plain pytest überschreibt den echten Session-Token (Fix auf PR #58). Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): ok."
 
 [[feature]]
 id = "safe-compare"
 group = "Auth & Security"
 name = "Constant-Time-Vergleich"
 status = "shipped"
+test = "getestet"
+tested = "2026-11-14"
 research = "security-secrets-compare-digest-codebase-audit"
 desc = "safe_compare-Helper + require_session-Refactor."
 paths = ["app/security_compare.py", "tests/test_security_compare.py"]
+notes = "Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): ok."
 
 [[feature]]
 id = "rate-limiter"
 group = "Auth & Security"
 name = "Token-Bucket Rate-Limit"
 status = "shipped"
+test = "getestet"
+tested = "2026-11-14"
 research = "security-rate-limit-design"
 desc = "In-Process-Buckets, Loopback ausgenommen, 429 + Retry-After."
 paths = ["app/rate_limit.py", "tests/test_rate_limit.py"]
-notes = "Nur HIGH-Tier verdrahtet (shutdown/restart/sc-auth-token)."
+notes = "Nur HIGH-Tier verdrahtet (shutdown/restart/sc-auth-token). Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): ok."
 
 [[feature]]
 id = "cors-lockdown"
 group = "Auth & Security"
 name = "CORS-Lockdown"
 status = "shipped"
+test = "testen"
 research = "security-cors-allow-credentials-tightening"
 desc = "Nur localhost/tauri-Origins, explizite Methoden, allow_credentials=False, kein Auth-Cookie."
-notes = "Code in app/main.py (CORS_ALLOWED_ORIGINS). Cookie-Auth-PRs immer ablehnen. Test: testen - 2026-11-14 http://tauri.localhost ergänzt (Windows-Origin der Release-App, useHttpsScheme default false; fehlte -> jeder Preflight OPTIONS 400). Tests in tests/test_auth.py TestCaseM2. Installierte App vom User prüfen."
+notes = "Code in app/main.py (CORS_ALLOWED_ORIGINS). Cookie-Auth-PRs immer ablehnen. Test: testen - 2026-11-14 http://tauri.localhost ergänzt (Windows-Origin der Release-App, useHttpsScheme default false; fehlte -> jeder Preflight OPTIONS 400). Tests in tests/test_auth.py TestCaseM2. Installierte App vom User prüfen. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): B2 (http://tauri.localhost fehlte) in PR #80 gefixt - installierte App neu prüfen."
 
 [[feature]]
 id = "audio-path-sandbox"
 group = "Auth & Security"
 name = "Pfad-Sandbox"
 status = "shipped"
+test = "getestet"
+tested = "2026-11-14"
 research = "security-api-file-reveal-sandbox"
 desc = "validate_audio_path gegen ALLOWED_AUDIO_ROOTS (is_relative_to) + Endungs-Whitelist."
 paths = ["tests/test_main_security.py", "tests/test_security_hotfixes.py"]
-notes = "Code in app/main.py."
+notes = "Code in app/main.py. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): ok."
 
 [[feature]]
 id = "api-route-auth-model"
@@ -127,6 +139,7 @@ test = "testen"
 research = "security-error-handler-exc-info-leak"
 desc = "RedactingFormatter entfernt absolute Pfade aus Logs/Tracebacks, safe_error_message."
 paths = ["app/logging_utils.py", "tests/test_logging_redaction.py"]
+todo = ["Boot-Zeile 'Allowed audio roots: [...]' loggt die Pfade unredigiert (app/main.py, Kern-Loop-Test 2026-11-14)"]
 
 [[feature]]
 id = "sc-log-credential-scrub"
@@ -147,20 +160,24 @@ id = "system-lifecycle-routes"
 group = "Infra"
 name = "Health/Heartbeat/Shutdown/Restart"
 status = "shipped"
+test = "getestet"
+tested = "2026-11-14"
 desc = "Health ohne Auth, Heartbeat alle 5 s, Shutdown/Restart mit Auth + Rate-Limit."
 paths = ["tests/test_system_health.py"]
 routes = ["/api/system/health", "/api/system/heartbeat", "/api/system/shutdown", "/api/system/restart"]
-notes = "Heartbeat wird gespeichert, aber kein Watchdog wertet ihn aus."
+notes = "Heartbeat wird gespeichert, aber kein Watchdog wertet ihn aus. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): ok."
 
 [[feature]]
 id = "config-platform-paths"
 group = "Infra"
 name = "Config / Plattform-Pfade"
 status = "partial"
+test = "getestet"
+tested = "2026-11-14"
 desc = "REKORDBOX_ROOT, FFMPEG_BIN, export/log/temp/music-Ordner; Auth-Dateien über platformdirs."
 paths = ["app/config.py"]
 related = ["linux-dj-workflow"]
-notes = "REKORDBOX_ROOT nur über %APPDATA%; relative ./exports hängen vom cwd ab."
+notes = "REKORDBOX_ROOT nur über %APPDATA%; relative ./exports hängen vom cwd ab. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): ok."
 
 [[feature]]
 id = "docker-deploy"

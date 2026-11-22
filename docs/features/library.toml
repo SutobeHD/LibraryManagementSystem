@@ -11,33 +11,37 @@ id = "track-table"
 group = "Browsen & Suchen"
 name = "Track-Tabelle"
 status = "shipped"
+test = "testen"
 desc = "Sortierbare Track-Liste: Spalten, Camelot-Key-Farben, Cover-Thumb, Drag, Kontextmenü."
 paths = ["frontend/src/components/TrackTable.jsx"]
 routes = ["/api/file/reveal"]
 related = ["inline-rating-color", "collection-view", "list-context-menus", "perf-frontend-virtualization"]
-notes = "Virtualisiert seit PR #63 (in #60, perf-frontend-virtualization). LibraryView.jsx ist ein toter Vorgänger."
+notes = "Virtualisiert seit PR #63 (in #60, perf-frontend-virtualization). LibraryView.jsx ist ein toter Vorgänger. B17 (Date Added leer) gefixt: Spalte zeigt StockDate, fehlendes Datum ist leer statt 'None'."
 
 [[feature]]
 id = "collection-view"
 group = "Browsen & Suchen"
 name = "Collection & Token-Suche"
 status = "shipped"
+test = "testen"
 desc = "Ganze Library als Collection-Knoten, Suche mit bpm:/key:/genre:/year:/rating:, Track löschen."
 routes = ["/api/library/tracks", "/api/track/{tid}", "/api/track/delete", "/api/tracks/move"]
 depends_on = ["track-table", "live-master-db"]
-notes = "/api/tracks/move ist ein Stub. /api/library/tracks ohne Pagination; light=true-Projektion in #60 (perf-backend-quickwins). Route kodiert ihr JSON selbst im Threadpool, pro Track ein json.dumps - blockiert den Event-Loop nicht mehr (B3, PR #82). Alle Listen-Views laden über fetchLibraryTracks() mit ?light=true (3,2 MB, ~0,2 s; PR #75). Editoren laden den Beatgrid mit PR #77."
+notes = "/api/tracks/move ist ein Stub. /api/library/tracks ohne Pagination; light=true-Projektion in #60 (perf-backend-quickwins). Route kodiert ihr JSON selbst im Threadpool, pro Track ein json.dumps - blockiert den Event-Loop nicht mehr (B3, PR #82). Alle Listen-Views laden über fetchLibraryTracks() mit ?light=true (3,2 MB, ~0,2 s; PR #75). Editoren laden den Beatgrid mit PR #77. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): B3 (Collection 0 Tracks, Backend 18 s blockiert) in PR #75 + #82 gefixt - neu prüfen."
 
 [[feature]]
 id = "category-browser"
 group = "Browsen & Suchen"
 name = "Artists/Labels/Albums-Browser"
 status = "shipped"
+test = "getestet"
+tested = "2026-11-14"
 desc = "Library nach Artist, Label, Album gruppiert, Track-Liste pro Eintrag."
 paths = ["frontend/src/components/MetadataView.jsx"]
 routes = ["/api/artists", "/api/artist/{aid}/tracks", "/api/labels", "/api/albums"]
 depends_on = ["track-table", "name-normalisation"]
 related = ["artist-hub"]
-notes = "Auf PR #58 übernimmt der Artist Hub den Artists-Tab."
+notes = "Auf PR #58 übernimmt der Artist Hub den Artists-Tab. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): ok."
 
 # ── Playlists ─────────────────────────────────────────────────────────────
 
@@ -52,7 +56,7 @@ paths = ["frontend/src/components/PlaylistBrowser.jsx"]
 routes = ["/api/playlists/tree", "/api/playlists/create", "/api/playlists/rename", "/api/playlists/move", "/api/playlists/delete"]
 depends_on = ["live-master-db"]
 related = ["standalone-library-mode"]
-notes = "Live-move_playlist war in leere Ordner und zurück nach ROOT kaputt (rbox: parent_id=None = Eltern behalten, seq ist ein Wert <= Anzahl). Fix auf fix/kernloop-0.1-bugs (B11): ROOT als \"root\", seq=None zum Anhängen, vor/nach per seq-Wert, Baum-Cache danach frisch aus master.db. /api/playlists/create gab den ganzen Knoten als id zurück (Duplizieren kopierte keine Tracks) und success auch ohne neue Playlist: jetzt id-String bzw. 500."
+notes = "Live-move_playlist war in leere Ordner und zurück nach ROOT kaputt (rbox: parent_id=None = Eltern behalten, seq ist ein Wert <= Anzahl). Fix auf fix/kernloop-0.1-bugs (B11): ROOT als \"root\", seq=None zum Anhängen, vor/nach per seq-Wert, Baum-Cache danach frisch aus master.db. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): B11 (Verschieben in leeren Ordner / zurück nach ROOT) in PR #82 gefixt - neu prüfen. /api/playlists/create gab den ganzen Knoten als id zurück (Duplizieren kopierte keine Tracks) und success auch ohne neue Playlist: jetzt id-String bzw. 500."
 
 [[feature]]
 id = "playlist-track-ops"
@@ -65,7 +69,7 @@ paths = ["tests/test_live_playlist_ops.py", "tests/test_live_playlist_b11.py"]
 routes = ["/api/playlists/add-track", "/api/playlists/remove-track", "/api/playlists/reorder"]
 depends_on = ["playlist-tree-crud", "db-write-lock"]
 todo = ["Test-Playlist im echten Rekordbox anlegen, Add/Remove/Reorder prüfen, wegräumen"]
-notes = "Im Live-Modus auf main kaputt. Auf fix/kernloop-0.1-bugs (B11): add/remove frischen den playlists_tracks-Cache auf, reorder setzt den Track per rbox move_playlist_song an target_index (0-basiert, geklemmt wie XML); da6ba0d (rbox-Arity) liegt schon in PR #60."
+notes = "Im Live-Modus auf main kaputt. Auf fix/kernloop-0.1-bugs (B11): add/remove frischen den playlists_tracks-Cache auf, reorder setzt den Track per rbox move_playlist_song an target_index (0-basiert, geklemmt wie XML); da6ba0d (rbox-Arity) liegt schon in PR #60. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): B11 (Add/Remove erst nach Reload sichtbar, Reorder ignorierte Ziel) in PR #82 gefixt - neu prüfen."
 
 [[feature]]
 id = "smart-playlists"
@@ -104,9 +108,12 @@ id = "inline-rating-color"
 group = "Bewertung & Tags"
 name = "Rating & Farbe inline"
 status = "shipped"
+test = "getestet"
+tested = "2026-11-14"
 desc = "5-Sterne-Klick und Pioneer-Farbpicker direkt in der Tabelle."
 routes = ["/api/tracks/batch"]
 depends_on = ["track-metadata-update", "track-table"]
+notes = "Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): ok."
 
 [[feature]]
 id = "ranking-mode"
@@ -150,12 +157,13 @@ id = "import-manager"
 group = "Import"
 name = "Import-Manager"
 status = "shipped"
+test = "testen"
 desc = "Drag-Drop/Ordner-Import, Ordner wird Playlist, 7-Stufen-Pipeline."
 paths = ["frontend/src/components/ImportView.jsx", "app/import_tracker.py", "tests/test_import*.py", "tests/test_live_import_analysis.py"]
 routes = ["/api/library/import-paths", "/api/audio/import", "/api/import/tasks"]
 depends_on = ["native-tag-read", "analysis-on-import", "anlz-writer"]
 related = ["download-manager-view", "import-progress-banner"]
-notes = "Live-Modus: Import schreibt BPM (centi), Länge, Key (Rekordbox-Schreibweise) in master.db und die ANLZ-Dateien in den Rekordbox-share unter /PIONEER/USBANLZ/<uuid[:3]>/<uuid[3:]>/ samt AnalysisDataPath + analysed=105 (B4, fix/kernloop-0.1-bugs)."
+notes = "Live-Modus: Import schreibt BPM (centi), Länge, Key (Rekordbox-Schreibweise) in master.db und die ANLZ-Dateien in den Rekordbox-share unter /PIONEER/USBANLZ/<uuid[:3]>/<uuid[3:]>/ samt AnalysisDataPath + analysed=105 (B4, fix/kernloop-0.1-bugs). Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): B4 (BPM/Länge/Key/Analysepfad fehlten in master.db) in PR #82 gefixt - neu prüfen."
 
 [[feature]]
 id = "import-quality-panel"
@@ -163,18 +171,22 @@ group = "Import"
 parent = "import-manager"
 name = "Import-Settings-Panel"
 status = "partial"
+test = "testen"
 desc = "Rechte Spalte im Import: Lossless/Lossy-Analyse, Zielformat, Safe-Delete."
-notes = "/api/library/quality-stats fehlt (zeigt hart 1247/892). Zielformat und Backup gehen nie ans Backend."
+notes = "Zielformat und Backup gehen nie ans Backend. Qualitäts-Zahlen kommen seit B16 von GET /api/library/quality-stats (nach Dateiendung, .m4a = lossy); vorher zeigte das Panel hart 1247/892."
 
 [[feature]]
 id = "folder-watcher"
 group = "Import"
 name = "Folder-Watcher & Ordner-Scan"
 status = "shipped"
+test = "getestet"
+tested = "2026-11-14"
 desc = "Überwachte Ordner automatisch importieren, einmaliger Scan."
 paths = ["app/folder_watcher.py"]
 routes = ["/api/library/folder-watcher", "/api/library/scan-folder"]
 depends_on = ["import-manager"]
+notes = "Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): ok."
 
 [[feature]]
 id = "rekordbox-free-workflow-toggles"

@@ -176,7 +176,7 @@ status = "idea"
 desc = "Toter Code, der gemountet aussieht: aufräumen oder wiederbeleben."
 paths = ["frontend/src/components/LibraryView.jsx", "app/rekordbox_export.py", "app/analysis_inspector.py", "app/sidecar.py"]
 related = ["non-destructive-editor", "batch-rename-comment", "rust-native-playback"]
-notes = "Weitere: BatchEditBar.jsx, ToolsView.jsx (nie gerendert), editor/, Rust audio/metadata.rs. Fehlende Routen: /api/library/quality-stats, /api/insights/dj_stats, /api/file/read."
+notes = "Weitere: BatchEditBar.jsx, ToolsView.jsx (nie gerendert), editor/, Rust audio/metadata.rs. Fehlende Routen: /api/insights/dj_stats, /api/file/read."
 
 [[feature]]
 id = "pre-commit-hooks"
