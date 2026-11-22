@@ -44,13 +44,13 @@ _(none)_
 _(none)_
 
 ### review
-_(none)_
+- [review_sound-component-sorting.md](implement/review_sound-component-sorting.md) — Sort by sound components; plan revision 5 after the user asked for more features from the collected data: 6 + 4 coarse bass / kick / top-end values, 3 combined kinds (Klang gesamt, Kick, Groove), big-drop bar + 2 new structure columns, intro / outro type, 4 filters incl. mix partner; no new dependency, no extra scan time; awaiting Plan-Reviewer (2026-11-22)
 
 ### approvalgate ⛔ THE GATE
 - [approvalgate_recording-booth.md](implement/approvalgate_recording-booth.md) — ⛔ **AWAITING /approve** (re-planned) — DJ-set recorder; **lead model now DDJ-GRV6** (4-channel / STEMS-native / GROOVE CIRCUIT + Sound-Color/Beat-FX + 4 decks) after gate-reject 2026-06-02. Plan re-scoped: GRV6 outline + full control map (stem-ISO/drum/FX), spike 1c extended (EQ + stem-ISO/sound-color/GROOVE-CIRCUIT on-the-wire), 4-deck timeline, 4-channel meters; mockup rebuilt 4-channel GRV6; 16 tasks (3 spikes + 10 core + 3 video); capture unchanged (class-MIDI → `midir`); live track-id unmet (PDL=Export-only) → post-hoc reconcile (2026-06-02)
 
 ### rework
-- [rework_sound-component-sorting.md](implement/rework_sound-component-sorting.md) — Sort by sound components; plan 4.1 judged good by the user, all 8 gate decisions confirmed at defaults; sent back 2026-11-22 for more: derive further features from the data the scans already collect + agent's own improvements → revision 5 (2026-11-22)
+_(none)_
 
 ### accepted
 - [accepted_downloader-unified-multi-source.md](implement/accepted_downloader-unified-multi-source.md) — Unified multi-source downloader: owner sign-off granted; integrated with parallel research (matching delegated to `external_track_match`, auth via `require_session`, `quality_engine` reuse). Ready for `inprogress_` (2026-05-21)

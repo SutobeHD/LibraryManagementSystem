@@ -101,13 +101,13 @@
 
   <div class="pagehead">
     <h1>Sort by sound components — wireframe</h1>
-    <div class="sub">Planned UI for <b>Option A</b> of the research doc <code>sound-component-sorting</code> (plan revision 4): bass, hats and song-structure values plus "sort by similarity", all without a new dependency. Track names are placeholders. Numbers in cells are illustrative; the ranges and costs in the notes are measured on the real library.</div>
+    <div class="sub">Planned UI for <b>Option A</b> of the research doc <code>sound-component-sorting</code> (plan revision 5): bass, hats and song-structure values plus "sort by similarity", all without a new dependency. Track names are placeholders. Numbers in cells are illustrative; the ranges and costs in the notes are measured on the real library.</div>
   </div>
 
   <!-- ===================================================== 1 -->
   <div class="screen">
     <div class="screenhead"><span class="num">1</span><h2>Collection with component columns switched on</h2></div>
-    <p class="caption">New columns live in the existing column picker and are hidden by default. They load only when one of them is visible. Cells show <i>nicht analysiert</i> before a scan; columns that passed only the "coarse" stability bar carry a marker. Sorting puts empty cells last.</p>
+    <p class="caption">New columns live in the existing column picker, grouped by part (Bass, Kick, Höhen / Hats, Aufbau), and are hidden by default. They load only when one of them is visible. Cells show <i>nicht analysiert</i> before a scan; columns that passed only the "coarse" stability bar carry a marker. Sorting puts empty cells last.</p>
     <div class="app">
       <div class="titlebar"><span class="name">Music Library Manager</span></div>
       <div class="wstabs"><span class="ws active">Library</span><span class="ws">Audio Import</span><span class="ws">Ranking</span><span class="ws">Editor</span><span class="ws">USB</span><span class="ws">SoundCloud</span><span class="ws">Utilities</span></div>
@@ -115,37 +115,38 @@
         <div class="toolbar">
           <div class="search">Search 4 765 tracks…</div>
           <span class="chip">Aufbau-Familie: alle ▾</span>
+          <span class="chip">Intro ≥ 16 Takte</span><span class="chip">Outro ≥ 16 Takte</span>
           <span class="spacer"></span>
           <span class="btn btn-ghost btn-sm">Spalten ▾</span>
         </div>
         <table class="tt">
           <tr><th>Title</th><th>Artist</th><th>BPM</th><th>Key</th>
-            <th class="new">Bass-Note</th><th class="new">Sub-Anteil<br/><span style="text-transform:none;letter-spacing:0">(Ausschnitt)</span></th>
-            <th class="new">Bass zw. Kicks<span class="sort">▼</span></th><th class="new">Höhen-Energie</th><th class="new">16tel-Hats</th><th class="new">Offbeat-Hats</th>
-            <th class="new">Intro</th><th class="new">Einstieg</th><th class="new">Drops</th><th class="new">Aufbau</th></tr>
-          <tr><td class="t">Steel Corridor</td><td>Artist A</td><td class="num">155</td><td>8A</td><td>F1</td>
-            <td class="num"><span class="bar" style="width:34px"></span>0.68</td><td class="num">+2.8 dB</td><td class="num">−15.1 dB</td><td class="num">0.41</td><td class="num">0.24<span class="coarse">grob</span></td>
-            <td class="num">8</td><td class="num">16</td><td class="num">4</td>
+            <th class="new">Bass-Note</th><th class="new">Kick-Ton</th><th class="new">Sub-Anteil<br/><span style="text-transform:none;letter-spacing:0">(Ausschnitt)</span></th>
+            <th class="new">Bass zw. Kicks<span class="sort">▼</span></th><th class="new">Höhen-Energie</th><th class="new">16tel-Hats</th><th class="new">Offbeat-Hats</th><th class="new">Offbeat-Bass</th>
+            <th class="new">Intro</th><th class="new">Einstieg</th><th class="new">Drops</th><th class="new">Drop → Ende</th><th class="new">Aufbau</th></tr>
+          <tr><td class="t">Steel Corridor</td><td>Artist A</td><td class="num">155</td><td>8A</td><td>F1</td><td>A1</td>
+            <td class="num"><span class="bar" style="width:34px"></span>0.68</td><td class="num">+2.8 dB</td><td class="num">−15.1 dB</td><td class="num">0.41</td><td class="num">0.24<span class="coarse">grob</span></td><td class="num">0.31</td>
+            <td class="num">8</td><td class="num">16</td><td class="num">4</td><td class="num">32</td>
             <td><span class="struct"><span class="I" style="width:6%"></span><span class="U" style="width:5%"></span><span class="C" style="width:16%"></span><span class="U" style="width:5%"></span><span class="C" style="width:16%"></span><span class="D" style="width:10%"></span><span class="U" style="width:10%"></span><span class="C" style="width:26%"></span><span class="O" style="width:6%"></span></span></td></tr>
-          <tr class="sel"><td class="t">Night Shift Pressure</td><td>Artist B</td><td class="num">150</td><td>5A</td><td>E1</td>
-            <td class="num"><span class="bar" style="width:29px"></span>0.58</td><td class="num">+1.4 dB</td><td class="num">−17.2 dB</td><td class="num">0.36</td><td class="num">0.27<span class="coarse">grob</span></td>
-            <td class="num">16</td><td class="num">24</td><td class="num">3</td>
+          <tr class="sel"><td class="t">Night Shift Pressure</td><td>Artist B</td><td class="num">150</td><td>5A</td><td>E1</td><td>G1</td>
+            <td class="num"><span class="bar" style="width:29px"></span>0.58</td><td class="num">+1.4 dB</td><td class="num">−17.2 dB</td><td class="num">0.36</td><td class="num">0.27<span class="coarse">grob</span></td><td class="num">0.22</td>
+            <td class="num">16</td><td class="num">24</td><td class="num">3</td><td class="num">48</td>
             <td><span class="struct"><span class="I" style="width:9%"></span><span class="U" style="width:5%"></span><span class="C" style="width:18%"></span><span class="D" style="width:9%"></span><span class="U" style="width:14%"></span><span class="C" style="width:37%"></span><span class="O" style="width:8%"></span></span></td></tr>
-          <tr><td class="t">Groove Theory</td><td>Artist C</td><td class="num">128</td><td>11B</td><td>G1</td>
-            <td class="num"><span class="bar" style="width:16px"></span>0.31</td><td class="num">−2.7 dB</td><td class="num">−18.0 dB</td><td class="num">0.15</td><td class="num">0.33<span class="coarse">grob</span></td>
-            <td class="num">16</td><td class="num">32</td><td class="num">2</td>
+          <tr><td class="t">Groove Theory</td><td>Artist C</td><td class="num">128</td><td>11B</td><td>G1</td><td>B1</td>
+            <td class="num"><span class="bar" style="width:16px"></span>0.31</td><td class="num">−2.7 dB</td><td class="num">−18.0 dB</td><td class="num">0.15</td><td class="num">0.33<span class="coarse">grob</span></td><td class="num">0.62</td>
+            <td class="num">16</td><td class="num">32</td><td class="num">2</td><td class="num">64</td>
             <td><span class="struct"><span class="I" style="width:12%"></span><span class="C" style="width:34%"></span><span class="U" style="width:8%"></span><span class="C" style="width:38%"></span><span class="O" style="width:8%"></span></span></td></tr>
-          <tr><td class="t">Lights Over Water</td><td>Artist D</td><td class="num">138</td><td>4B</td><td>D#1</td>
-            <td class="num"><span class="bar" style="width:12px"></span>0.24</td><td class="num">−4.9 dB</td><td class="num">−21.3 dB</td><td class="num">0.12</td><td class="num">0.31<span class="coarse">grob</span></td>
-            <td class="num">32</td><td class="num">48</td><td class="num">3</td>
+          <tr><td class="t">Lights Over Water</td><td>Artist D</td><td class="num">138</td><td>4B</td><td>D#1</td><td>F#1</td>
+            <td class="num"><span class="bar" style="width:12px"></span>0.24</td><td class="num">−4.9 dB</td><td class="num">−21.3 dB</td><td class="num">0.12</td><td class="num">0.31<span class="coarse">grob</span></td><td class="num">0.48</td>
+            <td class="num">32</td><td class="num">48</td><td class="num">3</td><td class="num">40</td>
             <td><span class="struct"><span class="I" style="width:16%"></span><span class="U" style="width:8%"></span><span class="C" style="width:16%"></span><span class="D" style="width:16%"></span><span class="U" style="width:8%"></span><span class="C" style="width:28%"></span><span class="O" style="width:8%"></span></span></td></tr>
           <tr><td class="t">Unknown Edit</td><td>Artist E</td><td class="num">145</td><td>2A</td><td class="na">nicht analysiert</td>
-            <td class="na">—</td><td class="na">—</td><td class="na">—</td><td class="na">—</td><td class="na">—</td>
-            <td class="num">8</td><td class="num">8</td><td class="num">5</td>
+            <td class="na">—</td><td class="na">—</td><td class="na">—</td><td class="na">—</td><td class="na">—</td><td class="na">—</td><td class="na">—</td>
+            <td class="num">8</td><td class="num">8</td><td class="num">5</td><td class="num">24</td>
             <td><span class="struct"><span class="I" style="width:5%"></span><span class="C" style="width:20%"></span><span class="U" style="width:6%"></span><span class="C" style="width:20%"></span><span class="U" style="width:6%"></span><span class="C" style="width:20%"></span><span class="U" style="width:6%"></span><span class="C" style="width:12%"></span><span class="O" style="width:5%"></span></span></td></tr>
         </table>
         <div class="legend"><span><i class="I"></i>Intro</span><span><i class="U"></i>Up / Build</span><span><i class="D"></i>Down / Break</span><span><i class="C"></i>Chorus / Main</span><span><i class="O"></i>Outro</span><span><i class="V"></i>Verse</span><span><i class="B"></i>Bridge</span></div>
-        <div class="note"><b>Measured column set:</b> values come from each track's main sections (Rekordbox phrases). Sub share, bass between kicks and bass note are stable across sections (0.94-0.98), so are 16th share (0.92) and top-end energy, 5-12 kHz (0.86). Off-beat hats are marked <b>grob</b> (0.84); two more optional columns, hats per beat and "Offbeat lang ausklingend", carry the same <span class="coarse">grob</span> marker (0.80 / 0.82). On-beat hats are left out: that position measures clap and kick, not hats. Intro, entry and drop count come from Rekordbox's own phrase analysis and stay 87-93 % equal across copies of the same audio. Tracks Rekordbox has no phrases for (21 of 4765) show "—" in the structure columns.</div>
+        <div class="note"><b>Measured column set:</b> values come from each track's main sections (Rekordbox phrases). New in revision 5, at no extra scan time: kick pitch (0.94), off-beat vs rolling bass (0.98), one-note bass (0.89), bass hits per beat, low-end weight, tonal vs noisy bass; structure: big drop, longest break, bars left after the last drop (0.93 across copies). Sub share, bass between kicks and bass note are stable across sections (0.94-0.98), so are 16th share (0.92) and top-end energy, 5-12 kHz (0.86). Off-beat hats are marked <b>grob</b> (0.84); two more optional columns, hats per beat and "Offbeat lang ausklingend", carry the same <span class="coarse">grob</span> marker (0.80 / 0.82). On-beat hats are left out: that position measures clap and kick, not hats. Intro, entry and drop count come from Rekordbox's own phrase analysis and stay 87-93 % equal across copies of the same audio. Tracks Rekordbox has no phrases for (21 of 4765) show "—" in the structure columns.</div>
       </div>
     </div>
   </div>
@@ -153,7 +154,7 @@
   <!-- ===================================================== 2 -->
   <div class="screen">
     <div class="screenhead"><span class="num">2</span><h2>Right-click → "Nach Ähnlichkeit sortieren"</h2></div>
-    <p class="caption">One entry with five kinds. Bass compares the bass sound on a pitch-relative scale (a transposed copy still matches) plus the bass line; "mit Kick" includes the kick. Hats (Klang) compares the high-end timbre and decay; Hat-Pattern compares where in the bar the hats fall (a coarser measure). Aufbau compares the phrase build-up within the same Rekordbox mood.</p>
+    <p class="caption">One entry with eight kinds. Kick compares the kick's sound, pitch and tail; Groove compares the rhythm of bass and hats (coarse); Klang gesamt combines bass and top-end sound. Bass compares the bass sound on a pitch-relative scale (a transposed copy still matches) plus the bass line; "mit Kick" includes the kick. Hats (Klang) compares the high-end timbre and decay; Hat-Pattern compares where in the bar the hats fall (a coarser measure). Aufbau compares the phrase build-up within the same Rekordbox mood.</p>
     <div class="app">
       <div class="titlebar"><span class="name">Music Library Manager</span></div>
       <div class="viewport" style="min-height:250px">
@@ -177,7 +178,10 @@
           <div class="it hl">Bass (ohne Kick)</div>
           <div class="it">Bass (mit Kick)</div>
           <div class="it">Hats (Klang)</div>
+          <div class="it">Kick</div>
           <div class="it">Hat-Pattern <span class="coarse">grob</span></div>
+          <div class="it">Groove <span class="coarse">grob</span></div>
+          <div class="it">Klang gesamt</div>
           <div class="it">Aufbau</div>
         </div>
       </div>
@@ -192,9 +196,9 @@
       <div class="titlebar"><span class="name">Music Library Manager</span></div>
       <div class="viewport" style="min-height:300px;padding-bottom:118px">
         <div class="toolbar">
-          <span class="chip amber">ähnlich zu: Night Shift Pressure · Bass (ohne Kick) <span class="x">✕</span></span>
+          <span class="chip amber">ähnlich zu: Night Shift Pressure · Bass (ohne Kick) <span class="x">✕</span></span><span class="chip">Intro passt zum Outro</span>
           <span class="spacer"></span>
-          <span class="btn btn-ghost btn-sm">Bass (mit Kick)</span><span class="btn btn-ghost btn-sm">Hats (Klang)</span><span class="btn btn-ghost btn-sm">Hat-Pattern</span><span class="btn btn-ghost btn-sm">Aufbau</span>
+          <span class="btn btn-ghost btn-sm">Bass (mit Kick)</span><span class="btn btn-ghost btn-sm">Hats (Klang)</span><span class="btn btn-ghost btn-sm">Kick</span><span class="btn btn-ghost btn-sm">Hat-Pattern</span><span class="btn btn-ghost btn-sm">Groove</span><span class="btn btn-ghost btn-sm">Klang gesamt</span><span class="btn btn-ghost btn-sm">Aufbau</span>
         </div>
         <table class="tt">
           <tr><th>#</th><th>Title</th><th>Artist</th><th>BPM</th><th>Key</th><th class="new">Distanz<span class="sort">▲</span></th><th class="new">Bass-Note</th></tr>
