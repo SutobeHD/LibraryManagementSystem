@@ -61,6 +61,7 @@ LibraryManagementSystem -- High-Accuracy Analysis Engine (v2.0)
 - `detect_beats_madmom()` — RNN-based beat tracking using madmom.
 - `detect_beats()` — High-accuracy BPM and beat grid detection.
 - `find_first_signal_onset()` — Find the time (in seconds) of the first non-silent audio.
+- `waveform_lead_in_s()` — Silence (s) to prepend to the decoded audio so waveform columns sit on
 - `generate_waveform_data()` — Generate ALL waveform data required for Rekordbox ANLZ files:
 - `detect_phrases()` — Adaptive song-structure detection (Energy + MFCC timbre changes).
 - `generate_hot_cues()`
@@ -2833,13 +2834,35 @@ Full `OneLibraryUsbWriter.sync()` with copy_anlz=True against the real template.
 - `no_analysis()`
 - `test_sync_ships_the_sidecar_with_stick_ppth_and_masked_pssi()`
 
+### `tests/test_anlz_waveform_values.py`
+
+Value model of the ANLZ waveform tags (app/analysis_engine.py generate_waveform_data).
+
+- `test_tag_ranges_and_entry_counts()`
+- `test_silence_keeps_preview_floors()` — A 0 height in PWAV/PWV2 reads as 'unanalysed' on players.
+- `three_band_wf()` — Low tone, then mid tone, then high tone.
+- `test_three_band_channel_order()`
+- `test_pwv4_colour_bytes_follow_bands()`
+- `test_pwv5_strongest_band_is_full_scale()`
+- `test_pwv5_bass_is_red_not_blue()`
+- `test_detail_height_is_squared_sample_peak()`
+- `test_pool_columns_reduces_every_column()`
+- `test_preview_keeps_a_short_transient()` — Old np.interp point sampling skipped most columns: a click between two
+- `test_mp3_lead_in_rules()`
+- `test_waveform_lead_in_reads_past_id3()`
+- `test_lead_in_shifts_columns()`
+
 ### `tests/test_anlz_writer_guards.py`
 
-Tests for app/anlz_writer.py logic-safety guards (NOT byte-layout).
+Tests for app/anlz_writer.py logic-safety guards + waveform tag headers.
 
 - `test_pwav_valid_values_byte_identical()`
 - `test_pwav_out_of_range_does_not_crash()` — Regression: bytes([300]) / bytes([-1]) would raise ValueError; the
-- `test_pwv2_out_of_range_clamped()`
+- `test_pwv2_clamped_to_4_bit()` — PWV2 is height-only 1..15: one byte > 15 makes Nexus-era firmware reject
+- `test_pwv4_header_and_7_bit_clamp()`
+- `test_pwv6_header_and_7_bit_clamp()`
+- `test_pwv7_header_and_7_bit_clamp()`
+- `test_pwv5_header_and_bit_layout()`
 - `test_pwv3_out_of_range_clamped_preserves_count()`
 
 ### `tests/test_artist_attribution.py`
