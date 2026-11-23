@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+- Library:
+  - Fixed: "Delete from Collection" in the live Rekordbox library only hid the
+    track until the next restart (and answered 500) while the dialog promised a
+    permanent delete. rbox 0.1.7 cannot delete a track row, so the live mode no
+    longer offers it: the menu item is hidden and `DELETE /api/track/{id}`
+    answers 409 with a hint to remove the track in Rekordbox. XML mode still
+    removes tracks, now with one confirmation instead of two.
+
 - USB export:
   - Fixed: a stick sync wrote at most 16 tracks into `exportLibrary.db` and
     `export.pdb` (B9) — the cap was the row count of the bundled OneLibrary

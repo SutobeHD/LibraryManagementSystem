@@ -3391,9 +3391,24 @@ async def system_health() -> HealthResponse:
     return HealthResponse(status="ok", library_loaded=bool(getattr(db, "loaded", False)))
 
 
+def _reject_track_delete_in_live_mode() -> None:
+    """409 in live mode: rbox 0.1.7 has no way to delete a djmdContent row.
+
+    The old live path dropped the track from the in-memory cache only and reported
+    success; the track was back after the next restart.
+    """
+    if getattr(db, "mode", None) == "live":
+        raise HTTPException(
+            409,
+            "Deleting tracks from the Rekordbox library is not supported yet. "
+            "Remove the track in Rekordbox.",
+        )
+
+
 @app.post("/api/track/delete", dependencies=[Depends(require_session)])
 def del_trk(r: DeleteTrackReq):
     _reject_while_rekordbox_runs("deleting tracks")
+    _reject_track_delete_in_live_mode()
     return {"status": "success" if db.delete_track(r.track_id) else "error"}
 
 
@@ -3487,6 +3502,7 @@ def remove_track_pl(r: PlRemoveTrackReq):
 @app.delete("/api/track/{tid}", dependencies=[Depends(require_session)])
 def delete_track(tid: str):
     _reject_while_rekordbox_runs("deleting tracks")
+    _reject_track_delete_in_live_mode()
     logger.info(f"API Request: Delete track {tid}")
     if db.delete_track(tid):
         return {"status": "success", "tid": tid}
