@@ -502,15 +502,11 @@ class UsbDetector:
             # /Contents/<Artist>/<Title>/<file>.m4a
             # We mirror that shape exactly — no extra .PIONEER nor DEVICE.PIONEER.
 
-            # Create default DEVSETTING files inside PIONEER
-            settings_files = {
-                "DEVSETTING.DAT": b"\x00" * 140,
-                "MYSETTING.DAT": b"\x00" * 148,
-                "MYSETTING2.DAT": b"\x00" * 148,
-                "DJMMYSETTING.DAT": b"\x00" * 160,
-            }
-            for name, content in settings_files.items():
-                (pioneer_path / name).write_bytes(content)
+            # Same valid defaults the sync seeds. Zero-filled files used to land
+            # here, and the sync's seeding skipped them as "already present".
+            from . import usb_mysettings
+
+            usb_mysettings.write_defaults(Path(drive))
 
             logger.info(f"Initialized Rekordbox library at {rb_path}")
 
@@ -2276,19 +2272,6 @@ class UsbSyncEngine:
     def _remap_paths(self, profile: dict):
         """Update FolderPath in USB DB to use the USB drive letter."""
         pass
-
-    def _write_usb_settings(self):
-        """Write DEVSETTING.DAT and related config files to PIONEER root."""
-        settings_files = {
-            "DEVSETTING.DAT": b"\x00" * 140,
-            "MYSETTING.DAT": b"\x00" * 148,
-            "MYSETTING2.DAT": b"\x00" * 148,
-            "DJMMYSETTING.DAT": b"\x00" * 160,
-        }
-        for name, default_content in settings_files.items():
-            path = self.usb_pioneer / name
-            if not path.exists():
-                path.write_bytes(default_content)
 
 
 # --- USB Actions ---
