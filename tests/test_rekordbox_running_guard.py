@@ -53,6 +53,11 @@ GUARDED: list[tuple[str, str, dict[str, Any] | None]] = [
     ("POST", "/api/soundcloud/sync", {"playlist_ids": [1]}),
     ("POST", "/api/soundcloud/sync-all", None),
     ("POST", "/api/soundcloud/merge", {"playlist_ids": [1], "merged_name": "M"}),
+    (
+        "POST",
+        "/api/usb/playcount/resolve",
+        {"resolutions": [], "usb_root": "C:/nowhere", "usb_xml_path": "C:/nowhere/rb.xml"},
+    ),
 ]
 _IDS = [f"{m} {u}" for m, u, _ in GUARDED]
 
@@ -204,6 +209,87 @@ def test_scan_failure_fails_open(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setitem(sys.modules, "rbox", types.SimpleNamespace(is_rekordbox_running=_boom))
     assert main._is_rekordbox_running() is False
+
+
+# --- /api/usb/playcount/resolve -------------------------------------------------------
+
+
+@pytest.fixture
+def resolved(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """``resolve_playcounts`` stub: records the master.db path the route hands it."""
+    db_paths: list[str] = []
+
+    def _resolve(resolutions: list[dict], pc_db_path: str, usb_xml_path: str) -> dict:
+        db_paths.append(pc_db_path)
+        return {"committed": len(resolutions), "errors": []}
+
+    monkeypatch.setattr(main, "resolve_playcounts", _resolve)
+    monkeypatch.setattr(main, "load_usb_sync_meta", lambda _root: {})
+    monkeypatch.setattr(main, "save_usb_sync_meta", lambda _root, _meta: None)
+    return db_paths
+
+
+_RESOLVE_BODY = {
+    "resolutions": [{"track_id": "1", "strategy": "take_max", "pc_count": 2, "usb_count": 5}],
+    "usb_root": "C:/nowhere",
+    "usb_xml_path": "C:/nowhere/rb.xml",
+}
+
+
+def test_playcount_resolve_writes_the_live_master_db(
+    monkeypatch: pytest.MonkeyPatch, auth_token: dict[str, str], resolved: list[str]
+) -> None:
+    fake = _RecordingDB("live")
+    fake.live_db_path = "D:/libs/rekordbox6/master.db"  # not %APPDATA%/Pioneer/rekordbox
+    monkeypatch.setattr(main, "db", fake)
+    monkeypatch.setattr(main, "_is_rekordbox_running", lambda: False)
+
+    r = _send("POST", "/api/usb/playcount/resolve", _RESOLVE_BODY, auth_token)
+
+    assert r.status_code == 200, r.text
+    assert r.json()["data"]["committed"] == 1
+    assert resolved == [str(Path("D:/libs/rekordbox6/master.db"))]
+
+
+def test_playcount_resolve_refused_while_rekordbox_runs(
+    monkeypatch: pytest.MonkeyPatch, auth_token: dict[str, str], resolved: list[str]
+) -> None:
+    monkeypatch.setattr(main, "db", _RecordingDB("live"))
+    monkeypatch.setattr(main, "_is_rekordbox_running", lambda: True)
+
+    r = _send("POST", "/api/usb/playcount/resolve", _RESOLVE_BODY, auth_token)
+
+    assert r.status_code == 409, r.text
+    assert r.json()["detail"] == "Rekordbox is running. Close it before syncing play counts."
+    assert resolved == []  # neither master.db nor the USB XML was touched
+
+
+def test_playcount_resolve_in_xml_mode_patches_only_the_usb_xml(
+    monkeypatch: pytest.MonkeyPatch, auth_token: dict[str, str], tmp_path: Path
+) -> None:
+    """XML library: no master.db to write, but the USB half of the sync still runs."""
+    usb_xml = tmp_path / "rekordbox.xml"
+    usb_xml.write_text(
+        '<?xml version="1.0" encoding="UTF-8"?><DJ_PLAYLISTS Version="1.0.0">'
+        '<COLLECTION Entries="1"><TRACK TrackID="1" Name="A" PlayCount="2"/></COLLECTION>'
+        "</DJ_PLAYLISTS>",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(main, "db", _RecordingDB("xml"))
+    monkeypatch.setattr(main, "_is_rekordbox_running", lambda: True)  # XML mode never scans
+    saved: list[dict] = []
+    monkeypatch.setattr(main, "load_usb_sync_meta", lambda _root: {})
+    monkeypatch.setattr(main, "save_usb_sync_meta", lambda _root, meta: saved.append(meta))
+    body = {**_RESOLVE_BODY, "usb_root": str(tmp_path), "usb_xml_path": str(usb_xml)}
+
+    r = _send("POST", "/api/usb/playcount/resolve", body, auth_token)
+
+    assert r.status_code == 200, r.text
+    data = r.json()["data"]
+    assert data == {"committed": 0, "usb_updated": 1, "pc_db_skipped": True, "errors": []}
+    track = ET.parse(usb_xml).getroot().find(".//TRACK")
+    assert track is not None and track.get("PlayCount") == "5"  # take_max(2, 5)
+    assert saved and saved[0]["last_sync_ts"] > 0
 
 
 # --- /api/playlists/create ---------------------------------------------------------

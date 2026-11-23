@@ -43,6 +43,26 @@
     Location (`<backend folder>/soundcloud:tracks:…`). They are now left out,
     and the response says how many were skipped.
 
+- API route hygiene:
+  - Fixed: a suffix range (`Range: bytes=-500`) on `/api/stream` returned the
+    first 501 bytes of a non-AIFF file instead of the last 500. Both stream
+    routes now share one RFC 7233 range
+    handler (single range -> 206, multi-range or malformed -> whole file,
+    unsatisfiable -> 416).
+  - Fixed: `/api/audio/stream` (DAW editor) ignored Range for MP3/FLAC/M4A/WAV
+    and sent FLAC/M4A with the wrong Content-Type. It now answers exactly like
+    `/api/stream`. Both routes answer `HEAD`.
+  - Fixed: `POST /api/audio/analyze` analysed any existing file; it now has the
+    same folder sandbox as playback (403 outside the library folders).
+  - Fixed: analysis responses (`analyze-batch` progress lines, `analyze-full`)
+    no longer contain absolute file paths.
+  - Fixed: play-count sync (`/api/usb/playcount/resolve`) wrote a fixed
+    `%APPDATA%` master.db in every mode, even while Rekordbox was running. With
+    the live library it now refuses while Rekordbox runs, writes the library's
+    own master.db and holds the database write lock; with an XML library it
+    updates only the USB stick and says so. Errors show the backend's reason
+    instead of "Request failed with status code 409".
+
 - USB export:
   - Fixed: every exported track lost its album and kept the OneLibrary
     template's file type (M4A), sample rate (48 kHz), bit depth and file size,

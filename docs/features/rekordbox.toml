@@ -49,10 +49,10 @@ name = "Rekordbox-läuft-Sperre"
 status = "shipped"
 test = "getestet"
 tested = "2026-11-22"
-desc = "Erkennt laufendes Rekordbox, blockt Live-master.db-Writes mit 409: Track-Edits, MyTags, Track-Löschen, alle Playlist-Änderungen, Importe, Duplikat-Merges, SC-Sync/-Merge, Format-Swap, Artist-Merge/Projektion, analyze-full."
+desc = "Erkennt laufendes Rekordbox, blockt Live-master.db-Writes mit 409: Track-Edits, MyTags, Track-Löschen, alle Playlist-Änderungen, Importe, Duplikat-Merges, SC-Sync/-Merge, Format-Swap, Artist-Merge/Projektion, analyze-full, Playcount-Resolve."
 paths = ["tests/test_rekordbox_running_guard.py"]
 todo = ["/api/track/delete validiert den Body vor der Sperre (422 statt 409 bei falschem Body) - harmlos"]
-notes = "PC-Test 2026-11-22 (Stick-Ordner statt Stick, Kopie der Library): Ersatzprozess rekordbox.exe: 12 geschützte Schreibrouten (Playlists, Tracks, Batch, Delete, analyze-full, import-paths, clean-titles) -> 409, Kopie byte-gleich; danach Schreiben wieder 200. Routen: app/main.py _reject_while_rekordbox_runs(action) als erste Anweisung im Handler (nur Live-Modus scannt, fail-open). Format-Swap nutzt services.is_rekordbox_running. Offen: /api/usb/playcount/resolve schreibt master.db (fester Pfad, ohne db_lock) ungeschützt; Downloads/Folder-Watcher/Render importieren später im Hintergrund ohne Check; 409-Text kommt im Frontend nur als generischer Fehler-Toast an."
+notes = "Fix 2026-11-23 (fix/api-route-hygiene, am PC noch nicht geprüft): /api/usb/playcount/resolve sperrt jetzt als erste Anweisung, schreibt den Live-master.db-Pfad (_live_master_db_path) unter db_lock; im XML-Modus nur das USB-XML (pc_db_skipped). Frontend PlayCountSync zeigt jetzt den detail-Text statt 'status code 409'. PC-Test 2026-11-22 (Stick-Ordner statt Stick, Kopie der Library): Ersatzprozess rekordbox.exe: 12 geschützte Schreibrouten (Playlists, Tracks, Batch, Delete, analyze-full, import-paths, clean-titles) -> 409, Kopie byte-gleich; danach Schreiben wieder 200. Routen: app/main.py _reject_while_rekordbox_runs(action) als erste Anweisung im Handler (nur Live-Modus scannt, fail-open). Format-Swap nutzt services.is_rekordbox_running. Offen: Downloads/Folder-Watcher/Render importieren später im Hintergrund ohne Check; 409-Text kommt im Frontend nur als generischer Fehler-Toast an."
 
 [[feature]]
 id = "rekordbox-write-backups"

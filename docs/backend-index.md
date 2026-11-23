@@ -94,17 +94,17 @@ Marker convention in the route tables below:
 ### Audio Endpoints
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/stream` | Stream audio file (range-request, sandboxed, query param `path`). AIFF goes out as WAV computed on the fly (`app/playable_audio.py`; Chromium/WebView2 decode no AIFF), 415 for encodings it cannot serve |
-| GET | `/api/audio/stream` | Same sandboxed path check, plain `FileResponse` (handler `stream_audio_file`; used by `DawEngine.js`); AIFF as WAV like `/api/stream` |
+| GET, HEAD | `/api/stream` | Stream audio file (sandboxed, query param `path`). Range per RFC 7233 via `_byte_range_response` (`playable_audio.parse_range`): one range `a-b` / `a-` / `-n` → 206 (`-n` past the size = whole file); no, malformed or multi-range header → 200 whole file (no multipart); unsatisfiable → 416 `Content-Range: bytes */size`. HEAD: same status + headers (Content-Length, Accept-Ranges), no body, no file read. AIFF goes out as WAV computed on the fly (`app/playable_audio.py`; Chromium/WebView2 decode no AIFF), 415 for encodings it cannot serve. Content-Type: mp3 `audio/mpeg`, flac `audio/flac`, m4a `audio/mp4`, wav `audio/wav`, ogg `audio/ogg` |
+| GET, HEAD | `/api/audio/stream` | Identical response to `/api/stream` (shared `_audio_stream_response`; handler `stream_audio_file`; used by `DawEngine.js`). Was a plain `FileResponse` until 2026-11 (Starlette 0.35 ignores Range → 200 + whole body) |
 | GET | `/api/audio/waveform` | Multiband waveform data (`pps` >= 1, points-per-second); computed off-loop, disk-cached per (file mtime+size, pps) |
-| POST | `/api/audio/analyze` `[AUTH]` | Start async BPM/key analysis → returns `{ task_id }` |
+| POST | `/api/audio/analyze` `[AUTH]` | Start async BPM/key analysis → returns `{ task_id }`. Body `{ file_path, mode }`; `file_path` goes through `validate_audio_path` (400 bad path/extension, 404 missing, 403 outside `ALLOWED_AUDIO_ROOTS`) |
 | GET | `/api/audio/analyze/{task_id}` | Poll analysis result: `{ status, bpm, key, confidence }` |
 | POST | `/api/audio/slice` `[AUTH]` | Slice audio file at beat positions |
 | POST | `/api/audio/render` `[AUTH]` | Render audio with FFmpeg (format conversion, export) |
 | POST | `/api/audio/import` `[AUTH]` `[RB]` | Import a local audio file into the library |
 | POST | `/api/track/{tid}/analyze` `[AUTH]` | Full analysis pipeline on single track |
-| POST | `/api/track/{tid}/analyze-full` `[AUTH]` | Analyze + write ANLZ files + update master.db in one call. Body: `{ force: bool }`. 409 when not in live mode / live library not loaded (`db.get_analysis_writer()` is None) or when Rekordbox is running. Writer errors map by `reason` (`_ANALYZE_FULL_ERRORS`): `track_not_found` → 404, `no_anlz_path` / `audio_missing` → 409, anything else → 500; fixed `detail` strings, never the writer's `error` text (can hold an absolute path). Single-flight with `analyze-batch` (`_analysis_db_run_lock`): 409 while either runs. Before 2026-10 it answered 400 in every mode (`hasattr` probe on the facade) |
-| POST | `/api/library/analyze-batch` `[AUTH]` | Batch analyze multiple tracks; NDJSON streaming progress. Body: `{ track_ids: [int], force: bool }`. Same 409 gates as `analyze-full`, incl. the shared single-flight slot; the stream's `finally` or the response's `BackgroundTask` frees it (whichever first), so a stream that never starts cannot leak it |
+| POST | `/api/track/{tid}/analyze-full` `[AUTH]` | Analyze + write ANLZ files + update master.db in one call. Body: `{ force: bool }`. 409 when not in live mode / live library not loaded (`db.get_analysis_writer()` is None) or when Rekordbox is running. Writer errors map by `reason` (`_ANALYZE_FULL_ERRORS`): `track_not_found` → 404, `no_anlz_path` / `audio_missing` → 409, anything else → 500; fixed `detail` strings, never the writer's `error` text (can hold an absolute path). Single-flight with `analyze-batch` (`_analysis_db_run_lock`): 409 while either runs. Before 2026-10 it answered 400 in every mode (`hasattr` probe on the facade). Ok body `data` = `_public_analysis_result`: no file paths, `anlz_paths` → `anlz_files` (kinds written, e.g. `["dat", "ext"]`) |
+| POST | `/api/library/analyze-batch` `[AUTH]` | Batch analyze multiple tracks; NDJSON streaming progress. Body: `{ track_ids: [int], force: bool }`. Same 409 gates as `analyze-full`, incl. the shared single-flight slot; the stream's `finally` or the response's `BackgroundTask` frees it (whichever first), so a stream that never starts cannot leak it. One line per track via `_public_analysis_result`: `track_id`, `index`, `total`, `analyzed`/`skipped`/`errors` counters, `status`, `reason`, results (`bpm`, `key`, `camelot`, …), `anlz_files`; no file paths — an error's text is the fixed per-`reason` detail of `analyze-full` |
 | GET | `/api/library/analyze-status` | Report analysis engine capabilities + count of unanalyzed tracks |
 
 ### Project (DAW / RBEP) Endpoints
@@ -581,14 +581,14 @@ New module for three-way play-count diffing between PC and USB.
 | `load_usb_sync_meta` | `(usb_root: str) -> dict` | Reads `PIONEER/RB_EDITOR_SYNC.json` |
 | `save_usb_sync_meta` | `(usb_root: str, meta: dict) -> None` | Atomic write via .tmp |
 | `diff_playcounts` | `(pc_tracks, usb_tracks, last_sync_ts) -> dict` | Returns `{auto, conflicts}` |
-| `resolve_playcounts` | `(resolutions, pc_db_path, usb_xml_path) -> dict` | Commits to DB + XML |
+| `resolve_playcounts` | `(resolutions, pc_db_path: str \| None, usb_xml_path) -> dict` | Commits to DB (skipped when `pc_db_path` is None) + XML |
 | `read_usb_xml_playcounts` | `(usb_xml_path: str) -> list[dict]` | Parses Rekordbox XML |
 
 **API endpoints added to `app/main.py`**:
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/usb/playcount/diff` | Diff PC vs USB play counts |
-| POST | `/api/usb/playcount/resolve` `[AUTH]` | Commit resolved play counts |
+| POST | `/api/usb/playcount/resolve` `[AUTH]` `[RB]` | Commit resolved play counts: live mode → the live library's master.db (`_live_master_db_path`) under `db_lock()`, then the USB XML. XML library → USB XML only, `pc_db_skipped: true`. Returns `{committed (master.db tracks), usb_updated (USB XML tracks), pc_db_skipped, errors}` |
 
 ---
 
