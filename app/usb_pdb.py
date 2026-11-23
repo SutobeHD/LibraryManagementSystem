@@ -587,7 +587,7 @@ def encode_track_row(track: dict[str, Any]) -> bytes:
         str_offsets.append(cursor)
         cursor += len(payload)
 
-    bpm_x100 = int((track.get("bpm") or 0) * 100)
+    bpm_x100 = round((track.get("bpm") or 0) * 100)  # int() would cut 127.96 to 12795
     duration = int(track.get("length_seconds") or 0)
     file_type = int(track.get("file_type") or 0)
 

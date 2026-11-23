@@ -51,6 +51,25 @@ def _copy_file_atomic(src: Path, dst: Path) -> None:
         raise
 
 
+def _remove_stick_file(path: Path) -> bool:
+    """Delete ``path`` if present; False when Windows still holds it open.
+
+    A handle that was never closed explicitly (an unclosed sqlite3 connection, an
+    rbox object in a reference cycle) keeps the file locked until the garbage
+    collector frees it, so one collection pass comes before giving up.
+    """
+    for attempt in range(2):
+        try:
+            path.unlink(missing_ok=True)
+            return True
+        except PermissionError as exc:
+            if attempt:
+                logger.error("[OneLibrary] cannot replace %s: %s", path, exc)
+                return False
+            gc.collect()
+    return False
+
+
 def _needs_copy(src: Path, dst: Path) -> bool:
     """True when ``dst`` is missing or does not match ``src``'s size.
 
@@ -716,7 +735,16 @@ class OneLibraryUsbWriter:
         for ext in ("", "-shm", "-wal"):
             src = Path(str(self.TEMPLATE_DB) + ext)
             dst = Path(str(self.db_path) + ext)
-            dst.unlink(missing_ok=True)
+            if not _remove_stick_file(dst):
+                yield {
+                    "stage": "error",
+                    "message": (
+                        f"{dst.name} on the stick is in use by another program "
+                        "(Rekordbox, a file preview, a backup tool). Close it and sync again."
+                    ),
+                    "progress": -1,
+                }
+                return
             if src.exists():
                 shutil.copy2(str(src), str(dst))
         logger.info(
@@ -872,7 +900,8 @@ class OneLibraryUsbWriter:
                 slot.path = usb_rel_path
                 slot.file_name = src_path.name if src_path else ""
                 slot.dj_comment = t.get("comment") or ""
-                slot.bpmx100 = int((t.get("bpm") or 0) * 100)
+                # round, not int: 127.96 * 100 is 12795.999..., which int() cuts to 127.95.
+                slot.bpmx100 = round((t.get("bpm") or 0) * 100)
                 slot.length = int((t.get("duration_ms") or 0) / 1000)
                 slot.rating = int(t.get("rating") or 0) * 51  # 0-5 → 0-255
                 slot.release_year = int(t.get("release_year") or 0)

@@ -1380,7 +1380,7 @@ USB Device Manager for Rekordbox Editor Pro.
 - `  UsbProfileManager.save_settings()`
 - `  UsbProfileManager.get_usb_contents()` — Fetches tracks from both Library One (DeviceSQL) and Library Legacy (Legacy PDB/XML).
 - `UsbSyncEngine` — Smart sync engine that performs diff-based synchronization
-- `  UsbSyncEngine.calculate_diff()`
+- `  UsbSyncEngine.calculate_diff()` — What a sync would change on the stick.
 - `  UsbSyncEngine.sync_collection()`
 - `  UsbSyncEngine.sync_playlists()`
 - `  UsbSyncEngine.sync_metadata()`
@@ -5379,7 +5379,7 @@ Batched master.db lookups in the USB scan / diff / legacy-export paths.
 - `  FakeMasterDb.get_playlists()`
 - `  FakeMasterDb.get_playlist_by_id()`
 - `  FakeMasterDb.get_playlist_contents()`
-- `fake_rbox()` — Install a fake `rbox` module whose `MasterDb(...)` returns `state["db"]`.
+- `fake_rbox()` — Install a fake `rbox` module: `MasterDb(...)` returns `state["db"]`,
 - `TestNameLookup`
 - `  TestNameLookup.test_one_bulk_call_for_many_lookups()`
 - `  TestNameLookup.test_unknown_and_falsy_ids_are_empty()`
@@ -5402,6 +5402,10 @@ Batched master.db lookups in the USB scan / diff / legacy-export paths.
 - `  TestLegacyExportBatching.test_playlist_filter_still_resolves()`
 - `TestLegacyExportGolden`
 - `  TestLegacyExportGolden.test_output_matches_pre_batching_export()`
+- `FakeStickDb` — The read surface of rbox `OneLibrary` that `_usb_library` uses.
+- `  FakeStickDb.get_artists()`
+- `  FakeStickDb.get_contents()`
+- `  FakeStickDb.get_playlists()`
 - `TestCalculateDiffEndToEnd`
 - `  TestCalculateDiffEndToEnd.test_same_artist_on_both_sides_is_unchanged()`
 
@@ -5534,6 +5538,22 @@ Tests for the USB relocation pass (`app/usb_one_library.py`).
 - `  TestUnreadableLocalPath.test_one_unreadable_file_does_not_cost_the_export()`
 - `TestSlotPruning` — Stage 3 deletes the placeholder slots nothing was written into.
 - `  TestSlotPruning.test_a_failed_slot_does_not_delete_a_populated_row()`
+
+### `tests/test_usb_resync.py`
+
+Re-syncing a stick that already holds an export (PC test 2026-11-22).
+
+- `no_analysis()`
+- `test_ensure_structure_leaves_an_existing_stick_db_alone()`
+- `test_resync_replaces_the_stick_db_with_the_new_selection()`
+- `test_stick_reader_skips_template_placeholders()`
+- `test_bpm_is_rounded_not_cut()`
+- `test_a_locked_stick_db_is_an_error_not_an_exception()`
+- `test_failed_onelibrary_stage_makes_the_sync_fail()`
+- `test_clean_sync_still_ends_on_complete()`
+- `test_diff_after_a_playlist_sync_is_empty_for_that_selection()`
+- `test_files_already_on_the_stick_are_not_counted_as_copied()`
+- `test_diff_counts_the_folders_above_the_selection()`
 
 ### `tests/test_validate_real_world.py`
 
