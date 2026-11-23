@@ -163,6 +163,10 @@
 | `frontend/src/utils/openExternal.js` | Open a web link outside the app: the system browser in Tauri, a new tab in the browser. |
 | `frontend/src/utils/openExternal.test.js` | node:test — `node --test frontend/src/utils/openExternal.test.js` |
 | `frontend/src/utils/theme.js` | theme — UI skin selection (per device, localStorage). |
+| `frontend/src/utils/trackSearch.js` | Token search for the Collection / playlist views. |
+| `frontend/src/utils/trackSearch.test.js` | *(no module docstring)* |
+| `frontend/src/utils/trackSort.js` | Sort helpers for TrackTable. |
+| `frontend/src/utils/trackSort.test.js` | *(no module docstring)* |
 | `frontend/src/components/ArtistHubView.jsx` | *(no module docstring)* |
 | `frontend/src/components/BatchEditBar.jsx` | *(no module docstring)* |
 | `frontend/src/components/ConfirmModal.jsx` | Module-level subscriber registry so a single mounted <ConfirmModalRoot /> |
@@ -335,7 +339,7 @@
 | `tests/test_live_import_analysis.py` | An imported track's analysis must reach master.db (B4, 0.1 core-loop test). |
 | `tests/test_live_playlist_b11.py` | Live playlist operations end to end against an rbox stand-in (B11, 0.1 core-loop test). |
 | `tests/test_live_playlist_ops.py` | Tests for the live-mode playlist primitives in `app/live_database.py`. |
-| `tests/test_live_stock_date.py` | StockDate in live track dicts: a missing date must not become the string "None" (B17). |
+| `tests/test_live_stock_date.py` | Live StockDate: never the text "None" (B17); a NULL date falls back to created_at's day. |
 | `tests/test_logging_redaction.py` | Unit tests for `app.logging_utils.RedactingFormatter`. |
 | `tests/test_main_route_table.py` | app/main.py defines each top-level name once, so no request model or handler is shadowed. |
 | `tests/test_main_security.py` | Regression tests for ``POST /api/file/reveal`` sandbox. |

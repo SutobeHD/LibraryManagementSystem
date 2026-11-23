@@ -6,6 +6,7 @@ import threading
 import time
 import xml.etree.ElementTree as ET
 from collections import defaultdict
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -191,6 +192,31 @@ class LiveRekordboxDB:
         except Exception as e:
             logger.error(f"Failed to load MyTags: {e}")
 
+    _ISO_DATE_PREFIX = re.compile(r"^\d{4}-\d{2}-\d{2}")
+
+    @classmethod
+    def _stock_date(cls, item: Any) -> str:
+        """Date added as ``YYYY-MM-DD``, or "" when the row carries no date at all.
+
+        Rekordbox leaves ``stock_date`` NULL on some imports, while ``created_at``
+        (NOT NULL in djmdContent) still holds the day the track entered the library.
+        """
+        stock = getattr(item, "stock_date", None)
+        if stock is not None and str(stock).strip():
+            return str(stock).strip()
+        created = getattr(item, "created_at", None)
+        if isinstance(created, datetime):
+            if created.tzinfo is not None:
+                created = created.astimezone()
+            return created.strftime("%Y-%m-%d")
+        if isinstance(created, date):
+            return created.isoformat()
+        if isinstance(created, str):
+            match = cls._ISO_DATE_PREFIX.match(created.strip())
+            if match:
+                return match.group(0)
+        return ""
+
     def _load_tracks(self):
         self.tracks = {}
         content_items = self.db.get_contents()
@@ -235,7 +261,7 @@ class LiveRekordboxDB:
                 else "",
                 "Subtitle": getattr(item, "subtitle", ""),
                 "ReleaseYear": int(getattr(item, "release_year", 0) or 0),
-                "StockDate": str(getattr(item, "stock_date", None) or ""),
+                "StockDate": self._stock_date(item),
                 "SampleRate": int(getattr(item, "sample_rate", 0) or 0),
                 "ISRC": getattr(item, "isrc", ""),
             }

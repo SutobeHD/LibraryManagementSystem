@@ -11,6 +11,22 @@
     to the root logger) get scrubbing formatters via `log_config`.
 
 - Library:
+  - Added: every track column sorts, Date Added and Colour included; Key sorts
+    on the Camelot wheel (Camelot and musical spellings mixed), missing values
+    stay at the bottom. New optional columns: Genre, Label, Year, My Tags,
+    Format (right-click the table header).
+  - Fixed: text columns sorted by code point, so titles with umlauts or accents
+    landed after Z. They now sort in the language's order, numbers inside
+    names by value ("Track 2" before "Track 10").
+  - Fixed: 23 tracks without a Rekordbox stock date showed "-" under Date
+    Added; they now show the day they were added to the library.
+  - Fixed: the Collection search found nothing for `rating:>=4` or
+    `genre:"deep house"`. Ratings, BPM and year take `>`, `>=`, `<`, `<=`
+    and `=`, BPM ranges like `bpm:138-142` still work, quoted values may
+    contain spaces, `key:8A` and `key:Am` find the same tracks (`key:A`
+    finds A and Am), and `artist:` / `title:` / `album:` filter their field.
+    A token the search cannot read is searched as plain text instead of
+    hiding every track; `12" mix` and `4:44` still find those titles.
   - Fixed: "Delete from Collection" in the live Rekordbox library only hid the
     track until the next restart (and answered 500) while the dialog promised a
     permanent delete. rbox 0.1.7 cannot delete a track row, so the live mode no

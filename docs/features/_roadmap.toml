@@ -49,6 +49,7 @@ features = [
   "sc-log-credential-scrub",
   # Library
   "track-table",
+  "library-feature-sorting",
   "collection-view",
   "category-browser",
   "playlist-tree-crud",

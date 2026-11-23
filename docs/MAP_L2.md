@@ -2078,6 +2078,34 @@ theme — UI skin selection (per device, localStorage).
 - `applyTheme()`
 - `setTheme()`
 
+### `frontend/src/utils/trackSearch.js`
+
+Token search for the Collection / playlist views.
+
+- `SEARCH_SYNTAX_HINT()` — Tooltip for the search box.
+- `tokenizeQuery()` — Split a lower-cased query into `{ field, value, quoted }` tokens on whitespace.
+- `compileToken()` — One token -> predicate `(track, hay) => boolean`, or null for a token that filters nothing yet (emp…
+- `compileQuery()` — Whole query -> one predicate `(track, hay) => boolean`; all tokens must match.
+- `filterTracks()` — Tracks of `list` matching `query`; the list itself when the query is empty.
+
+### `frontend/src/utils/trackSearch.test.js`
+
+*(no module docstring)*
+
+### `frontend/src/utils/trackSort.js`
+
+Sort helpers for TrackTable.
+
+- `keySortValue()` — export function camelotOf(key) { const raw = text(key); if (!raw) return null; const s = raw .repla…
+- `formatOf()` — export function mytagList(raw) { const seen = new Set(); for (const part of String(raw || '').split…
+- `dateAdded()` — "YYYY-MM-DD" a track was added, else null.
+- `SORT_VALUES()`
+- `sortTracks()` — New array sorted by one column; ties keep their incoming order.
+
+### `frontend/src/utils/trackSort.test.js`
+
+*(no module docstring)*
+
 ### `frontend/src/components/ArtistHubView.jsx`
 
 *(no module docstring)*
@@ -4412,9 +4440,11 @@ Tests for the live-mode playlist primitives in `app/live_database.py`.
 
 ### `tests/test_live_stock_date.py`
 
-StockDate in live track dicts: a missing date must not become the string "None" (B17).
+Live StockDate: never the text "None" (B17); a NULL date falls back to created_at's day.
 
 - `test_stock_date_passes_through_and_null_is_empty()`
+- `test_missing_stock_date_falls_back_to_created_at_day()`
+- `test_stock_date_wins_over_created_at()`
 
 ### `tests/test_logging_redaction.py`
 
