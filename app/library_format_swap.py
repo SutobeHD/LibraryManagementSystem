@@ -63,6 +63,23 @@ FILE_TYPE_FLAC = 5
 FILE_TYPE_WAV = 11
 FILE_TYPE_AIFF = 12
 
+_FILE_TYPE_BY_SUFFIX = {
+    ".mp3": FILE_TYPE_MP3,
+    ".m4a": FILE_TYPE_M4A,
+    ".mp4": FILE_TYPE_M4A,
+    ".aac": FILE_TYPE_M4A,
+    ".flac": FILE_TYPE_FLAC,
+    ".wav": FILE_TYPE_WAV,
+    ".aif": FILE_TYPE_AIFF,
+    ".aiff": FILE_TYPE_AIFF,
+}
+
+
+def file_type_for(path: str | Path) -> int:
+    """The Pioneer FileType code for an audio file's extension; 0 when unknown."""
+    return _FILE_TYPE_BY_SUFFIX.get(Path(path).suffix.lower(), 0)
+
+
 LOSSY_SOURCE_EXTS = frozenset({".m4a", ".mp3", ".aac", ".ogg", ".opus"})
 LOSSLESS_SOURCE_EXTS = frozenset({".aiff", ".aif", ".wav", ".flac", ".alac"})
 

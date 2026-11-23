@@ -72,8 +72,8 @@ test = "testen"
 desc = "PIONEER/rekordbox/exportLibrary.db über Template-DB - Rekordbox 6/7 erkennt den Stick."
 paths = ["app/usb_one_library.py", "app/templates/", "tests/test_onelibrary_wal_flush.py"]
 depends_on = ["usb-anlz-export", "usb-artwork"]
-todo = ["Alben gehen verloren: create_album bekommt die Artist-ID als String, rbox lehnt ab (usb_one_library.py:1223)", "Jede Zeile behält Template-Werte: file_type 4 (M4A) auch für aiff/flac/wav/mp3, sampling_rate 48000, falsche file_size (auch in export.pdb)", "Ordner nur in Groß/Kleinschreibung verschieden (Stenoz/STENOZ): rekordbox.xml-Pass verschiebt Datei, 3 DB-Pfade passen danach nicht", "Template-Reste: 13 leere Artists, 10 unbenutzte Keys"]
-notes = "PC-Test 2026-11-22: Zeilen, numberOfContents, bpm, Länge, Titel/Artist/Key/Genre/Jahr, Playlist-Reihenfolge korrekt (38 und 328 Tracks). Template-Hack, weil rbox create_content in 0.1.7 kaputt ist. Slots wachsen über 16 hinaus (usb-onelibrary-track-limit). Playlist-Links seit fix/usb-onelibrary-track-limit lückenlos nummeriert - vorher leerte ein fehlender Track den Rest der Playlist. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): bpmx100=0/length=0 auf dem Stick (Folge von B4) in PR #82 gefixt - neu prüfen. BPM wird auf dem Stick gerundet statt abgeschnitten (fix/usb-resync, auch export.pdb)."
+todo = ["Ordner nur in Groß/Kleinschreibung verschieden (Stenoz/STENOZ): rekordbox.xml-Pass verschiebt Datei, 3 DB-Pfade passen danach nicht", "Template-Reste: 13 leere Artists, 10 unbenutzte Keys"]
+notes = "PC-Test 2026-11-22: Zeilen, numberOfContents, bpm, Länge, Titel/Artist/Key/Genre/Jahr, Playlist-Reihenfolge korrekt (38 und 328 Tracks). Template-Hack, weil rbox create_content in 0.1.7 kaputt ist. Slots wachsen über 16 hinaus (usb-onelibrary-track-limit). Playlist-Links seit fix/usb-onelibrary-track-limit lückenlos nummeriert - vorher leerte ein fehlender Track den Rest der Playlist. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): bpmx100=0/length=0 auf dem Stick (Folge von B4) in PR #82 gefixt - neu prüfen. BPM wird auf dem Stick gerundet statt abgeschnitten (fix/usb-resync, auch export.pdb). Exportfelder gefixt (fix/usb-export-data, 2026-11-23): Album, Dateityp, Samplerate, Bittiefe, Dateigröße aus der Datei, Bewertung 0..5 statt x51. PC-Test 41 echte Tracks: alle Felder = Datei/Library, export.pdb gleich."
 
 [[feature]]
 id = "usb-onelibrary-track-limit"
@@ -106,12 +106,13 @@ id = "usb-legacy-pdb"
 group = "Export-Formate"
 name = "Legacy export.pdb (alte CDJs)"
 status = "partial"
-test = "testen"
+test = "getestet"
+tested = "2026-11-23"
 desc = "export.pdb + exportExt.pdb nach Crate-Digger-Spec, byte-verifiziert gegen echten Stick."
 paths = ["app/usb_pdb.py", "tests/test_pdb_structure.py"]
 depends_on = ["usb-onelibrary-export"]
-todo = ["Trägt die Template-Daten aus exportLibrary.db (file_type, sampling_rate, file_size)", "Doku-Drift: CLAUDE.md/coding-rules sagen 0x34 auf jeder Datenseite und empty_candidate = next_unused; Code und test_pdb_structure nutzen Regeln pro Tabelle (tracks 0x34, sonst 0x24)"]
-notes = "PC-Test 2026-11-22: Struktur korrekt (57/96 Seiten, Ketten, Flags pro Tabelle, Unicode inkl. CJK/Griechisch, lückenlose Playlists, exportExt.pdb 9 Tabellen). Default an (usb_write_legacy_pdb=True in usb_manager), kein UI-Toggle. ~500-Track-Grenze unbelegt (Docstring-Annahme). Datenseiten max. 255 Zeilen (MAX_ROWS_PER_PAGE), damit nie der unverifizierte >255-Zeilen-Header entsteht. rbxport-Abweichungen (UTF-16 ohne Terminator + 4-Byte-Align, >255-Zeilen-Header, Tabellen 16-19): docs/reference/rbxport/export.md §10-11. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): ok."
+todo = ["Doku-Drift: CLAUDE.md/coding-rules sagen 0x34 auf jeder Datenseite und empty_candidate = next_unused; Code und test_pdb_structure nutzen Regeln pro Tabelle (tracks 0x34, sonst 0x24)"]
+notes = "PC-Test 2026-11-22: Struktur korrekt (57/96 Seiten, Ketten, Flags pro Tabelle, Unicode inkl. CJK/Griechisch, lückenlose Playlists, exportExt.pdb 9 Tabellen). Default an (usb_write_legacy_pdb=True in usb_manager), kein UI-Toggle. ~500-Track-Grenze unbelegt (Docstring-Annahme). Datenseiten max. 255 Zeilen (MAX_ROWS_PER_PAGE), damit nie der unverifizierte >255-Zeilen-Header entsteht. rbxport-Abweichungen (UTF-16 ohne Terminator + 4-Byte-Align, >255-Zeilen-Header, Tabellen 16-19): docs/reference/rbxport/export.md §10-11. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): ok. Track-Zeilen tragen jetzt Dateityp, Samplerate, Bittiefe, Dateigröße und Bewertung der echten Datei (fix/usb-export-data)."
 
 [[feature]]
 id = "usb-anlz-export"
@@ -154,8 +155,8 @@ status = "partial"
 test = "testen"
 desc = "Eingebettetes Cover oder cover.jpg nach PIONEER/Artwork (klein + mittel)."
 paths = ["app/usb_artwork.py", "tests/test_usb_artwork.py"]
-todo = ["_bucket_for: id 1 -> 00001 (Referenz-Stick), nicht 00000", "Alle Bild-IDs landen im Ordner 00000 (echter Stick: 00001 ab ID 1)", "Mittleres Bild bis 500x500 statt 240x240 (usb_artwork.py:33)", "Cover kommen aus den eingebetteten Tags, nicht aus der Library (328 geschrieben vs 290 Library-Cover)", "Vorhandene Cover-Dateien werden nie überschrieben (nach Slot) - Re-Sync kann alte Cover zeigen"]
-notes = "PC-Test 2026-11-22: B8 gefixt - beide JPEGs je Track, dekodierbar, 80x80, DB verweist darauf. rbxport nutzt id//20+1; docs/reference/rbxport/export.md §5. Pillow==13.0.0 jetzt in requirements.txt + backend.spec (Build bricht ohne ab); vorher blieb PIONEER/Artwork leer (B8, fix/kernloop-0.1-bugs). Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): B8 (Pillow fehlte, 0 Cover) in PR #82 gefixt - neu prüfen."
+todo = ["_bucket_for: id 1 -> 00001 (Referenz-Stick), nicht 00000", "Cover kommen aus den eingebetteten Tags, nicht aus der Library (328 geschrieben vs 290 Library-Cover)", "Vorhandene Cover-Dateien werden nie überschrieben (nach Slot) - Re-Sync kann alte Cover zeigen", "Mittleres Bild: unser F:-Stick zeigt ~500x500, rbxport-Referenz 240x240 - an einem echten Rekordbox-Export klären (bisher 500 gelassen)"]
+notes = "PC-Test 2026-11-22: B8 gefixt - beide JPEGs je Track, dekodierbar, 80x80, DB verweist darauf. rbxport nutzt id//20+1; docs/reference/rbxport/export.md §5. Pillow==13.0.0 jetzt in requirements.txt + backend.spec (Build bricht ohne ab); vorher blieb PIONEER/Artwork leer (B8, fix/kernloop-0.1-bugs). Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): B8 (Pillow fehlte, 0 Cover) in PR #82 gefixt - neu prüfen. Cover-Ordner gefixt (fix/usb-export-data): 20 Bilder pro Ordner ab 00001, dazu b-Kopien wie Rekordbox; PC-Test: 40 Cover in 00001-00003, je a/a_m/b/b_m."
 
 [[feature]]
 id = "usb-folder-relocation"
