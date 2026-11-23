@@ -3292,6 +3292,38 @@ def save_grid(r: GridReq):
     return {"status": "success" if db.save_track_beatgrid(r.track_id, r.beat_grid) else "error"}
 
 
+def _file_tag_writeback(track_ids: list[str], updates: dict[str, Any]) -> dict[str, str]:
+    """Mirror ``updates`` into each track's audio file tags, after the library write.
+
+    Best effort: a failure here never undoes the library write. Per track "written",
+    "failed" (the tag writer refused), "skipped" (no file path, or
+    settings.write_tags_to_files=False, default true) or "error".
+    """
+    status = dict.fromkeys(track_ids, "skipped")
+    try:
+        enabled = SettingsManager.load().get("write_tags_to_files", True)
+    except Exception as exc:
+        logger.warning(f"Tag write-back skipped, settings unreadable: {exc}")
+        return dict.fromkeys(track_ids, "error")
+    if not enabled:
+        return status
+    for tid in status:
+        try:
+            track = db.get_track_details(tid) or {}
+            src = track.get("path")
+            if src:
+                artwork_bytes = None
+                art_path = track.get("Artwork")
+                if art_path:
+                    artwork_bytes = audio_tags.load_artwork(art_path)
+                ok = audio_tags.write_tags(src, updates, artwork=artwork_bytes)
+                status[tid] = "written" if ok else "failed"
+        except Exception as exc:
+            logger.warning(f"Tag write-back skipped for {tid}: {exc}")
+            status[tid] = "error"
+    return status
+
+
 @app.post("/api/track/{tid}", dependencies=[Depends(require_session)])
 def update_track(tid: str, r: TrackUpdateReq):
     """Edit one track. 404 for an unknown id, 400 for a value the backend refuses.
@@ -3314,27 +3346,7 @@ def update_track(tid: str, r: TrackUpdateReq):
     except Exception as e:
         logger.error(f"Update failed for {tid}: {e}")
         raise HTTPException(500, f"Update failed: {e!s}")
-
-    # Best-effort write-back to the source audio file's tags. Disabled by
-    # toggling settings.write_tags_to_files=False (default true).
-    tag_status = "skipped"
-    try:
-        cfg = SettingsManager.load()
-        if cfg.get("write_tags_to_files", True):
-            track = db.get_track_details(tid) or {}
-            src = track.get("path")
-            if src:
-                artwork_bytes = None
-                art_path = track.get("Artwork")
-                if art_path:
-                    artwork_bytes = audio_tags.load_artwork(art_path)
-                ok = audio_tags.write_tags(src, updates, artwork=artwork_bytes)
-                tag_status = "written" if ok else "failed"
-    except Exception as exc:
-        logger.warning(f"Tag write-back skipped for {tid}: {exc}")
-        tag_status = "error"
-
-    return {"status": "success", "file_tags": tag_status}
+    return {"status": "success", "file_tags": _file_tag_writeback([tid], updates)[tid]}
 
 
 @app.patch("/api/tracks/batch", dependencies=[Depends(require_session)])
@@ -3343,7 +3355,8 @@ def batch_up(r: BatchReq):
 
     400 names a field or value the backend refuses, 404 every unknown track id; both
     before the first write. A write that fails partway is a 500 once the tracks
-    already written are restored (live mode).
+    already written are restored (live mode). ``file_tags`` maps each track id to its
+    best-effort write-back into the audio file, as the single-track edit reports it.
     """
     _reject_while_rekordbox_runs("editing tracks")
     track_ids = list(dict.fromkeys(r.track_ids))
@@ -3361,7 +3374,7 @@ def batch_up(r: BatchReq):
         raise HTTPException(500, f"Library update failed: {e!s}") from e
     if not ok:
         raise HTTPException(500, "Library update failed for one or more tracks.")
-    return {"status": "success"}
+    return {"status": "success", "file_tags": _file_tag_writeback(track_ids, updates)}
 
 
 @app.post("/api/system/heartbeat")

@@ -238,6 +238,7 @@ def test_batch_route_writes_a_repeated_id_once(facade, master, auth_token) -> No
     r = _batch(["1", "1"], {"Title": "New"}, auth_token)
     assert r.status_code == 200, r.text
     assert master.writes == [("update_content", "1")]
+    assert r.json()["file_tags"] == {"1": "skipped"}
 
 
 def test_rbox_failure_midway_restores_the_rows_already_written(

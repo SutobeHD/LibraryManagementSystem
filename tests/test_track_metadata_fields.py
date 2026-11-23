@@ -502,7 +502,7 @@ def test_batch_route_success(live_main, conn, auth_token) -> None:
     body = {"track_ids": ["1"], "updates": {"Rating": 3, "ColorID": "5"}}
     r = _req("PATCH", "/api/tracks/batch", body, auth_token)
     assert r.status_code == 200, r.text
-    assert r.json() == {"status": "success"}
+    assert r.json() == {"status": "success", "file_tags": {"1": "skipped"}}
     assert (conn.item.rating, conn.item.color_id) == (3, "5")
 
 
