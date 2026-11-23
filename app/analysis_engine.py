@@ -14,7 +14,7 @@ Upgrade highlights (v2.0):
   - PSSI Song Structure / Phrase detection (energy-based, bar-aligned)
   - 3-Band Waveforms: PWV6/PWV7 for CDJ-3000 .2EX files (3 bytes/entry: [low, mid, high])
   - PVBR VBR index generation
-  - Corrected crossover frequencies (200 Hz / 2500 Hz)
+  - Crossover frequencies 200 Hz / 2 kHz (Rekordbox-matched waveform bands)
   - Integrated Loudness (LUFS) measurement
   - Dynamic tempo grid support for variable-BPM tracks
 
@@ -1432,17 +1432,19 @@ _PWV7_RELEASE = (0.96, 0.92, 0.88)  # low, mid, high
 # Per-track band scaling: Rekordbox scales its 3-band tags per track (the u16
 # words in its PWVC tag follow that gain). value = gain * band / stat**alpha,
 # stat = band mean ("mean"), a percentile (float) or None (fixed gain); alpha
-# from a log-log regression of Rekordbox's per-track gain on the stat.
-_BandScale = tuple[float, str | float | None, float]
+# from a log-log regression of Rekordbox's per-track gain on the stat. The last
+# field caps the multiplier (1.5x the largest seen on real tracks) so a band
+# the track barely has (filter leakage of a pure tone) is not blown up to full.
+_BandScale = tuple[float, str | float | None, float, float]
 _PWV7_BAND_SCALE: tuple[_BandScale, ...] = (
-    (79.35, "mean", 0.5),
-    (108.3, 99.9, 1.0),
-    (79.29, None, 0.0),
+    (79.35, "mean", 0.5, 230.0),
+    (108.3, 99.9, 1.0, 270.0),
+    (79.29, None, 0.0, 79.29),
 )
 _PWV6_BAND_SCALE: tuple[_BandScale, ...] = (
-    (50.97, "mean", 0.5),
-    (39.79, 99.0, 1.0),
-    (47.92, 99.0, 1.0),
+    (50.97, "mean", 0.5, 165.0),
+    (39.79, 99.0, 1.0, 235.0),
+    (47.92, 99.0, 1.0, 420.0),
 )
 
 # MP3 samples Rekordbox's decode has in front of ours (libsndfile/mpg123 trims
@@ -1571,13 +1573,11 @@ def _scale_to(arr: np.ndarray, target: float, ref: float) -> np.ndarray:
 
 def _band_scale(x: np.ndarray, scale: _BandScale) -> np.ndarray:
     """Apply a per-track band gain (see _PWV7_BAND_SCALE) and clip to 7 bit."""
-    gain, ref, alpha = scale
-    if ref is None:
-        out = x * gain
-    else:
+    gain, ref, alpha, max_gain = scale
+    if ref is not None:
         stat = float(x.mean()) if ref == "mean" else float(np.percentile(x, float(ref)))
-        out = x * (gain / stat**alpha) if stat > 1e-12 else np.zeros_like(x)
-    return np.clip(np.round(out), 0, 127)
+        gain = min(gain / stat**alpha, max_gain) if stat > 1e-12 else 0.0
+    return np.clip(np.round(x * gain), 0, 127)
 
 
 def _release_envelope(x: np.ndarray, release: float) -> np.ndarray:
