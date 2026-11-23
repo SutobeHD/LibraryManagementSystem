@@ -838,135 +838,104 @@ def _content_disposition_inline(filename: str) -> str:
 # in its threadpool instead of on the event loop.
 _STREAM_CHUNK_BYTES = 1024 * 1024
 
+#: Content-Type per stored format. AIFF never goes out raw (``playable_audio`` WAV view).
+_STREAM_MEDIA_TYPES = {
+    ".mp3": "audio/mpeg",
+    ".wav": "audio/wav",
+    ".flac": "audio/flac",
+    ".m4a": "audio/mp4",
+    ".ogg": "audio/ogg",
+}
 
-async def _wav_view_response(file_path: Path, range_header: str | None) -> Response:
-    """AIFF served as a virtual WAV with Range support (Chromium decodes no AIFF)."""
-    try:
-        view = await asyncio.to_thread(playable_audio.describe, file_path)
-    except playable_audio.WavViewError as e:
-        logger.warning("op=wav_view file=%s err=%s", file_path.name, e)
-        raise HTTPException(415, "Audio encoding not supported for playback") from e
 
+def _read_file_range(file_path: Path, start: int, end: int) -> Iterator[bytes]:
+    """Bytes ``start..end`` (inclusive) of ``file_path`` in 1 MiB reads. Blocking."""
+    with open(file_path, "rb") as f:
+        f.seek(start)
+        remaining = end - start + 1
+        while remaining > 0:
+            data = f.read(min(_STREAM_CHUNK_BYTES, remaining))
+            if not data:
+                break
+            remaining -= len(data)
+            yield data
+
+
+def _byte_range_response(
+    request: Request,
+    size: int,
+    read_range: Callable[[int, int], Iterator[bytes]],
+    media_type: str,
+    filename: str,
+) -> Response:
+    """One RFC 7233 Range answer for every stream route, raw file and WAV view alike.
+
+    Single range only (``a-b``, ``a-``, ``-n``; ``n`` past the size = whole file) -> 206.
+    No, malformed or multi-range header -> 200 with the whole file (RFC 7233 lets a
+    server ignore Range; no multipart/byteranges). Unsatisfiable -> 416 ``bytes */size``.
+    HEAD gets the same status and headers, no body, and reads nothing.
+    """
     headers = {
         "Accept-Ranges": "bytes",
-        "Content-Disposition": _content_disposition_inline(
-            playable_audio.wav_filename(file_path.name)
-        ),
+        "Content-Disposition": _content_disposition_inline(filename),
         "Cache-Control": "no-cache",
     }
-    start, end, status = 0, view.size - 1, 200
+    start, end, status = 0, size - 1, 200
+    range_header = request.headers.get("range")
     if range_header:
         try:
-            byte_range = playable_audio.parse_range(range_header, view.size)
+            byte_range = playable_audio.parse_range(range_header, size)
         except ValueError as e:
             return Response(
                 status_code=416,
-                headers={"Content-Range": f"bytes */{view.size}"},
+                headers={"Content-Range": f"bytes */{size}"},
                 content=f"Invalid range: {e}",
             )
-        if byte_range is not None:  # None: malformed header, ignored -> whole file
+        if byte_range is not None:
             start, end = byte_range
             status = 206
-            headers["Content-Range"] = f"bytes {start}-{end}/{view.size}"
+            headers["Content-Range"] = f"bytes {start}-{end}/{size}"
     headers["Content-Length"] = str(end - start + 1)
+    if request.method == "HEAD":
+        return Response(status_code=status, media_type=media_type, headers=headers)
     return StreamingResponse(
-        playable_audio.iter_range(view, start, end),
-        status_code=status,
-        media_type="audio/wav",
-        headers=headers,
+        read_range(start, end), status_code=status, media_type=media_type, headers=headers
     )
 
 
-@app.get("/api/stream")
-async def stream_audio(path: str, request: Request):
-    """Streams audio file with HTTP Range support — required for browser seeking.
+async def _audio_stream_response(path: str, request: Request) -> Response:
+    """Shared body of ``/api/stream`` and ``/api/audio/stream`` (GET + HEAD).
 
-    AIFF goes out as WAV (``_wav_view_response``); every other format as stored.
+    AIFF goes out as a virtual WAV (Chromium decodes no AIFF); every other format as stored.
     """
     file_path = validate_audio_path(path)
     if playable_audio.needs_wav_view(file_path):
-        return await _wav_view_response(file_path, request.headers.get("range"))
-
-    mime_types = {
-        ".mp3": "audio/mpeg",
-        ".wav": "audio/wav",
-        ".aiff": "audio/aiff",
-        ".aif": "audio/aiff",
-        ".flac": "audio/flac",
-        ".m4a": "audio/mp4",
-        ".ogg": "audio/ogg",
-    }
-    ext = file_path.suffix.lower()
-    media_type = mime_types.get(ext, "application/octet-stream")
-
-    file_size = file_path.stat().st_size
-    range_header = request.headers.get("range") or request.headers.get("Range")
-
-    # No Range header → still expose Accept-Ranges so browsers know seeking is possible
-    if not range_header:
-
-        def _full() -> Iterator[bytes]:
-            with open(file_path, "rb") as f:
-                while True:
-                    chunk = f.read(_STREAM_CHUNK_BYTES)
-                    if not chunk:
-                        break
-                    yield chunk
-
-        return StreamingResponse(
-            _full(),
-            media_type=media_type,
-            headers={
-                "Accept-Ranges": "bytes",
-                "Content-Length": str(file_size),
-                "Content-Disposition": _content_disposition_inline(file_path.name),
-                "Cache-Control": "no-cache",
-            },
+        try:
+            view = await asyncio.to_thread(playable_audio.describe, file_path)
+        except playable_audio.WavViewError as e:
+            logger.warning("op=wav_view file=%s err=%s", file_path.name, e)
+            raise HTTPException(415, "Audio encoding not supported for playback") from e
+        return _byte_range_response(
+            request,
+            view.size,
+            lambda start, end: playable_audio.iter_range(view, start, end),
+            "audio/wav",
+            playable_audio.wav_filename(file_path.name),
         )
 
-    # Parse "bytes=START-END"
-    try:
-        units, _, rng = range_header.partition("=")
-        if units.strip().lower() != "bytes":
-            raise ValueError("only byte ranges supported")
-        start_s, _, end_s = rng.strip().partition("-")
-        start = int(start_s) if start_s else 0
-        end = int(end_s) if end_s else file_size - 1
-        end = min(end, file_size - 1)
-        if start > end or start < 0:
-            raise ValueError("invalid range")
-    except Exception as e:
-        return Response(
-            status_code=416,
-            headers={"Content-Range": f"bytes */{file_size}"},
-            content=f"Invalid range: {e}",
-        )
-
-    chunk_size = end - start + 1
-
-    def _ranged() -> Iterator[bytes]:
-        with open(file_path, "rb") as f:
-            f.seek(start)
-            remaining = chunk_size
-            while remaining > 0:
-                data = f.read(min(_STREAM_CHUNK_BYTES, remaining))
-                if not data:
-                    break
-                remaining -= len(data)
-                yield data
-
-    return StreamingResponse(
-        _ranged(),
-        status_code=206,
-        media_type=media_type,
-        headers={
-            "Accept-Ranges": "bytes",
-            "Content-Range": f"bytes {start}-{end}/{file_size}",
-            "Content-Length": str(chunk_size),
-            "Content-Disposition": _content_disposition_inline(file_path.name),
-            "Cache-Control": "no-cache",
-        },
+    return _byte_range_response(
+        request,
+        file_path.stat().st_size,
+        lambda start, end: _read_file_range(file_path, start, end),
+        _STREAM_MEDIA_TYPES.get(file_path.suffix.lower(), "application/octet-stream"),
+        file_path.name,
     )
+
+
+@app.api_route("/api/stream", methods=["GET", "HEAD"])
+async def stream_audio(path: str, request: Request):
+    """Streams an audio file with HTTP Range support — required for browser seeking."""
+    return await _audio_stream_response(path, request)
 
 
 def _waveform_body(file_path: Path, pps: int) -> bytes:
@@ -3199,17 +3168,11 @@ async def analyze_track(tid: str):
         raise HTTPException(500, safe_error_message(e))
 
 
-@app.get("/api/audio/stream")
+@app.api_route("/api/audio/stream", methods=["GET", "HEAD"])
 async def stream_audio_file(path: str, request: Request):
-    """Streams an audio file from the local filesystem (AIFF as WAV, see /api/stream)."""
-    logger.info(f"Stream request for: {path}")
-
-    # SECURITY: Validate against allowed audio roots to prevent path traversal
-    valid_path = validate_audio_path(path)
-    if playable_audio.needs_wav_view(valid_path):
-        return await _wav_view_response(valid_path, request.headers.get("range"))
-
-    return FileResponse(valid_path, headers={"Accept-Ranges": "bytes"})
+    """Same response as ``/api/stream`` (DawEngine's URL); Starlette 0.35's FileResponse
+    ignored Range, so this route no longer uses it."""
+    return await _audio_stream_response(path, request)
 
 
 # ── Pioneer "My Tag" (mode-agnostic — XML + Live both supported) ──────────────
