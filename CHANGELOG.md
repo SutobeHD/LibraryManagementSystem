@@ -19,6 +19,13 @@
   - Fixed: MP3 waveforms ran 25-51 ms ahead of Rekordbox. The decoder lead-in
     Rekordbox keeps (LAME delay and the Xing/Info frame) is now prepended.
   - Changed: cached analyses are re-run once (analysis cache version 6).
+- Logging:
+  - Fixed: user paths reached the logs with the account name whenever they were
+    not spelled exactly like the home folder — forward slashes (a third of the
+    library), other case, URL-encoded query strings in uvicorn access lines,
+    doubled backslashes from a list repr, UNC paths. The scrub now matches every
+    spelling, and uvicorn's own access and error loggers (which do not propagate
+    to the root logger) get scrubbing formatters via `log_config`.
 
 - Library:
   - Fixed: "Delete from Collection" in the live Rekordbox library only hid the
