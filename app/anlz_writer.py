@@ -168,6 +168,8 @@ def _build_pwav(waveform_data: list[int]) -> bytes:
 def _build_pwv2(waveform_data: list[int]) -> bytes:
     """
     PWV2 — Tiny waveform preview (100 entries, 1 byte each).
+    Payload = height only, bits 3-0 (1..15), no whiteness bits: Nexus-era
+    firmware rejects the whole preview (incl. PWAV) when any byte is > 15.
     """
     entries = (
         waveform_data[:100]
@@ -186,9 +188,7 @@ def _build_pwv2(waveform_data: list[int]) -> bytes:
         1,  # bytes per entry
         0,  # reserved
     )
-    # Clamp to 0..255 like PWV4/6/7 — bytes() raises on out-of-range; for valid
-    # waveform values this is the identity, so produced bytes are unchanged.
-    buf += bytes(max(0, min(255, v)) for v in entries)
+    buf += bytes(max(0, min(15, v)) for v in entries)
     return buf
 
 
@@ -398,7 +398,7 @@ def _build_pwv3(waveform_data: list[int], fps: int = 150) -> bytes:
 def _build_pwv5(waveform_u16: list[int], fps: int = 150) -> bytes:
     """
     PWV5 — Color waveform detail (2 bytes per entry, 150 entries/sec).
-    Packed as u16: R(3) | G(3) | B(3) | H(5) | reserved(2)
+    Packed as u16: R(3)=low | G(3)=mid | B(3)=high | H(5) | reserved(2)
     """
     entry_count = len(waveform_u16)
     hdr_len = 24
@@ -423,7 +423,7 @@ def _build_pwv5(waveform_u16: list[int], fps: int = 150) -> bytes:
 def _build_pwv4(color_preview: list[list[int]]) -> bytes:
     """
     PWV4 — Color waveform preview (1200 entries, 6 bytes each).
-    Each entry: [R_high, G_mid, B_low, height, R_low_half, B_low_half]
+    Each entry: [level, 0, 0, R=low, G=mid, B=high], every byte 7-bit (0..127).
     """
     entry_count = len(color_preview)
     if entry_count == 0:
@@ -445,15 +445,15 @@ def _build_pwv4(color_preview: list[list[int]]) -> bytes:
     )
     for entry in color_preview:
         for val in entry[:6]:
-            buf += struct.pack("B", max(0, min(255, val)))
+            buf += struct.pack("B", max(0, min(127, val)))
     return buf
 
 
 def _build_pwv6(hd_preview: list[list[int]]) -> bytes:
     """
     PWV6 — 3-band waveform preview (3 bytes per entry, ~1200 entries).
-    rbox identifies this as Waveform3BandPreview: [low, mid, high] per entry.
-    Same header layout as PWV7: entry_size(4) + entry_count(4) + fps(2) + reserved(2).
+    rbox identifies this as Waveform3BandPreview: [low, mid, high] per entry, 0..127.
+    Header is 20 bytes: entry_size(4) + entry_count(4), no fps trailer (unlike PWV7).
     """
     entry_count = len(hd_preview)
     hdr_len = 20
@@ -469,14 +469,14 @@ def _build_pwv6(hd_preview: list[list[int]]) -> bytes:
     )
     for entry in hd_preview:
         for val in entry[:3]:
-            buf += struct.pack("B", max(0, min(255, val)))
+            buf += struct.pack("B", max(0, min(127, val)))
     return buf
 
 
 def _build_pwv7(hd_detail: list[list[int]], fps: int = 150) -> bytes:
     """
     PWV7 — 3-band waveform detail (3 bytes per entry, 150/sec).
-    rbox identifies this as Waveform3BandDetail: [low, mid, high] per entry.
+    rbox identifies this as Waveform3BandDetail: [low, mid, high] per entry, 0..127.
     """
     entry_count = len(hd_detail)
     hdr_len = 24
@@ -494,7 +494,7 @@ def _build_pwv7(hd_detail: list[list[int]], fps: int = 150) -> bytes:
     )
     for entry in hd_detail:
         for val in entry[:3]:
-            buf += struct.pack("B", max(0, min(255, val)))
+            buf += struct.pack("B", max(0, min(127, val)))
     return buf
 
 

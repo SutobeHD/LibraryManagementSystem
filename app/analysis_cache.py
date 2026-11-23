@@ -39,9 +39,11 @@ logger = logging.getLogger(__name__)
 # next free one, so no entry written by either side is served:
 # 4: main = regression BPM + uniform grid for steady tracks (B5); branch = depth-aware entries.
 # 5: main = comb refit (exact BPM + uniform grid where the tracker slipped); branch = both 4s.
-# 6: all of the above — depth-aware entries (rekordbox / high), mood / genre_hint / stereo
-#    nullable, extras, regression BPM, comb refit.
-ANALYSIS_VERSION = 6
+# 6: main = Rekordbox-faithful waveform values (peak^2 heights, pooled previews);
+#    branch = depth-aware entries + regression BPM + comb refit.
+# 7: all of the above — depth-aware entries (rekordbox / high), mood / genre_hint / stereo
+#    nullable, extras, regression BPM, comb refit, Rekordbox-faithful waveform values.
+ANALYSIS_VERSION = 7
 
 USE_CONTENT_HASH = False  # opt-in: also compare a quick xxhash/md5 sample
 
