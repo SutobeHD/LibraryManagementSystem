@@ -163,8 +163,12 @@ def test_settings_post_without_the_key_still_reads_back_a_valid_depth(
 
 
 @pytest.fixture
-def audio_file(tmp_path: Path) -> Path:
-    f = tmp_path / "t.wav"
+def audio_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    # The route runs `validate_audio_path` (403 outside ALLOWED_AUDIO_ROOTS).
+    root = (tmp_path / "lib").resolve()
+    root.mkdir()
+    monkeypatch.setattr(main, "ALLOWED_AUDIO_ROOTS", [*main.ALLOWED_AUDIO_ROOTS, root])
+    f = root / "t.wav"
     f.write_bytes(b"RIFF" + b"\x00" * 64)
     return f
 

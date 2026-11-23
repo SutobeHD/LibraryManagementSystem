@@ -16,6 +16,7 @@ from contextlib import contextmanager
 import pytest
 
 from app.metadata_fixer import applier, schema
+from app.track_fields import UnknownTrackIds
 
 
 class FakeDB:
@@ -154,6 +155,28 @@ def test_apply_skips_failed_db_write(fresh_db, lock_counter, no_tag_write):
     )
     assert applied == 0
     assert fresh_db.get_run(run_id)["mutation_count"] == 0  # nothing journalled
+
+
+class RaisingFakeDB(FakeDB):
+    """The real facade's answer to an id the library lacks: ``UnknownTrackIds``."""
+
+    def update_tracks_metadata(self, ids, updates):
+        unknown = [tid for tid in ids if tid not in self.tracks]
+        if unknown:
+            raise UnknownTrackIds(unknown)
+        return super().update_tracks_metadata(ids, updates)
+
+
+def test_apply_skips_a_track_the_library_no_longer_holds(fresh_db, lock_counter, no_tag_write):
+    db = RaisingFakeDB({"1": {"Title": "01 - Intro", "path": "/m/1.mp3"}})
+    run_id, applied = applier.apply_fixes(
+        db,
+        [applier.FixRequest("gone", 4, "Title", "X"), applier.FixRequest("1", 4, "Title", "Intro")],
+        rule_ids=[4],
+    )
+    assert applied == 1
+    assert db.tracks["1"]["Title"] == "Intro"
+    assert fresh_db.get_run(run_id)["mutation_count"] == 1
 
 
 # --- v2: entity revert, honest status, sha1 skip ---------------------------

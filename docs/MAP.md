@@ -275,6 +275,7 @@
 | `tests/__init__.py` | *(no module docstring)* |
 | `tests/conftest.py` | Pytest fixtures shared across the suite. |
 | `tests/test_analysis.py` | Regression tests for the analysis pipeline. |
+| `tests/test_analysis_api_hygiene.py` | POST /api/audio/analyze sandbox + path-free analyze-batch / analyze-full bodies. |
 | `tests/test_analysis_cache.py` | Tests for app/analysis_cache.py — persistent analysis-result cache. |
 | `tests/test_analysis_db_writer.py` | Unit tests for AnalysisDBWriter — the values it writes into Rekordbox master.db. |
 | `tests/test_analysis_depth_settings.py` | The `analysis_depth` setting ("rekordbox" | "high") and how the analyze routes resolve it. |
@@ -385,15 +386,21 @@
 | `tests/test_soundcloud_log_redaction.py` | Regression guard: no SoundCloud log record may carry a `client_id`. |
 | `tests/test_soundcloud_refresh_route.py` | Route tests for the persistent SoundCloud login (T-19). |
 | `tests/test_stream_chunking.py` | GET /api/stream: file reads happen off the event loop, in 1 MiB chunks. |
+| `tests/test_stream_ranges.py` | RFC 7233 Range + HEAD on both stream routes, raw files and the AIFF WAV view alike. |
 | `tests/test_stream_unicode_filename.py` | Regression: GET /api/stream 500 on non-latin-1 filenames. |
 | `tests/test_system_health.py` | Contract tests for ``GET /api/system/health`` -- unauth'd liveness probe. |
+| `tests/test_track_batch_tags.py` | PATCH /api/tracks/batch writes the audio-file tags like the single-track edit. |
+| `tests/test_track_batch_writes.py` | Track edits are all or nothing and name an unknown id (PC test 2026-11-22). |
+| `tests/test_track_delete_routes.py` | Deleting a track (PC test 2026-11-22). |
 | `tests/test_track_metadata_fields.py` | Track-metadata writes refuse fields and values the backend cannot store (issue K8). |
 | `tests/test_usb_artwork.py` | Cover art for the USB stick, with the real Pillow (B8, 0.1 core-loop test). |
 | `tests/test_usb_copy_atomic.py` | USB audio copies must not leave a truncated file that never self-heals. |
+| `tests/test_usb_export_fields.py` | Per-track fields of a stick export (PC test 2026-11-22). |
 | `tests/test_usb_lookup_batching.py` | Batched master.db lookups in the USB scan / diff / legacy-export paths. |
 | `tests/test_usb_manager.py` | Tests for `app/usb_manager.py`. |
 | `tests/test_usb_mysettings.py` | Tests for app/usb_mysettings.py — Pioneer MYSETTING file schema + I/O. |
 | `tests/test_usb_relocate.py` | Tests for the USB relocation pass (`app/usb_one_library.py`). |
+| `tests/test_usb_resync.py` | Re-syncing a stick that already holds an export (PC test 2026-11-22). |
 | `tests/test_validate_real_world.py` | Unit tests for the pure helpers in scripts/validate_real_world.py. |
 | `tests/test_variant_detector.py` | variant_schema + variant_detector tests (analysis-remix-detector T-2, T-3). |
 | `tests/test_variant_schema.py` | Tests for app/variant_schema.py — variants.db DDL + migration runner. |

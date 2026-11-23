@@ -23,12 +23,12 @@ Marker convention in the route tables below:
 | GET | `/api/track/{tid}` | Single track full detail |
 | GET | `/api/track/{tid}/cues` | Hot cues + memory cues for a track |
 | GET | `/api/track/{tid}/beatgrid` | Beatgrid data for a track |
-| POST | `/api/track/{tid}` `[AUTH]` `[RB]` | Update track metadata fields. Body `TrackUpdateReq {Rating?, ColorID?, Comment?, Genre?}` with `extra="forbid"`: any other key → 422 (was dropped, 200). A value the backend refuses (`app.track_fields.TrackFieldError`, e.g. live `Rating` 9) → 400 naming it; a failed write → 500 |
+| POST | `/api/track/{tid}` `[AUTH]` `[RB]` | Update track metadata fields. Body `TrackUpdateReq {Rating?, ColorID?, Comment?, Genre?}` with `extra="forbid"`: any other key → 422 (was dropped, 200). A value the backend refuses (`app.track_fields.TrackFieldError`, e.g. live `Rating` 9) → 400 naming it; unknown id → 404 `Unknown track id(s): …` (`UnknownTrackIds`, was 500); a failed write → 500 (live: row restored). → `{status, file_tags}`: best-effort write into the audio file via `_file_tag_writeback` (`write_tags_to_files`, default true; `written` / `failed` / `skipped` / `error`). Only fields a file tag stores (`audio_tags.tag_fields`): ColorID alone or a streaming track → `skipped`, file untouched. Existing pictures stay (no cover re-embed). Per file the tag write follows the library-write order (`audio_tags.FileWriteLocks`, taken before `db_lock` is released) |
 | DELETE | `/api/track/{tid}` `[AUTH]` `[RB]` | Delete a track |
 | POST | `/api/track/delete` `[AUTH]` `[RB]` | Delete track by body param |
 | POST | `/api/track/cues/save` `[AUTH]` | Save cue points for a track |
 | POST | `/api/track/grid/save` `[AUTH]` | Save beatgrid for a track |
-| PATCH | `/api/tracks/batch` `[AUTH]` `[RB]` | Batch update metadata on multiple tracks. Body `BatchReq {track_ids, updates}` → `{status: "success"}`. 400 (`detail` names the field / value, e.g. `live library cannot write field(s): BPM, Key`) when a key is outside `db.writable_track_fields()` or a value has the wrong type / range — every track untouched. 500 when the write fails: XML unknown id or a save that failed (memory rolled back), live row missing (was 200 `{"status": "error"}`, read by no caller) |
+| PATCH | `/api/tracks/batch` `[AUTH]` `[RB]` | Batch update metadata on multiple tracks. Body `BatchReq {track_ids, updates}` → `{status: "success", file_tags: {track_id: written\|failed\|skipped\|error}}` (same write-back into the audio file as `POST /api/track/{tid}`, per track; was never written). All or nothing, checked before the first write: 400 (`detail` names the field / value, e.g. `live library cannot write field(s): BPM, Key`) when a key is outside `db.writable_track_fields()` or a value has the wrong type / range; 404 `Unknown track id(s): …` for every id the library lacks (was 500 with the valid rows already written, live). 500 when the write fails: live rbox error partway (`TrackWriteFailed`; rows already written restored from snapshots, `detail` names any it could not restore), XML save failed (memory rolled back). A refused batch touches no file |
 | POST | `/api/tracks/move` `[AUTH]` | Move tracks between playlists |
 | GET | `/api/artists` | All artists (normalized) |
 | GET | `/api/artist/{aid}/tracks` | Tracks by artist |
@@ -94,17 +94,17 @@ Marker convention in the route tables below:
 ### Audio Endpoints
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/stream` | Stream audio file (range-request, sandboxed, query param `path`). AIFF goes out as WAV computed on the fly (`app/playable_audio.py`; Chromium/WebView2 decode no AIFF), 415 for encodings it cannot serve |
-| GET | `/api/audio/stream` | Same sandboxed path check, plain `FileResponse` (handler `stream_audio_file`; used by `DawEngine.js`); AIFF as WAV like `/api/stream` |
+| GET, HEAD | `/api/stream` | Stream audio file (sandboxed, query param `path`). Range per RFC 7233 via `_byte_range_response` (`playable_audio.parse_range`): one range `a-b` / `a-` / `-n` → 206 (`-n` past the size = whole file); no, malformed or multi-range header → 200 whole file (no multipart); unsatisfiable → 416 `Content-Range: bytes */size`. HEAD: same status + headers (Content-Length, Accept-Ranges), no body, no file read. AIFF goes out as WAV computed on the fly (`app/playable_audio.py`; Chromium/WebView2 decode no AIFF), 415 for encodings it cannot serve. Content-Type: mp3 `audio/mpeg`, flac `audio/flac`, m4a `audio/mp4`, wav `audio/wav`, ogg `audio/ogg` |
+| GET, HEAD | `/api/audio/stream` | Identical response to `/api/stream` (shared `_audio_stream_response`; handler `stream_audio_file`; used by `DawEngine.js`). Was a plain `FileResponse` until 2026-11 (Starlette 0.35 ignores Range → 200 + whole body) |
 | GET | `/api/audio/waveform` | Multiband waveform data (`pps` >= 1, points-per-second); computed off-loop, disk-cached per (file mtime+size, pps) |
-| POST | `/api/audio/analyze` `[AUTH]` | Start async analysis → returns `{ task_id }`. Body `{ file_path, depth? }` — `depth` = `rekordbox` \| `high` \| null (null → stored `analysis_depth` setting; the old `mode` speed/accuracy knob and its 120 s cap are gone, a legacy `mode` key is ignored). Path check is existence-only (no `validate_audio_path`, pre-existing, see `security-api-auth-hardening`) |
+| POST | `/api/audio/analyze` `[AUTH]` | Start async analysis → returns `{ task_id }`. Body `{ file_path, depth? }` — `depth` = `rekordbox` \| `high` \| null (null → stored `analysis_depth` setting; the old `mode` speed/accuracy knob and its 120 s cap are gone, a legacy `mode` key is ignored); `file_path` goes through `validate_audio_path` (400 bad path/extension, 404 missing, 403 outside `ALLOWED_AUDIO_ROOTS`) |
 | GET | `/api/audio/analyze/{task_id}` | Poll analysis result: `{ status, bpm, key, confidence }` |
 | POST | `/api/audio/slice` `[AUTH]` | Slice audio file at beat positions |
 | POST | `/api/audio/render` `[AUTH]` | Render audio with FFmpeg (format conversion, export) |
 | POST | `/api/audio/import` `[AUTH]` `[RB]` | Import a local audio file into the library |
 | POST | `/api/track/{tid}/analyze` `[AUTH]` | Full analysis pipeline on single track. Optional body `{ depth? }` (`rekordbox` \| `high`; null → stored setting) |
-| POST | `/api/track/{tid}/analyze-full` `[AUTH]` | Analyze + write ANLZ files + update master.db in one call. Body: `{ force: bool, depth?: 'rekordbox'|'high' }` (depth null → stored `analysis_depth`; resolved once per request before the single-flight claim). Response `{ status, data }` where `data` is the engine result incl. `depth`, `extras`. 409 when not in live mode / live library not loaded (`db.get_analysis_writer()` is None) or when Rekordbox is running. Writer errors map by `reason` (`_ANALYZE_FULL_ERRORS`): `track_not_found` → 404, `no_anlz_path` / `audio_missing` → 409, anything else → 500; fixed `detail` strings, never the writer's `error` text (can hold an absolute path). Single-flight with `analyze-batch` (`_analysis_db_run_lock`): 409 while either runs. Before 2026-10 it answered 400 in every mode (`hasattr` probe on the facade) |
-| POST | `/api/library/analyze-batch` `[AUTH]` | Batch analyze multiple tracks; NDJSON streaming progress. Body: `{ track_ids: [int], force: bool, depth?: 'rekordbox'|'high' }` (depth resolved once per batch). Same 409 gates as `analyze-full`, incl. the shared single-flight slot; the stream's `finally` or the response's `BackgroundTask` frees it (whichever first), so a stream that never starts cannot leak it |
+| POST | `/api/track/{tid}/analyze-full` `[AUTH]` | Analyze + write ANLZ files + update master.db in one call. Body: `{ force: bool, depth?: 'rekordbox'|'high' }` (depth null → stored `analysis_depth`; resolved once per request before the single-flight claim). 409 when not in live mode / live library not loaded (`db.get_analysis_writer()` is None) or when Rekordbox is running. Writer errors map by `reason` (`_ANALYZE_FULL_ERRORS`): `track_not_found` → 404, `no_anlz_path` / `audio_missing` → 409, anything else → 500; fixed `detail` strings, never the writer's `error` text (can hold an absolute path). Single-flight with `analyze-batch` (`_analysis_db_run_lock`): 409 while either runs. Before 2026-10 it answered 400 in every mode (`hasattr` probe on the facade). Ok body `data` = `_public_analysis_result`: no file paths, `anlz_paths` → `anlz_files` (kinds written, e.g. `["dat", "ext"]`) |
+| POST | `/api/library/analyze-batch` `[AUTH]` | Batch analyze multiple tracks; NDJSON streaming progress. Body: `{ track_ids: [int], force: bool, depth?: 'rekordbox'|'high' }` (depth resolved once per batch). Same 409 gates as `analyze-full`, incl. the shared single-flight slot; the stream's `finally` or the response's `BackgroundTask` frees it (whichever first), so a stream that never starts cannot leak it. One line per track via `_public_analysis_result`: `track_id`, `index`, `total`, `analyzed`/`skipped`/`errors` counters, `status`, `reason`, results (`bpm`, `key`, `camelot`, …), `anlz_files`; no file paths — an error's text is the fixed per-`reason` detail of `analyze-full` |
 | GET | `/api/library/analyze-status` | Report analysis engine capabilities + count of unanalyzed tracks |
 
 ### Project (DAW / RBEP) Endpoints
@@ -141,7 +141,7 @@ Marker convention in the route tables below:
 | Method | Path | Description |
 |--------|------|-------------|
 | POST | `/api/xml/clean` `[AUTH]` | Clean Rekordbox XML (strip tags, fix encoding, normalize) |
-| POST | `/api/rekordbox/export` `[AUTH]` | Export selected tracks to Rekordbox-compatible XML. Body `RbxSyncReq {track_ids, filename?}`; `filename` reduced to its basename, `.xml` appended when missing, default `rekordbox_export.xml`, must resolve inside `EXPORT_DIR` (`_rbx_export_path`) → `{status, message, path}`. 400 on an unusable name (`..`, `?<>|:`, control chars) or when no id is a known track |
+| POST | `/api/rekordbox/export` `[AUTH]` | Export tracks to Rekordbox-compatible XML. Body `RbxSyncReq {track_ids?, filename?, playlist_id?, playlist_name?}`: `playlist_id` = one library playlist, or a folder with its subtree as nested `NODE Type="0" Count`, tracks in playlist-view order; `track_ids` + `playlist_name` = those tracks as one playlist (`NODE Type="1" KeyType="0" Entries`); `track_ids` alone = PLAYLISTS holds ROOT only (`Count="0"`). `playlist_name` also renames a `playlist_id` export. Streaming tracks (`soundcloud:`/`spotify:`/`tidal:`/`beatport:`/`http(s):`) are left out of COLLECTION and playlists. `filename` reduced to its basename, `.xml` appended when missing, default `rekordbox_export.xml`, must resolve inside `EXPORT_DIR` (`_rbx_export_path`) → `{status, message, path, exported, skipped_streaming, playlist}`. 400 on an unusable name (`..`, `?<>|:`, control chars), on `playlist_id` + `track_ids`, or when no exportable track is left (none known / all streaming); 404 for an unknown `playlist_id` |
 | POST | `/api/rekordbox/import` `[AUTH]` `[RB]` | Import tracks from a Rekordbox XML export. 404 when `xml_path` does not exist (was turned into a 500) |
 | POST | `/api/file/write` `[AUTH]` | Write raw XML content to a file (sandboxed) |
 | POST | `/api/file/reveal` `[AUTH]` | Open OS file-manager at the given sandboxed path |
@@ -581,14 +581,14 @@ New module for three-way play-count diffing between PC and USB.
 | `load_usb_sync_meta` | `(usb_root: str) -> dict` | Reads `PIONEER/RB_EDITOR_SYNC.json` |
 | `save_usb_sync_meta` | `(usb_root: str, meta: dict) -> None` | Atomic write via .tmp |
 | `diff_playcounts` | `(pc_tracks, usb_tracks, last_sync_ts) -> dict` | Returns `{auto, conflicts}` |
-| `resolve_playcounts` | `(resolutions, pc_db_path, usb_xml_path) -> dict` | Commits to DB + XML |
+| `resolve_playcounts` | `(resolutions, pc_db_path: str \| None, usb_xml_path) -> dict` | Commits to DB (skipped when `pc_db_path` is None) + XML |
 | `read_usb_xml_playcounts` | `(usb_xml_path: str) -> list[dict]` | Parses Rekordbox XML |
 
 **API endpoints added to `app/main.py`**:
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/usb/playcount/diff` | Diff PC vs USB play counts |
-| POST | `/api/usb/playcount/resolve` `[AUTH]` | Commit resolved play counts |
+| POST | `/api/usb/playcount/resolve` `[AUTH]` `[RB]` | Commit resolved play counts: live mode → the live library's master.db (`_live_master_db_path`) under `db_lock()`, then the USB XML. XML library → USB XML only, `pc_db_skipped: true`. Returns `{committed (master.db tracks), usb_updated (USB XML tracks), pc_db_skipped, errors}` |
 
 ---
 

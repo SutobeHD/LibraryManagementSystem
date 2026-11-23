@@ -2,7 +2,88 @@
 
 ## [Unreleased]
 
+- Logging:
+  - Fixed: user paths reached the logs with the account name whenever they were
+    not spelled exactly like the home folder — forward slashes (a third of the
+    library), other case, URL-encoded query strings in uvicorn access lines,
+    doubled backslashes from a list repr, UNC paths. The scrub now matches every
+    spelling, and uvicorn's own access and error loggers (which do not propagate
+    to the root logger) get scrubbing formatters via `log_config`.
+
+- Library:
+  - Fixed: "Delete from Collection" in the live Rekordbox library only hid the
+    track until the next restart (and answered 500) while the dialog promised a
+    permanent delete. rbox 0.1.7 cannot delete a track row, so the live mode no
+    longer offers it: the menu item is hidden and `DELETE /api/track/{id}`
+    answers 409 with a hint to remove the track in Rekordbox. XML mode still
+    removes tracks, now with one confirmation instead of two.
+  - Fixed: editing several tracks at once is all or nothing. A batch naming a
+    track the library does not hold answers 404 with that id and writes nothing
+    (the live library had already written the valid tracks and answered 500); a
+    write the live database refuses partway puts the tracks already written back.
+    Editing an unknown track answers 404 instead of 500.
+  - Fixed: Title / Artist / Album edits from the track table and the batch bar
+    now reach the audio file's tags too (setting `write_tags_to_files`, on by
+    default), as single-track edits already did; the answer reports each file.
+  - Fixed: a track edit no longer replaces the file's own cover art with the
+    library thumbnail (a back cover was deleted, a PNG relabelled JPEG), a
+    colour-only edit leaves the file untouched, and two quick edits of one track
+    write the file in the order they reached the library.
+  - Fixed: imported MP3s got FileType 0 in master.db instead of Rekordbox's 1.
+    Every import now gets the code of its format (MP3 1, M4A 4, FLAC 5, WAV 11,
+    AIFF 12).
+
+- Rekordbox XML export:
+  - Fixed: the export held no playlist (PLAYLISTS was an empty ROOT), so an
+    imported file lost the playlist and its order. `POST /api/rekordbox/export`
+    now takes `playlist_id` (a playlist, or a folder with its subfolders) or
+    `track_ids` + `playlist_name` and writes the playlist nodes in playlist
+    order. A plain track list (the whole-library push) still has no playlist.
+  - Fixed: SoundCloud and other streaming tracks got a made-up local
+    Location (`<backend folder>/soundcloud:tracks:…`). They are now left out,
+    and the response says how many were skipped.
+
+- API route hygiene:
+  - Fixed: a suffix range (`Range: bytes=-500`) on `/api/stream` returned the
+    first 501 bytes of a non-AIFF file instead of the last 500. Both stream
+    routes now share one RFC 7233 range
+    handler (single range -> 206, multi-range or malformed -> whole file,
+    unsatisfiable -> 416).
+  - Fixed: `/api/audio/stream` (DAW editor) ignored Range for MP3/FLAC/M4A/WAV
+    and sent FLAC/M4A with the wrong Content-Type. It now answers exactly like
+    `/api/stream`. Both routes answer `HEAD`.
+  - Fixed: `POST /api/audio/analyze` analysed any existing file; it now has the
+    same folder sandbox as playback (403 outside the library folders).
+  - Fixed: analysis responses (`analyze-batch` progress lines, `analyze-full`)
+    no longer contain absolute file paths.
+  - Fixed: play-count sync (`/api/usb/playcount/resolve`) wrote a fixed
+    `%APPDATA%` master.db in every mode, even while Rekordbox was running. With
+    the live library it now refuses while Rekordbox runs, writes the library's
+    own master.db and holds the database write lock; with an XML library it
+    updates only the USB stick and says so. Errors show the backend's reason
+    instead of "Request failed with status code 409".
+
 - USB export:
+  - Fixed: every exported track lost its album and kept the OneLibrary
+    template's file type (M4A), sample rate (48 kHz), bit depth and file size,
+    in `exportLibrary.db` and `export.pdb`. They now come from the file itself.
+  - Fixed: ratings are stored as 0-5 stars instead of x51 (CDJ-3000X / XDJ-AZ
+    showed no stars).
+  - Fixed: artwork landed in folder `00000`; folders now hold 20 images each and
+    start at `00001`, and every image is also written as the `b` copy Rekordbox
+    writes.
+  - Fixed: re-syncing a stick never updated `exportLibrary.db` / `export.pdb`
+    on Windows while the app reported success. A plain sqlite3 probe of the
+    SQLCipher file failed and kept it locked, so the writer could not replace
+    it. The probe is gone, a still-locked file now ends the sync with an error,
+    and any failed stage makes the whole sync report "Sync incomplete".
+  - Fixed: the sync preview compared the stick with the whole library and read
+    the stick with plain sqlite3 (always empty). It now reads it through rbox and
+    compares the profile's selected playlists (plus their folders).
+  - Fixed: BPM on the stick was cut instead of rounded (127.96 became 127.95)
+    in `exportLibrary.db` and `export.pdb`.
+  - Changed: the sync message counts files that were already on the stick
+    separately instead of as "copied".
   - Fixed: a stick sync wrote at most 16 tracks into `exportLibrary.db` and
     `export.pdb` (B9) — the cap was the row count of the bundled OneLibrary
     template. The writer now adds the missing content slots before it writes
