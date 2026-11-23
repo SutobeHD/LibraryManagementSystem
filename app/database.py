@@ -15,7 +15,7 @@ from typing import Any
 from urllib.parse import unquote
 
 from .live_database import LiveRekordboxDB
-from .track_fields import normalise_track_updates, writable_fields
+from .track_fields import UnknownTrackIds, normalise_track_updates, writable_fields
 
 logger = logging.getLogger(__name__)
 
@@ -1451,24 +1451,22 @@ class RekordboxDB:
     def update_tracks_metadata(self, track_ids: list[str], updates: dict[str, Any]) -> bool:
         """Apply ``updates`` to every track. True only once the backend holds them.
 
-        Raises ``TrackFieldError`` (a ``ValueError``) before touching any track when a
+        Raises before touching any track: ``TrackFieldError`` (a ``ValueError``) when a
         key is outside ``writable_track_fields()`` or a value has the wrong type or range
-        (``app.track_fields``). XML mode: False with nothing changed when a track id is
-        unknown, and False when the library file cannot be saved; memory is then rolled
-        back to what the file still holds.
+        (``app.track_fields``), ``UnknownTrackIds`` (a ``LookupError``) naming every id
+        the library lacks. Live mode: a write that fails partway restores the rows
+        already written and raises ``TrackWriteFailed``. XML mode: False when the
+        library file cannot be saved; memory is then rolled back to what the file
+        still holds.
         """
         updates = normalise_track_updates(updates, self.mode)
         if self.mode == "live":
-            success = True
-            for tid in track_ids:
-                if not self.active_db.update_track_metadata(tid, updates):
-                    success = False
-            return success
+            return self.active_db.update_tracks_metadata(track_ids, updates)
         tracks = self.xml_db.tracks
-        unknown = [tid for tid in track_ids if tid not in tracks]
+        unknown = [tid for tid in dict.fromkeys(track_ids) if tid not in tracks]
         if unknown:
             logger.warning("update_tracks_metadata: unknown XML track id(s) %s", unknown[:5])
-            return False
+            raise UnknownTrackIds(unknown)
         before = {tid: {k: tracks[tid].get(k, _MISSING) for k in updates} for tid in track_ids}
         for tid in track_ids:
             tracks[tid].update(updates)

@@ -107,8 +107,7 @@ tested = "2026-11-23"
 desc = "export.pdb + exportExt.pdb nach Crate-Digger-Spec, byte-verifiziert gegen echten Stick."
 paths = ["app/usb_pdb.py", "tests/test_pdb_structure.py"]
 depends_on = ["usb-onelibrary-export"]
-todo = ["Doku-Drift: CLAUDE.md/coding-rules sagen 0x34 auf jeder Datenseite und empty_candidate = next_unused; Code und test_pdb_structure nutzen Regeln pro Tabelle (tracks 0x34, sonst 0x24)"]
-notes = "PC-Test 2026-11-22: Struktur korrekt (57/96 Seiten, Ketten, Flags pro Tabelle, Unicode inkl. CJK/Griechisch, lückenlose Playlists, exportExt.pdb 9 Tabellen). Default an (usb_write_legacy_pdb=True in usb_manager), kein UI-Toggle. ~500-Track-Grenze unbelegt (Docstring-Annahme). Datenseiten max. 255 Zeilen (MAX_ROWS_PER_PAGE), damit nie der unverifizierte >255-Zeilen-Header entsteht. rbxport-Abweichungen (UTF-16 ohne Terminator + 4-Byte-Align, >255-Zeilen-Header, Tabellen 16-19): docs/reference/rbxport/export.md §10-11. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): ok. Track-Zeilen tragen jetzt Dateityp, Samplerate, Bittiefe, Dateigröße und Bewertung der echten Datei (fix/usb-export-data)."
+notes = "PC-Test 2026-11-22: Struktur korrekt (57/96 Seiten, Ketten, Flags pro Tabelle, Unicode inkl. CJK/Griechisch, lückenlose Playlists, exportExt.pdb 9 Tabellen). Default an (usb_write_legacy_pdb=True in usb_manager), kein UI-Toggle. ~500-Track-Grenze unbelegt (Docstring-Annahme). Datenseiten max. 255 Zeilen (MAX_ROWS_PER_PAGE), damit nie der unverifizierte >255-Zeilen-Header entsteht. rbxport-Abweichungen (UTF-16 ohne Terminator + 4-Byte-Align, >255-Zeilen-Header, Tabellen 16-19): docs/reference/rbxport/export.md §10-11. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): ok. Track-Zeilen tragen jetzt Dateityp, Samplerate, Bittiefe, Dateigröße und Bewertung der echten Datei (fix/usb-export-data). Doku-Drift behoben (2026-11-23): coding-rules.md nennt jetzt die Regeln pro Tabelle (Flags 0x34/0x24, eigene Blank-Page als Ketten-Ende)."
 
 [[feature]]
 id = "usb-anlz-export"
@@ -184,6 +183,8 @@ status = "shipped"
 desc = "Drei-Wege-Diff der Playcounts, Konflikte auflösen."
 paths = ["app/playcount_sync.py", "frontend/src/components/usb/PlayCountSync.jsx"]
 routes = ["/api/usb/playcount"]
+todo = ["PC-Seite schreibt nie: rbox 0.1.7 MasterDb hat kein set_play_count/set_last_played -> jeder Track landet in errors, nur das USB-XML wird gepatcht"]
+notes = "2026-11-23 (fix/api-route-hygiene): Rekordbox-Sperre, Live-master.db-Pfad, Write-Schleife unter db_lock; im XML-Modus wird nur das USB-XML gepatcht (pc_db_skipped=true, usb_updated zählt). UI zeigt den Backend-detail-Text bei Fehlern."
 
 [[feature]]
 id = "usb-mysettings"

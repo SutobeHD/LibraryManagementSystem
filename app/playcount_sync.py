@@ -284,9 +284,64 @@ def _apply_strategy(
     return usb_count, max(pc_lp, usb_lp)
 
 
+def _write_pc_playcounts(
+    pc_db_path: str, finals: dict[str, tuple[int, float]], errors: list[str]
+) -> int:
+    """Write ``finals`` into master.db via rbox under ``db_lock``; returns tracks updated.
+
+    Best-effort: every failure lands in ``errors`` instead of raising, so the USB XML
+    can still be patched.
+    """
+    from .database import db_lock
+
+    committed = 0
+    try:
+        import rbox  # type: ignore  # soft-dependency: rbox wheel
+
+        db_path = Path(pc_db_path)
+        if not db_path.exists():
+            raise FileNotFoundError(f"master.db not found: {db_path}")
+
+        # Every master.db writer serialises on db_lock (coding-rules "Backend concurrency").
+        with db_lock():
+            master_db = rbox.MasterDb(str(db_path))
+            for tid, (count, lp) in finals.items():
+                try:
+                    # rbox integer track ids
+                    int_tid = int(tid)
+                    # rbox 0.1.x API: set_play_count(track_id, count)
+                    # last_played update may not be available in all versions —
+                    # we attempt it and fall back gracefully.
+                    master_db.set_play_count(int_tid, count)
+                    try:
+                        master_db.set_last_played(int_tid, int(lp))
+                    except AttributeError:
+                        logger.warning(
+                            "resolve_playcounts: rbox.set_last_played not available for track=%s",
+                            tid,
+                        )
+                    committed += 1
+                    logger.info("resolve_playcounts: PC updated track=%s count=%d", tid, count)
+                except Exception as exc:
+                    msg = f"PC DB update failed for track {tid}: {exc}"
+                    logger.error("resolve_playcounts: %s", msg)
+                    errors.append(msg)
+
+    except ImportError:
+        logger.warning("resolve_playcounts: rbox not installed — PC DB will not be updated")
+        errors.append("rbox library not installed; PC database not updated")
+    except FileNotFoundError as exc:
+        logger.error("resolve_playcounts: %s", exc)
+        errors.append(str(exc))
+    except Exception as exc:
+        logger.error("resolve_playcounts: unexpected PC DB error — %s", exc)
+        errors.append(f"PC DB error: {exc}")
+    return committed
+
+
 def resolve_playcounts(
     resolutions: list[dict],
-    pc_db_path: str,
+    pc_db_path: str | None,
     usb_xml_path: str,
 ) -> dict:
     """
@@ -306,11 +361,13 @@ def resolve_playcounts(
 
     Args:
         resolutions: List of resolution dicts (see above).
-        pc_db_path: Path to Rekordbox master.db.
+        pc_db_path: Path to Rekordbox master.db, or None to skip the PC side
+            (XML library: there is no master.db to write).
         usb_xml_path: Path to the exported Rekordbox XML on the USB drive.
 
     Returns:
-        {"committed": int, "errors": list[str]}
+        {"committed": int (master.db tracks updated), "usb_updated": int (USB XML
+        tracks patched), "pc_db_skipped": bool, "errors": list[str]}
     """
     logger.info(
         "resolve_playcounts: %d resolutions, db=%s, xml=%s",
@@ -318,13 +375,21 @@ def resolve_playcounts(
         pc_db_path,
         usb_xml_path,
     )
+    errors: list[str] = []
+    committed = 0
+
+    def _result(usb_updated: int) -> dict:
+        return {
+            "committed": committed,
+            "usb_updated": usb_updated,
+            "pc_db_skipped": pc_db_path is None,
+            "errors": errors,
+        }
 
     if not isinstance(resolutions, list):
         logger.error("resolve_playcounts: resolutions must be list, got %s", type(resolutions))
-        return {"committed": 0, "errors": ["resolutions must be a list"]}
-
-    errors: list[str] = []
-    committed = 0
+        errors.append("resolutions must be a list")
+        return _result(0)
 
     # Build a lookup from track_id → (final_count, final_lp)
     finals: dict[str, tuple[int, float]] = {}
@@ -352,44 +417,10 @@ def resolve_playcounts(
         )
 
     # ── 1. Update PC database via rbox ─────────────────────────────────────
-    try:
-        import rbox  # type: ignore  # soft-dependency: rbox wheel
-
-        db_path = Path(pc_db_path)
-        if not db_path.exists():
-            raise FileNotFoundError(f"master.db not found: {db_path}")
-
-        master_db = rbox.MasterDb(str(db_path))
-        for tid, (count, lp) in finals.items():
-            try:
-                # rbox integer track ids
-                int_tid = int(tid)
-                # rbox 0.1.x API: set_play_count(track_id, count)
-                # last_played update may not be available in all versions —
-                # we attempt it and fall back gracefully.
-                master_db.set_play_count(int_tid, count)
-                try:
-                    master_db.set_last_played(int_tid, int(lp))
-                except AttributeError:
-                    logger.warning(
-                        "resolve_playcounts: rbox.set_last_played not available for track=%s", tid
-                    )
-                committed += 1
-                logger.info("resolve_playcounts: PC updated track=%s count=%d", tid, count)
-            except Exception as exc:
-                msg = f"PC DB update failed for track {tid}: {exc}"
-                logger.error("resolve_playcounts: %s", msg)
-                errors.append(msg)
-
-    except ImportError:
-        logger.warning("resolve_playcounts: rbox not installed — PC DB will not be updated")
-        errors.append("rbox library not installed; PC database not updated")
-    except FileNotFoundError as exc:
-        logger.error("resolve_playcounts: %s", exc)
-        errors.append(str(exc))
-    except Exception as exc:
-        logger.error("resolve_playcounts: unexpected PC DB error — %s", exc)
-        errors.append(f"PC DB error: {exc}")
+    if pc_db_path is None:
+        logger.info("resolve_playcounts: no master.db (XML library) — PC side skipped")
+    else:
+        committed = _write_pc_playcounts(pc_db_path, finals, errors)
 
     # ── 2. Patch USB XML ────────────────────────────────────────────────────
     usb_path = Path(usb_xml_path)
@@ -397,8 +428,9 @@ def resolve_playcounts(
         msg = f"USB XML not found: {usb_path}"
         logger.error("resolve_playcounts: %s", msg)
         errors.append(msg)
-        return {"committed": committed, "errors": errors}
+        return _result(0)
 
+    updated_in_xml = 0
     try:
         tree = ET.parse(str(usb_path))
         root = tree.getroot()
@@ -408,7 +440,6 @@ def resolve_playcounts(
         if tracks_elem is None:
             raise ValueError("No COLLECTION element found in USB XML")
 
-        updated_in_xml = 0
         for track_elem in tracks_elem.findall("TRACK"):
             tid = track_elem.get("TrackID", "")
             if tid in finals:
@@ -433,8 +464,9 @@ def resolve_playcounts(
         msg = f"USB XML update failed: {exc}"
         logger.error("resolve_playcounts: %s", msg)
         errors.append(msg)
+        updated_in_xml = 0  # nothing reached the stick
 
-    return {"committed": committed, "errors": errors}
+    return _result(updated_in_xml)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

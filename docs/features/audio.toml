@@ -26,11 +26,10 @@ name = "Audio-Streaming-Route"
 status = "shipped"
 test = "testen"
 desc = "Range-Request-Streaming, sandboxed via validate_audio_path, MIME pro Endung; AIFF geht als on-the-fly-WAV raus (Chromium/WebView2 dekodiert kein AIFF)."
-paths = ["app/playable_audio.py", "tests/test_playable_audio.py", "tests/test_stream_unicode_filename.py"]
+paths = ["app/playable_audio.py", "tests/test_playable_audio.py", "tests/test_stream_unicode_filename.py", "tests/test_stream_ranges.py"]
 routes = ["/api/stream", "/api/audio/stream"]
 depends_on = ["audio-path-sandbox"]
-todo = ["/api/stream: Suffix-Range bytes=-500 liefert den Anfang statt das Ende (main.py:933)", "/api/audio/stream ignoriert Range für mp3/flac/m4a/wav (200 statt 206), HEAD -> 405"]
-notes = "PC-Test 2026-11-22: /api/stream Range 206 korrekt für mp3/flac/m4a/wav/aiff + Nicht-ASCII, AIFF kommt als RIFF/WAVE und ist seekbar (B10); Sperren 403/400/404 korrekt. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): ok."
+notes = "Fix 2026-11-23 (fix/api-route-hygiene, am PC noch nicht geprüft): beide Routen teilen einen RFC-7233-Range-Pfad (main.py _byte_range_response) - Suffix bytes=-n liefert das Ende, Multi-Range/kaputter Header -> 200 ganze Datei, unerfüllbar -> 416 bytes */size; /api/audio/stream liefert 206 statt FileResponse-200, flac=audio/flac, m4a=audio/mp4; HEAD auf beiden Routen. PC-Test 2026-11-22: /api/stream Range 206 korrekt für mp3/flac/m4a/wav/aiff + Nicht-ASCII, AIFF kommt als RIFF/WAVE und ist seekbar (B10); Sperren 403/400/404 korrekt. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): ok."
 
 # ── Waveform ──────────────────────────────────────────────────────────────
 
