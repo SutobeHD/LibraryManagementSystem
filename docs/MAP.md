@@ -289,7 +289,8 @@
 | `tests/test_anlz_safe_pqtz.py` | Beat-grid extraction in `app.anlz_safe`. |
 | `tests/test_anlz_usb_export.py` | ANLZ trio -> USB stick transform (`app.anlz_usb_export`) and its wiring in |
 | `tests/test_anlz_usb_export_sync.py` | Full `OneLibraryUsbWriter.sync()` with copy_anlz=True against the real template. |
-| `tests/test_anlz_writer_guards.py` | Tests for app/anlz_writer.py logic-safety guards (NOT byte-layout). |
+| `tests/test_anlz_waveform_values.py` | Value model of the ANLZ waveform tags (app/analysis_engine.py generate_waveform_data). |
+| `tests/test_anlz_writer_guards.py` | Tests for app/anlz_writer.py logic-safety guards + waveform tag headers. |
 | `tests/test_artist_attribution.py` | Local attribution tests (T-24 — app/artist_store/attribution.py). |
 | `tests/test_artist_catalogue.py` | Artist-Hub catalogue tests (T-14 — app/artist_store/catalogue.py). |
 | `tests/test_artist_catalogue_routes.py` | Artist-Hub SoundCloud route tests — binding, catalogue, batch download (T-13/T-15). |

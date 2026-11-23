@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+- Waveforms (ANLZ):
+  - Fixed: the waveforms written to `.DAT` / `.EXT` / `.2EX` looked unlike
+    Rekordbox's (about twice as tall and flat, colours swapped, values out of
+    range). Heights now follow the squared sample peak per 1/150 s column,
+    previews pool every column of a bucket instead of sampling single points,
+    the 3-band tags follow a peak envelope with per-track band gain, and the
+    band split is 200 Hz / 2 kHz. Measured against Rekordbox's own files for
+    the same audio, amplitude correlation (median, 5 tracks) went from
+    0.45-0.77 to 0.89-1.00 per tag, and 0.92-1.00 on 5 held-out tracks.
+  - Fixed: value ranges and channel order now match Rekordbox: PWV5 red =
+    bass and blue = highs (were swapped), PWV4 `[level, 0, 0, low, mid, high]`
+    7-bit, PWV6/PWV7 0-127, PWV2 1-15 without whiteness bits (players reject
+    the preview on any byte above 15), PWAV 2-25 (a 0 column reads as
+    "unanalysed").
+  - Fixed: MP3 waveforms ran 25-51 ms ahead of Rekordbox. The decoder lead-in
+    Rekordbox keeps (LAME delay and the Xing/Info frame) is now prepended.
+  - Changed: cached analyses are re-run once (analysis cache version 6).
 - Logging:
   - Fixed: user paths reached the logs with the account name whenever they were
     not spelled exactly like the home folder — forward slashes (a third of the
