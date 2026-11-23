@@ -1186,32 +1186,14 @@ class LiveRekordboxDB:
                 break
 
     def delete_track(self, tid: str) -> bool:
-        tid = str(tid)
+        """Always False: rbox 0.1.7 cannot delete a djmdContent row.
 
-        # 1. Remove from local cache
-        if tid in self.tracks:
-            del self.tracks[tid]
-
-        # 2. Remove from all playlists (internal cache)
-        for pid, tracks in self.playlists_tracks.items():
-            if tid in [str(t.id) if hasattr(t, "id") else str(t["ID"]) for t in tracks]:
-                # This is tricky because we store objects or dicts.
-                # Ideally we call remove_track_from_playlist
-                try:
-                    self.remove_track_from_playlist(pid, tid)
-                except Exception as e:
-                    logger.warning(
-                        "live_database: remove_track_from_playlist(%s, %s) failed: %s",
-                        pid,
-                        tid,
-                        e,
-                    )
-
-        # 3. Warn about Master DB
-        logger.warning(
-            f"Track {tid} removed from cache/playlists, but RBOX library does not support direct deletion from Master DB via this API."
-        )
-        return True
+        The old version removed the track from the in-memory cache and the playlists
+        (and crashed on string entries there), so the UI showed it gone until the
+        next reload. The routes now answer 409 in live mode before reaching this.
+        """
+        logger.warning("op=delete_track tid=%s refused: live library has no content delete", tid)
+        return False
 
     def update_track_comment(self, tid: str, comment: str) -> bool:
         return self.update_track_metadata(tid, {"Comment": comment})

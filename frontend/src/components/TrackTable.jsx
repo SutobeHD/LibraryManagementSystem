@@ -1143,9 +1143,9 @@ const TrackContextMenuPopup = ({
                     <button
                         onClick={async () => {
                             const ok = await confirmModal({
-                                title: 'Delete track permanently?',
-                                message: `Are you sure you want to PERMANENTLY delete "${contextMenu.track.Title}" from the library?`,
-                                confirmLabel: 'Delete',
+                                title: 'Remove track from the library?',
+                                message: `"${contextMenu.track.Title}" is removed from the library and from every playlist. The audio file stays on disk.`,
+                                confirmLabel: 'Remove',
                                 danger: true,
                             });
                             if (ok) {
@@ -1155,7 +1155,7 @@ const TrackContextMenuPopup = ({
                         }}
                         className="w-full flex items-center gap-3 px-4 py-2 hover:bg-bad/10 text-[12px] text-ink-secondary hover:text-bad transition-colors text-left"
                     >
-                        <Trash2 size={14} /> Delete from Collection
+                        <Trash2 size={14} /> Remove from Collection
                     </button>
                 </>
             )}

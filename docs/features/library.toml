@@ -25,12 +25,13 @@ id = "collection-view"
 group = "Browsen & Suchen"
 name = "Collection & Token-Suche"
 status = "shipped"
-test = "testen"
+test = "getestet"
+tested = "2026-11-23"
 desc = "Ganze Library als Collection-Knoten, Suche mit bpm:/key:/genre:/year:/rating:, Track löschen."
 routes = ["/api/library/tracks", "/api/track/{tid}", "/api/track/delete", "/api/tracks/move"]
 depends_on = ["track-table", "live-master-db"]
-todo = ["FEHLER: 'Delete from Collection' löscht nur im Cache, DELETE /api/track/{id} -> 500 (live_database.py:1197); nach Neustart ist der Track zurück, UI sagt 'PERMANENTLY'", "Suche: rating:>=4 und genre:\"…\" liefern 0 Treffer ohne Hinweis"]
-notes = "PC-Test 2026-11-22: Suche bpm:/key:/genre:/year:/rating: = Trefferzahlen der DB; Light-Liste 3,4 MB in 0,04 s, Health dabei <35 ms (B3). /api/tracks/move ist ein Stub. /api/library/tracks ohne Pagination; light=true-Projektion in #60 (perf-backend-quickwins). Route kodiert ihr JSON selbst im Threadpool, pro Track ein json.dumps - blockiert den Event-Loop nicht mehr (B3, PR #82). Alle Listen-Views laden über fetchLibraryTracks() mit ?light=true (3,2 MB, ~0,2 s; PR #75). Editoren laden den Beatgrid mit PR #77. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): B3 (Collection 0 Tracks, Backend 18 s blockiert) in PR #75 + #82 gefixt - neu prüfen."
+todo = ["Suche: rating:>=4 und genre:\"…\" liefern 0 Treffer ohne Hinweis", "Live-Modus: echtes Löschen aus master.db erst mit einer rbox-Version, die Content-Zeilen löschen kann (0.1.7 kann es nicht)", "POST /api/track/delete ist toter Endpunkt: POST /api/track/{tid} (Edit) ist vorher registriert und fängt 'delete' als ID ab", "XML-Modus: Entfernen-Dialog in der UI nicht im PC-Test geprüft (nur per Route-Test)"]
+notes = "PC-Test 2026-11-22: Suche bpm:/key:/genre:/year:/rating: = Trefferzahlen der DB; Light-Liste 3,4 MB in 0,04 s, Health dabei <35 ms (B3). /api/tracks/move ist ein Stub. /api/library/tracks ohne Pagination; light=true-Projektion in #60 (perf-backend-quickwins). Route kodiert ihr JSON selbst im Threadpool, pro Track ein json.dumps - blockiert den Event-Loop nicht mehr (B3, PR #82). Alle Listen-Views laden über fetchLibraryTracks() mit ?light=true (3,2 MB, ~0,2 s; PR #75). Editoren laden den Beatgrid mit PR #77. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): B3 (Collection 0 Tracks, Backend 18 s blockiert) in PR #75 + #82 gefixt - neu prüfen. Track löschen ehrlich gemacht (fix/track-delete, 2026-11-23): im Live-Modus kein Menüpunkt, DELETE /api/track/{id} -> 409 mit Hinweis, Cache bleibt unverändert; XML-Modus löscht weiter, eine Rückfrage statt zwei. PC-Test Live: Menü ohne Löschen, API 409, Track bleibt."
 
 [[feature]]
 id = "category-browser"

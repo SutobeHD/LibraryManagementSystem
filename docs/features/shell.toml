@@ -72,7 +72,6 @@ test = "getestet"
 tested = "2026-11-22"
 desc = "Promise-basierter Ersatz für window.confirm/prompt, Rename-Dialog."
 paths = ["frontend/src/components/ConfirmModal.jsx", "frontend/src/components/PromptModal.jsx", "frontend/src/components/RenameModal.jsx"]
-todo = ["Track löschen fragt zweimal (TrackTable + PlaylistBrowser stapeln zwei ConfirmModals)"]
 notes = "PC-Test 2026-11-22 (Kopie der Library, main f3ce85d): Prompt/Rename/Confirm-Modals für Playlist anlegen, umbenennen, löschen und Track löschen; nie ein Browser-Dialog."
 
 # ── Kontextmenüs ──────────────────────────────────────────────────────────

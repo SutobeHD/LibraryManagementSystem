@@ -721,7 +721,7 @@ LibrarySource — uniform abstraction over Live (master.db) and XML modes.
 - `  LiveRekordboxDB.get_track_details()`
 - `  LiveRekordboxDB.add_track()`
 - `  LiveRekordboxDB.attach_import_anlz()` — Write a new track's ANLZ trio into Rekordbox's share and record it in master.db.
-- `  LiveRekordboxDB.delete_track()`
+- `  LiveRekordboxDB.delete_track()` — Always False: rbox 0.1.7 cannot delete a djmdContent row.
 - `  LiveRekordboxDB.update_track_comment()`
 - `  LiveRekordboxDB.update_track_metadata()` — Write ``updates`` to one master.db row.
 - `  LiveRekordboxDB.list_mytags()` — Return all defined MyTag entries as [{id, name}, …].
@@ -5293,6 +5293,17 @@ Contract tests for ``GET /api/system/health`` -- unauth'd liveness probe.
 - `  TestHealthLeaksNothing.test_response_model_filters_undeclared_fields()` — ``response_model`` pins the schema so future edits can't leak.
 - `TestHealthHasNoSideEffects`
 - `  TestHealthHasNoSideEffects.test_does_not_lazily_build_live_db()` — ``db.active_db`` constructs ``LiveRekordboxDB`` on first touch.
+
+### `tests/test_track_delete_routes.py`
+
+Deleting a track (PC test 2026-11-22).
+
+- `recorder()`
+- `test_live_mode_refuses_with_409_and_deletes_nothing()`
+- `test_xml_mode_still_deletes()`
+- `test_post_track_delete_is_shadowed_by_the_edit_route()`
+- `test_running_rekordbox_still_wins_over_the_mode_check()`
+- `test_live_backend_delete_leaves_the_cache_alone()`
 
 ### `tests/test_track_metadata_fields.py`
 

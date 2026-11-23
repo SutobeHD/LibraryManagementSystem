@@ -582,24 +582,17 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
         }
     };
 
+    // TrackTable asks for confirmation (with the track title) before calling this.
     const handleDeleteFromCollection = async (trackId) => {
-        if (
-            !(await confirmModal({
-                title: 'Delete track from collection?',
-                message: 'Delete this track from the entire collection? This cannot be undone.',
-                confirmLabel: 'Delete',
-                danger: true,
-            }))
-        )
-            return;
         try {
             await api.delete(`/api/track/${trackId}`);
-            toast.success('Track deleted from library.');
+            toast.success('Track removed from the library.');
             if (selectedPlaylist) handleSelect(selectedPlaylist);
             loadAllTracks();
             loadTree();
         } catch (err) {
-            toast.error('Failed to delete track.');
+            console.error('[PlaylistBrowser] delete track failed', err);
+            toast.error(err.response?.data?.detail || 'Failed to remove the track.');
         }
     };
 
@@ -764,6 +757,7 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
     const currentViewTracks = showCollection ? filteredCollectionTracks : filteredPlaylistTracks;
     const isIntelligentSelected = selectedPlaylist?.Type === '4';
     const canEditPlaylist = !!selectedPlaylist && !isIntelligentSelected;
+    const canDeleteTracks = libraryStatus?.mode !== 'live';
     const tablePlaylistId = showCollection ? 'COLLECTION' : selectedPlaylist?.ID;
 
     const handleReorderTrack = (trackId, newIndex) => {
@@ -816,7 +810,8 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
                 onSortedTracksChange={handleSortedTracksChange}
                 onReorder={canEditPlaylist ? tableHandlers.reorder : undefined}
                 onRemove={canEditPlaylist ? tableHandlers.remove : undefined}
-                onDelete={tableHandlers.deleteFromCollection}
+                // The live Rekordbox library cannot delete tracks (rbox 0.1.7): no menu item there.
+                onDelete={canDeleteTracks ? tableHandlers.deleteFromCollection : undefined}
                 onAddToPlaylist={tableHandlers.addToPlaylist}
                 availablePlaylists={allPlaylists}
                 playlistId={tablePlaylistId}
@@ -829,6 +824,7 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
             onPlayTrack,
             handleSortedTracksChange,
             canEditPlaylist,
+            canDeleteTracks,
             tableHandlers,
             allPlaylists,
             tablePlaylistId,
