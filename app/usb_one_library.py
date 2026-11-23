@@ -548,6 +548,86 @@ def _relocate_one(
     _reloc_detail(report, "copied_cross_volume", dest, source=str(cand))
 
 
+class FolderNames:
+    """One spelling per case-folded folder under `Contents/`, for one stick and one sync.
+
+    FAT32 / exFAT / NTFS see `Stenoz/` and `STENOZ/` as one folder. Tracks asking
+    for both spellings share one folder on disk while each DB row keeps its own
+    spelling, and the relocation pass then case-renames the folder back and forth:
+    after a sync several exportLibrary.db paths no longer match the case on disk.
+
+    `settle()` fixes the spelling of every folder of a plan: the folder already on
+    the stick when some track asks for exactly that spelling (no churn), else the
+    first spelling asked for (an artist restyle still renames the folder).
+    `apply()` rewrites a destination to the settled spellings; a folder no plan
+    covered takes the on-disk spelling, else the asked one, and keeps it. Both
+    writers of one sync share one instance, so their paths agree.
+    """
+
+    def __init__(self, contents: Path) -> None:
+        self.contents = Path(contents)
+        # folded relative dir ("stenoz/intro") -> spelling of its last segment
+        self._names: dict[str, str] = {}
+
+    def _dirs(self, dest: Path) -> tuple[str, ...]:
+        try:
+            return Path(dest).relative_to(self.contents).parts[:-1]
+        except ValueError:
+            return ()
+
+    @staticmethod
+    def _key(dirs: tuple[str, ...], depth: int) -> str:
+        return "/".join(part.casefold() for part in dirs[: depth + 1])
+
+    @staticmethod
+    def _on_disk(parent: Path, wanted: str) -> str | None:
+        exact, ci = _match_segment(parent, wanted)
+        if exact is not None:
+            return exact
+        return ci[0] if len(ci) == 1 else None
+
+    def _parent(self, key: str) -> Path:
+        cur = self.contents
+        segs = key.split("/")[:-1]
+        for i in range(len(segs)):
+            cur = cur / self._names["/".join(segs[: i + 1])]
+        return cur
+
+    def settle(self, dests: Iterable[Path]) -> None:
+        asked: dict[str, list[str]] = {}
+        depth: dict[str, int] = {}
+        for dest in dests:
+            dirs = self._dirs(dest)
+            for d, part in enumerate(dirs):
+                key = self._key(dirs, d)
+                spellings = asked.setdefault(key, [])
+                if part not in spellings:
+                    spellings.append(part)
+                depth[key] = d
+        # Parents first: a child's on-disk lookup needs its parent's settled name.
+        for key in sorted(asked, key=depth.__getitem__):
+            if key in self._names:
+                continue
+            spellings = asked[key]
+            disk = self._on_disk(self._parent(key), spellings[0])
+            self._names[key] = disk if disk in spellings else spellings[0]
+
+    def apply(self, dest: Path) -> Path:
+        dest = Path(dest)
+        dirs = self._dirs(dest)
+        if not dirs:
+            return dest
+        cur = self.contents
+        for d, part in enumerate(dirs):
+            key = self._key(dirs, d)
+            name = self._names.get(key)
+            if name is None:
+                name = self._on_disk(cur, part) or part
+                self._names[key] = name
+            cur = cur / name
+        return cur / dest.name
+
+
 def relocate_audio_files(
     usb_root: str | Path,
     planned: Iterable[tuple[Path | None, Path]],
@@ -635,6 +715,7 @@ class OneLibraryUsbWriter:
         self,
         usb_root: str,
         dest_resolver: Callable[[str, str, str], Path] | None = None,
+        folder_names: FolderNames | None = None,
     ):
         """
         dest_resolver(artist, album, filename) -> absolute Path on the USB.
@@ -642,6 +723,10 @@ class OneLibraryUsbWriter:
         legacy XML writer so files are not copied twice into different
         directory trees. Falls back to an internal `_dest_audio_path` when
         no resolver is passed (older callers, tests).
+
+        folder_names: the case-insensitive folder spellings shared with the
+        legacy writer of the same sync (the resolver then returns raw paths).
+        Without one, each `sync()` keeps its own.
         """
         if len(usb_root) == 2 and usb_root[1] == ":":
             usb_root = usb_root + "\\"
@@ -658,6 +743,8 @@ class OneLibraryUsbWriter:
         self.music_dir = self.usb_root / "Contents"
         self.db_path = self.rb_dir / "exportLibrary.db"
         self._dest_resolver = dest_resolver
+        self._shared_names = folder_names
+        self._names = folder_names or FolderNames(self.music_dir)
 
     def ensure_structure(self):
         for d in (self.rb_dir, self.anlz_root, self.artwork_dir, self.music_dir):
@@ -758,6 +845,8 @@ class OneLibraryUsbWriter:
 
         yield {"stage": "preparing", "message": "Creating USB structure", "progress": 1}
         self.ensure_structure()
+        if self._shared_names is None:
+            self._names = FolderNames(self.music_dir)
 
         # Stage 1 — copy template to USB (DB + WAL + SHM together)
         for ext in ("", "-shm", "-wal"):
@@ -872,12 +961,15 @@ class OneLibraryUsbWriter:
         # track belongs, so move what is already on the stick before the copy
         # phase decides it is missing and rewrites gigabytes.
         if audio_copy:
-            planned: list[tuple[Path | None, Path]] = []
+            raw: list[tuple[Path, Path]] = []
             for t in all_tracks[:slot_count]:
                 p = Path(t["path"]) if t.get("path") else None
                 if p is None or not _exists_safe(p):
                     continue
-                planned.append((p, self._planned_dest(t, p)))
+                raw.append((p, self._raw_dest(t, p)))
+            # One spelling per case-folded folder before anything moves or copies.
+            self._names.settle(d for _, d in raw)
+            planned: list[tuple[Path | None, Path]] = [(p, self._names.apply(d)) for p, d in raw]
             reloc = relocate_audio_files(self.usb_root, planned, contents_dir=self.music_dir)
             if any(reloc[k] for k in ("relocated", "copied", "collisions", "errors")):
                 yield {
@@ -1616,7 +1708,12 @@ class OneLibraryUsbWriter:
 
         Single source of truth for the relocation pass and the copy phase — the
         two disagreeing would relocate a file and then copy it again anyway.
+        Folder names come out in this stick's one spelling per case-folded name.
         """
+        return self._names.apply(self._raw_dest(track, src_path))
+
+    def _raw_dest(self, track: dict, src_path: Path) -> Path:
+        """The destination as the resolver spells it, before folder-name settling."""
         if self._dest_resolver is not None:
             return self._dest_resolver(
                 track.get("artist") or "",

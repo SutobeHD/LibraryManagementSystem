@@ -1272,6 +1272,11 @@ class UsbSyncEngine:
         self.usb_rb = self.usb_pioneer / "rekordbox"
         self.usb_db_path = self.usb_rb / "exportLibrary.db"
         self.usb_anlz = self.usb_pioneer / "USBANLZ"
+        # One spelling per case-folded Contents/ folder, shared by both writers of
+        # this sync (Stenoz/STENOZ would otherwise flip between them).
+        from .usb_one_library import FolderNames
+
+        self.folder_names = FolderNames(self.usb_root / "Contents")
 
         # Filesystem-aware path limit:
         # FAT32  → 260 chars total (Windows MAX_PATH), 240 conservative limit
@@ -1577,7 +1582,8 @@ class UsbSyncEngine:
             source = from_db(global_db)
             writer = OneLibraryUsbWriter(
                 profile["drive"],
-                dest_resolver=self._get_safe_dest_path,
+                dest_resolver=self._raw_dest_path,
+                folder_names=self.folder_names,
             )
             # `usb_write_legacy_pdb` (default True) controls whether the
             # legacy export.pdb / exportExt.pdb files are written alongside
@@ -1700,6 +1706,15 @@ class UsbSyncEngine:
         return cleaned or "Unknown"
 
     def _get_safe_dest_path(self, artist: str, title: str, filename: str) -> Path:
+        """Destination of a track on the stick, folders in this stick's one spelling.
+
+        Case-only variants of an artist or title folder (Stenoz / STENOZ) resolve
+        to one name, so every path written into exportLibrary.db and rekordbox.xml
+        matches the case on disk (`usb_one_library.FolderNames`).
+        """
+        return self.folder_names.apply(self._raw_dest_path(artist, title, filename))
+
+    def _raw_dest_path(self, artist: str, title: str, filename: str) -> Path:
         """
         Build a safe destination path for a track on the USB drive.
 
@@ -1750,6 +1765,10 @@ class UsbSyncEngine:
 
         if not planned:
             return
+        # `planned` carries raw destinations: settle the folder spellings over the
+        # whole plan first, then move what is already on the stick.
+        self.folder_names.settle(d for _, d in planned)
+        planned = [(s, self.folder_names.apply(d)) for s, d in planned]
         report = relocate_audio_files(
             self.usb_root, planned, contents_dir=self.usb_root / "Contents"
         )
@@ -1781,7 +1800,7 @@ class UsbSyncEngine:
             planned.append(
                 (
                     local,
-                    self._get_safe_dest_path(
+                    self._raw_dest_path(
                         t.get("artist", "") or "", t.get("title", "") or "", local.name
                     ),
                 )
@@ -1968,7 +1987,7 @@ class UsbSyncEngine:
                 relocation_plan.append(
                     (
                         local_candidate,
-                        self._get_safe_dest_path(
+                        self._raw_dest_path(
                             artist_name_of(getattr(t, "artist_id", None)),
                             getattr(t, "title", "") or "",
                             getattr(t, "file_name_l", "") or os.path.basename(raw_path),
