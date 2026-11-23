@@ -165,6 +165,10 @@
 | `frontend/src/utils/openExternal.js` | Open a web link outside the app: the system browser in Tauri, a new tab in the browser. |
 | `frontend/src/utils/openExternal.test.js` | node:test — `node --test frontend/src/utils/openExternal.test.js` |
 | `frontend/src/utils/theme.js` | theme — UI skin selection (per device, localStorage). |
+| `frontend/src/utils/trackSearch.js` | Token search for the Collection / playlist views. |
+| `frontend/src/utils/trackSearch.test.js` | *(no module docstring)* |
+| `frontend/src/utils/trackSort.js` | Sort helpers for TrackTable. |
+| `frontend/src/utils/trackSort.test.js` | *(no module docstring)* |
 | `frontend/src/components/ArtistHubView.jsx` | *(no module docstring)* |
 | `frontend/src/components/BatchEditBar.jsx` | *(no module docstring)* |
 | `frontend/src/components/ConfirmModal.jsx` | Module-level subscriber registry so a single mounted <ConfirmModalRoot /> |
@@ -343,7 +347,7 @@
 | `tests/test_live_import_analysis.py` | An imported track's analysis must reach master.db (B4, 0.1 core-loop test). |
 | `tests/test_live_playlist_b11.py` | Live playlist operations end to end against an rbox stand-in (B11, 0.1 core-loop test). |
 | `tests/test_live_playlist_ops.py` | Tests for the live-mode playlist primitives in `app/live_database.py`. |
-| `tests/test_live_stock_date.py` | StockDate in live track dicts: a missing date must not become the string "None" (B17). |
+| `tests/test_live_stock_date.py` | Live StockDate: never the text "None" (B17); a NULL date falls back to created_at's day. |
 | `tests/test_logging_redaction.py` | Unit tests for `app.logging_utils.RedactingFormatter`. |
 | `tests/test_main_route_table.py` | app/main.py defines each top-level name once, so no request model or handler is shadowed. |
 | `tests/test_main_security.py` | Regression tests for ``POST /api/file/reveal`` sandbox. |
@@ -351,6 +355,7 @@
 | `tests/test_metadata_fixer_detector.py` | M0 detector tests — read-only malformation detection. |
 | `tests/test_metadata_fixer_schema.py` | metadata-fixer undo-log schema tests (T4 — app/metadata_fixer/schema.py). |
 | `tests/test_musicbrainz_client.py` | MusicBrainz client tests (T-22, Threat T14 — app/musicbrainz_client.py). |
+| `tests/test_onelibrary_template_refs.py` | Template reference rows do not survive a stick export (PC test 2026-11-22). |
 | `tests/test_onelibrary_track_limit.py` | B9 regression: a USB sync writes EVERY selected track, not just the 16 template slots. |
 | `tests/test_onelibrary_wal_flush.py` | End-to-end regression test for OneLibraryUsbWriter — runs the FULL |
 | `tests/test_pairing.py` | Phase-2 paired-token store tests (T1 — app/auth_db.py). |
@@ -394,13 +399,18 @@
 | `tests/test_track_delete_routes.py` | Deleting a track (PC test 2026-11-22). |
 | `tests/test_track_metadata_fields.py` | Track-metadata writes refuse fields and values the backend cannot store (issue K8). |
 | `tests/test_usb_artwork.py` | Cover art for the USB stick, with the real Pillow (B8, 0.1 core-loop test). |
+| `tests/test_usb_artwork_resync.py` | Cover files follow their slot across re-syncs (PC test 2026-11-22). |
+| `tests/test_usb_case_folders.py` | Folders that differ only in case get one spelling per stick (PC test 2026-11-22). |
 | `tests/test_usb_copy_atomic.py` | USB audio copies must not leave a truncated file that never self-heals. |
+| `tests/test_usb_device_scan.py` | GET /api/usb/devices without a stick took 4.2-4.9 s per call (PC test 2026-11-22). |
 | `tests/test_usb_export_fields.py` | Per-track fields of a stick export (PC test 2026-11-22). |
 | `tests/test_usb_lookup_batching.py` | Batched master.db lookups in the USB scan / diff / legacy-export paths. |
 | `tests/test_usb_manager.py` | Tests for `app/usb_manager.py`. |
 | `tests/test_usb_mysettings.py` | Tests for app/usb_mysettings.py — Pioneer MYSETTING file schema + I/O. |
+| `tests/test_usb_profile_route.py` | POST /api/usb/profiles merges a partial body into the stored profile (PC test 2026-11-22). |
 | `tests/test_usb_relocate.py` | Tests for the USB relocation pass (`app/usb_one_library.py`). |
 | `tests/test_usb_resync.py` | Re-syncing a stick that already holds an export (PC test 2026-11-22). |
+| `tests/test_usb_settings_seed.py` | Settings files on an initialized stick (PC test 2026-11-22). |
 | `tests/test_validate_real_world.py` | Unit tests for the pure helpers in scripts/validate_real_world.py. |
 | `tests/test_variant_detector.py` | variant_schema + variant_detector tests (analysis-remix-detector T-2, T-3). |
 | `tests/test_variant_schema.py` | Tests for app/variant_schema.py — variants.db DDL + migration runner. |

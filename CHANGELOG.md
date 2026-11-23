@@ -11,6 +11,22 @@
     to the root logger) get scrubbing formatters via `log_config`.
 
 - Library:
+  - Added: every track column sorts, Date Added and Colour included; Key sorts
+    on the Camelot wheel (Camelot and musical spellings mixed), missing values
+    stay at the bottom. New optional columns: Genre, Label, Year, My Tags,
+    Format (right-click the table header).
+  - Fixed: text columns sorted by code point, so titles with umlauts or accents
+    landed after Z. They now sort in the language's order, numbers inside
+    names by value ("Track 2" before "Track 10").
+  - Fixed: 23 tracks without a Rekordbox stock date showed "-" under Date
+    Added; they now show the day they were added to the library.
+  - Fixed: the Collection search found nothing for `rating:>=4` or
+    `genre:"deep house"`. Ratings, BPM and year take `>`, `>=`, `<`, `<=`
+    and `=`, BPM ranges like `bpm:138-142` still work, quoted values may
+    contain spaces, `key:8A` and `key:Am` find the same tracks (`key:A`
+    finds A and Am), and `artist:` / `title:` / `album:` filter their field.
+    A token the search cannot read is searched as plain text instead of
+    hiding every track; `12" mix` and `4:44` still find those titles.
   - Fixed: "Delete from Collection" in the live Rekordbox library only hid the
     track until the next restart (and answered 500) while the dialog promised a
     permanent delete. rbox 0.1.7 cannot delete a track row, so the live mode no
@@ -64,6 +80,26 @@
     instead of "Request failed with status code 409".
 
 - USB export:
+  - Fixed: "Initialize" wrote the four settings files (DEVSETTING, MYSETTING,
+    MYSETTING2, DJMMYSETTING) as zero bytes, and later syncs never replaced them.
+    Initialize now writes valid defaults; a sync repairs a blank file but never
+    touches real settings. DEVSETTING.DAT is the 140-byte file rekordbox writes.
+  - Fixed: saving a USB profile with only some fields (e.g. a new label) reset
+    drive, type, sync mode and the playlist selection to defaults.
+  - Fixed: after a re-sync a cover slot could show the previous track's artwork,
+    also for a track without a cover. Covers are rewritten when their source
+    image changes and left alone when it does not; covers no track uses any more
+    are removed from the stick.
+  - Fixed: artist or title folders that differ only in case (Stenoz / STENOZ)
+    now get one spelling per stick, so the paths in `exportLibrary.db`,
+    `export.pdb` and `rekordbox.xml` match the case on disk.
+  - Fixed: the USB view took 4-8 s to list sticks and profiles even with no
+    stick plugged in (two PowerShell calls per scan, scanned twice per profiles
+    read). Device scan and profiles read now answer in milliseconds, and stored
+    profiles show without waiting for the device scan.
+  - Fixed: the OneLibrary template's empty artists, albums, genre and keys no
+    longer stay in `exportLibrary.db` / `export.pdb`; a track without a key or
+    genre now has none instead of an empty one.
   - Fixed: every exported track lost its album and kept the OneLibrary
     template's file type (M4A), sample rate (48 kHz), bit depth and file size,
     in `exportLibrary.db` and `export.pdb`. They now come from the file itself.
