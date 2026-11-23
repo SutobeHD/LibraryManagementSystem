@@ -129,6 +129,9 @@ except Exception as e:
 # Relocation pass — a renamed artist must MOVE audio, not re-copy it
 # ---------------------------------------------------------------------------
 
+#: Reference tables the template pre-fills; unused template rows are dropped per sync.
+_REF_TABLES = ("album", "artist", "genre", "key", "label")
+
 #: Intermediate name used by the two-step rename. Never left behind on success.
 _RELOC_TMP_SUFFIX = ".lms-reloc-tmp"
 
@@ -548,6 +551,86 @@ def _relocate_one(
     _reloc_detail(report, "copied_cross_volume", dest, source=str(cand))
 
 
+class FolderNames:
+    """One spelling per case-folded folder under `Contents/`, for one stick and one sync.
+
+    FAT32 / exFAT / NTFS see `Stenoz/` and `STENOZ/` as one folder. Tracks asking
+    for both spellings share one folder on disk while each DB row keeps its own
+    spelling, and the relocation pass then case-renames the folder back and forth:
+    after a sync several exportLibrary.db paths no longer match the case on disk.
+
+    `settle()` fixes the spelling of every folder of a plan: the folder already on
+    the stick when some track asks for exactly that spelling (no churn), else the
+    first spelling asked for (an artist restyle still renames the folder).
+    `apply()` rewrites a destination to the settled spellings; a folder no plan
+    covered takes the on-disk spelling, else the asked one, and keeps it. Both
+    writers of one sync share one instance, so their paths agree.
+    """
+
+    def __init__(self, contents: Path) -> None:
+        self.contents = Path(contents)
+        # folded relative dir ("stenoz/intro") -> spelling of its last segment
+        self._names: dict[str, str] = {}
+
+    def _dirs(self, dest: Path) -> tuple[str, ...]:
+        try:
+            return Path(dest).relative_to(self.contents).parts[:-1]
+        except ValueError:
+            return ()
+
+    @staticmethod
+    def _key(dirs: tuple[str, ...], depth: int) -> str:
+        return "/".join(part.casefold() for part in dirs[: depth + 1])
+
+    @staticmethod
+    def _on_disk(parent: Path, wanted: str) -> str | None:
+        exact, ci = _match_segment(parent, wanted)
+        if exact is not None:
+            return exact
+        return ci[0] if len(ci) == 1 else None
+
+    def _parent(self, key: str) -> Path:
+        cur = self.contents
+        segs = key.split("/")[:-1]
+        for i in range(len(segs)):
+            cur = cur / self._names["/".join(segs[: i + 1])]
+        return cur
+
+    def settle(self, dests: Iterable[Path]) -> None:
+        asked: dict[str, list[str]] = {}
+        depth: dict[str, int] = {}
+        for dest in dests:
+            dirs = self._dirs(dest)
+            for d, part in enumerate(dirs):
+                key = self._key(dirs, d)
+                spellings = asked.setdefault(key, [])
+                if part not in spellings:
+                    spellings.append(part)
+                depth[key] = d
+        # Parents first: a child's on-disk lookup needs its parent's settled name.
+        for key in sorted(asked, key=depth.__getitem__):
+            if key in self._names:
+                continue
+            spellings = asked[key]
+            disk = self._on_disk(self._parent(key), spellings[0])
+            self._names[key] = disk if disk in spellings else spellings[0]
+
+    def apply(self, dest: Path) -> Path:
+        dest = Path(dest)
+        dirs = self._dirs(dest)
+        if not dirs:
+            return dest
+        cur = self.contents
+        for d, part in enumerate(dirs):
+            key = self._key(dirs, d)
+            name = self._names.get(key)
+            if name is None:
+                name = self._on_disk(cur, part) or part
+                self._names[key] = name
+            cur = cur / name
+        return cur / dest.name
+
+
 def relocate_audio_files(
     usb_root: str | Path,
     planned: Iterable[tuple[Path | None, Path]],
@@ -635,6 +718,7 @@ class OneLibraryUsbWriter:
         self,
         usb_root: str,
         dest_resolver: Callable[[str, str, str], Path] | None = None,
+        folder_names: FolderNames | None = None,
     ):
         """
         dest_resolver(artist, album, filename) -> absolute Path on the USB.
@@ -642,6 +726,10 @@ class OneLibraryUsbWriter:
         legacy XML writer so files are not copied twice into different
         directory trees. Falls back to an internal `_dest_audio_path` when
         no resolver is passed (older callers, tests).
+
+        folder_names: the case-insensitive folder spellings shared with the
+        legacy writer of the same sync (the resolver then returns raw paths).
+        Without one, each `sync()` keeps its own.
         """
         if len(usb_root) == 2 and usb_root[1] == ":":
             usb_root = usb_root + "\\"
@@ -658,6 +746,8 @@ class OneLibraryUsbWriter:
         self.music_dir = self.usb_root / "Contents"
         self.db_path = self.rb_dir / "exportLibrary.db"
         self._dest_resolver = dest_resolver
+        self._shared_names = folder_names
+        self._names = folder_names or FolderNames(self.music_dir)
 
     def ensure_structure(self):
         for d in (self.rb_dir, self.anlz_root, self.artwork_dir, self.music_dir):
@@ -758,6 +848,8 @@ class OneLibraryUsbWriter:
 
         yield {"stage": "preparing", "message": "Creating USB structure", "progress": 1}
         self.ensure_structure()
+        if self._shared_names is None:
+            self._names = FolderNames(self.music_dir)
 
         # Stage 1 — copy template to USB (DB + WAL + SHM together)
         for ext in ("", "-shm", "-wal"):
@@ -816,18 +908,26 @@ class OneLibraryUsbWriter:
         key_cache: dict[str, str] = {}
         label_cache: dict[str, str] = {}
 
-        # Pre-warm caches with what's already in the template
+        # Pre-warm caches with what's already in the template, and remember those
+        # rows: whichever no track ends up using is dropped after Stage 3.
+        template_refs: dict[str, set[int]] = {t: set() for t in _REF_TABLES}
+        used_refs: dict[str, set[int]] = {t: set() for t in _REF_TABLES}
         try:
             for a in db.get_artists():
                 artist_cache.setdefault((a.name or ""), str(a.id))
+                template_refs["artist"].add(int(a.id))
             for a in db.get_albums():
                 album_cache.setdefault((a.name or ""), str(a.id))
+                template_refs["album"].add(int(a.id))
             for g in db.get_genres():
                 genre_cache.setdefault((g.name or ""), str(g.id))
+                template_refs["genre"].add(int(g.id))
             for k in db.get_keys():
                 key_cache.setdefault((k.name or ""), str(k.id))
+                template_refs["key"].add(int(k.id))
             for lab in db.get_labels():
                 label_cache.setdefault((lab.name or ""), str(lab.id))
+                template_refs["label"].add(int(lab.id))
         except Exception as exc:
             logger.debug("[OneLibrary] cache pre-warm skipped: %s", exc)
 
@@ -864,6 +964,12 @@ class OneLibraryUsbWriter:
         total = len(all_tracks)
         used_slots = 0
         skipped_overflow = 0
+        # Which artwork image ids the new database points at, and from which
+        # source image each was made (rewrite on change, prune the rest).
+        from . import usb_artwork
+
+        art_manifest = usb_artwork.load_manifest(self.pioneer)
+        art_live: set[int] = set()
         # Which slot indices really carry a track. A failed slot leaves a gap, and
         # `placeholders[used_slots:]` would then delete a populated row instead.
         populated: set[int] = set()
@@ -872,12 +978,15 @@ class OneLibraryUsbWriter:
         # track belongs, so move what is already on the stick before the copy
         # phase decides it is missing and rewrites gigabytes.
         if audio_copy:
-            planned: list[tuple[Path | None, Path]] = []
+            raw: list[tuple[Path, Path]] = []
             for t in all_tracks[:slot_count]:
                 p = Path(t["path"]) if t.get("path") else None
                 if p is None or not _exists_safe(p):
                     continue
-                planned.append((p, self._planned_dest(t, p)))
+                raw.append((p, self._raw_dest(t, p)))
+            # One spelling per case-folded folder before anything moves or copies.
+            self._names.settle(d for _, d in raw)
+            planned: list[tuple[Path | None, Path]] = [(p, self._names.apply(d)) for p, d in raw]
             reloc = relocate_audio_files(self.usb_root, planned, contents_dir=self.music_dir)
             if any(reloc[k] for k in ("relocated", "copied", "collisions", "errors")):
                 yield {
@@ -907,6 +1016,15 @@ class OneLibraryUsbWriter:
                 genre_id = self._get_or_create_genre(db, genre_cache, t.get("genre") or "")
                 key_id = self._get_or_create_key(db, key_cache, t.get("key") or "")
                 label_id = self._get_or_create_label(db, label_cache, t.get("label") or "")
+                for table, ref in (
+                    ("artist", artist_id),
+                    ("album", album_id),
+                    ("genre", genre_id),
+                    ("key", key_id),
+                    ("label", label_id),
+                ):
+                    if ref is not None:
+                        used_refs[table].add(int(ref))
 
                 # Audio file copy → USB (Pioneer-canonical /Contents/<Artist>/<Title>/)
                 src_path = Path(t["path"]) if t.get("path") else None
@@ -967,9 +1085,10 @@ class OneLibraryUsbWriter:
                 # (image_id is preserved from the placeholder slot) at the
                 # small variant. Done BEFORE update_content so the FK stays
                 # valid in case the user-data overlay shifts image_id.
+                art_id: int | None = None
                 if src_path is not None and _exists_safe(src_path):
                     try:
-                        self._write_track_artwork(db, slot, src_path)
+                        art_id = self._write_track_artwork(db, slot, src_path, art_manifest)
                     except Exception as exc:
                         logger.debug("[OneLibrary] artwork skipped for slot %s: %s", slot.id, exc)
 
@@ -990,6 +1109,8 @@ class OneLibraryUsbWriter:
                 content_id_map[t["id"]] = str(slot.id)
                 populated.add(i)
                 used_slots += 1
+                if art_id is not None:
+                    art_live.add(art_id)
 
                 if i % 5 == 0 or i == slot_count - 1:
                     yield {
@@ -1015,6 +1136,16 @@ class OneLibraryUsbWriter:
 
         # The template's property row says 16 whatever the stick holds.
         self._set_number_of_contents(db, used_slots)
+
+        self._drop_template_refs(db, template_refs, used_refs)
+
+        # Cover files of slots that are gone, or whose track has no cover now,
+        # would otherwise stay on the stick (and an image id could show them).
+        try:
+            usb_artwork.prune_artwork(self.pioneer, art_live, art_manifest)
+            usb_artwork.save_manifest(self.pioneer, art_manifest)
+        except OSError as exc:
+            logger.warning("[OneLibrary] artwork cleanup skipped: %s", exc)
 
         # Stage 4 — playlist tree (create_playlist works, no template needed)
         yield {"stage": "playlists", "message": "Writing playlist tree…", "progress": 80}
@@ -1200,6 +1331,37 @@ class OneLibraryUsbWriter:
                     "[OneLibrary] Could not remove broken content row %d: %s", new_id, del_exc
                 )
             return None
+
+    @staticmethod
+    def _drop_template_refs(
+        db, template_refs: dict[str, set[int]], used_refs: dict[str, set[int]]
+    ) -> int:
+        """Delete the template's artist/album/genre/key/label rows no track uses.
+
+        The template ships 14 empty-name artists, 16 albums, a genre and 10 keys,
+        and every slot points at some of them. A track without a key (artist,
+        genre, …) kept the template's empty row, the rest stayed unreferenced.
+        rbox 0.1.7 `delete_<table>` also clears the content FKs still pointing at
+        the row (verified: the row reads back None, the file reopens), so such a
+        track ends up with no key instead of an empty one — id 0 in export.pdb.
+        Returns the number of rows deleted.
+        """
+        deleted = 0
+        for table in _REF_TABLES:
+            delete = getattr(db, f"delete_{table}", None)
+            if delete is None:
+                continue
+            for row_id in sorted(template_refs[table] - used_refs[table]):
+                try:
+                    delete(row_id)
+                    deleted += 1
+                except Exception as exc:  # rbox OneLibraryError; keep the row, go on
+                    logger.warning(
+                        "[OneLibrary] template %s %d not deleted: %s", table, row_id, exc
+                    )
+        if deleted:
+            logger.info("[OneLibrary] dropped %d unused template reference row(s)", deleted)
+        return deleted
 
     @staticmethod
     def _set_number_of_contents(db, count: int) -> None:
@@ -1578,29 +1740,34 @@ class OneLibraryUsbWriter:
             len(playlist_entries_pdb),
         )
 
-    def _write_track_artwork(self, db, slot, audio_path: Path) -> None:
+    def _write_track_artwork(
+        self, db, slot, audio_path: Path, manifest: dict[str, str] | None = None
+    ) -> int | None:
         """Generate the bucketed artwork pair for one track and update the
         OneLibrary `image` row to point at the small JPEG.
 
         Reuses whichever image_id the placeholder slot already references
         (template-baseline images carry empty paths after anonymisation).
+        Returns the image id when the track has a cover on the stick, else None.
         """
         from . import usb_artwork
 
         image_id = getattr(slot, "image_id", None)
         if image_id in (None, 0):
-            # No FK — try to create a fresh image row (works on real DBs).
+            # No FK — try to create a fresh image row (works on real DBs). Empty
+            # path until a cover is written: a placeholder path would show
+            # image 1's cover for a track that has none.
             try:
-                img = db.create_image(usb_artwork.usb_relative_path(1))  # placeholder path
+                img = db.create_image("")
                 image_id = int(img.id)
                 slot.image_id = image_id
             except Exception as exc:
                 logger.debug("[OneLibrary] create_image failed: %s", exc)
-                return
+                return None
 
-        result = usb_artwork.write_artwork_pair(audio_path, int(image_id), self.pioneer)
+        result = usb_artwork.write_artwork_pair(audio_path, int(image_id), self.pioneer, manifest)
         if not result:
-            return  # no embedded art — leave existing image FK in place
+            return None  # no cover: the image row keeps the template's empty path
 
         # Point the image record at our small JPEG so CDJ list-view can find it
         try:
@@ -1610,13 +1777,20 @@ class OneLibraryUsbWriter:
                 db.update_image(img_row)
         except Exception as exc:
             logger.debug("[OneLibrary] update_image path skipped: %s", exc)
+            return None
+        return int(image_id)
 
     def _planned_dest(self, track: dict, src_path: Path) -> Path:
         """Where this track's audio belongs on the stick.
 
         Single source of truth for the relocation pass and the copy phase — the
         two disagreeing would relocate a file and then copy it again anyway.
+        Folder names come out in this stick's one spelling per case-folded name.
         """
+        return self._names.apply(self._raw_dest(track, src_path))
+
+    def _raw_dest(self, track: dict, src_path: Path) -> Path:
+        """The destination as the resolver spells it, before folder-name settling."""
         if self._dest_resolver is not None:
             return self._dest_resolver(
                 track.get("artist") or "",

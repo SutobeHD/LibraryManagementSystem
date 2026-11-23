@@ -1367,7 +1367,11 @@ Track-metadata field policy: which keys a library backend stores, and their valu
 USB artwork extraction + bucketed write to PIONEER/Artwork/.
 
 - `get_artwork_bytes()` — Public single-shot extractor — embedded → sidecar → None.
+- `source_digest()` — Identity of one source image under the current resize recipe.
+- `load_manifest()` — {image id: source digest} of the artwork on the stick; empty when unreadable.
+- `save_manifest()`
 - `write_artwork_pair()` — Extract+write small/medium artwork JPEGs to the bucketed CDJ layout.
+- `prune_artwork()` — Delete artwork files no image row of the new database points at.
 - `usb_relative_path()` — Return the relative path string used inside the OneLibrary `image` row.
 
 ### `app/usb_manager.py`
@@ -1408,12 +1412,17 @@ USB MYSETTING / DJMMYSETTING file read/write + schema for frontend.
 - `get_schema()` — Return the full editable-field schema, plus the current default value
 - `read_settings()` — Read all four MYSETTING files from a stick (use defaults where missing).
 - `write_settings()` — Write MYSETTING files to <USB>/PIONEER/.
-- `write_defaults()` — Convenience: write all-defaults MYSETTING files (used at sync time
+- `build_devsetting()` — A valid 140-byte DEVSETTING.DAT with rekordbox's device defaults.
+- `write_devsetting()` — Seed PIONEER/DEVSETTING.DAT when missing or blank.
+- `write_defaults()` — Seed all four settings files with defaults where missing or blank.
 
 ### `app/usb_one_library.py`
 
 USB OneLibrary writer — uses rbox.OneLibrary to build PIONEER/rekordbox/exportLibrary.db
 
+- `FolderNames` — One spelling per case-folded folder under `Contents/`, for one stick and one sync.
+- `  FolderNames.settle()`
+- `  FolderNames.apply()`
 - `relocate_audio_files()` — Move audio already on the stick to its new destination instead of re-copying it.
 - `OneLibraryUsbWriter` — Writes the modern Library One DB (exportLibrary.db) plus ANLZ sidecars
 - `  OneLibraryUsbWriter.ensure_structure()`
@@ -4578,6 +4587,15 @@ MusicBrainz client tests (T-22, Threat T14 — app/musicbrainz_client.py).
 - `test_search_escapes_lucene_syntax_and_sorts_by_score()`
 - `test_blank_search_costs_nothing()`
 
+### `tests/test_onelibrary_template_refs.py`
+
+Template reference rows do not survive a stick export (PC test 2026-11-22).
+
+- `no_analysis()`
+- `test_no_template_rows_and_no_dangling_refs()`
+- `test_export_pdb_has_only_the_libraries_rows()`
+- `test_resync_over_a_cleaned_stick()`
+
 ### `tests/test_onelibrary_track_limit.py`
 
 B9 regression: a USB sync writes EVERY selected track, not just the 16 template slots.
@@ -5499,6 +5517,34 @@ Cover art for the USB stick, with the real Pillow (B8, 0.1 core-loop test).
 - `test_artwork_folders_hold_twenty_images_from_00001()`
 - `test_pillow_is_pinned_and_bundled()`
 
+### `tests/test_usb_artwork_resync.py`
+
+Cover files follow their slot across re-syncs (PC test 2026-11-22).
+
+- `no_analysis()`
+- `test_a_reused_slot_shows_its_new_tracks_cover()`
+- `test_a_track_without_cover_does_not_inherit_one()`
+- `test_a_changed_cover_is_rewritten()`
+- `test_an_unchanged_cover_is_not_rewritten()`
+- `test_files_without_a_manifest_entry_are_rewritten_once()` — A stick from before the manifest: its files say nothing about their source.
+- `test_prune_touches_only_dead_artwork()`
+- `test_manifest_roundtrip_and_garbage()`
+
+### `tests/test_usb_case_folders.py`
+
+Folders that differ only in case get one spelling per stick (PC test 2026-11-22).
+
+- `env()`
+- `test_both_writers_agree_on_one_spelling()`
+- `test_resync_keeps_the_spelling_and_moves_nothing()`
+- `test_a_stick_left_in_the_other_spelling_is_kept()` — A stick an older sync left as STENOZ/ keeps it — STENOZ is one of the asked spellings.
+- `test_first_spelling_wins_on_an_empty_stick()`
+- `test_on_disk_spelling_wins_when_asked_for()`
+- `test_a_restyle_nobody_still_asks_against_renames()` — All tracks now say "Boys Noize": the old "boys noize/" folder is not kept.
+- `test_unplanned_folder_takes_the_disk_spelling()`
+- `test_title_folders_settle_under_the_settled_artist()`
+- `test_paths_outside_contents_and_flat_files_pass_through()`
+
 ### `tests/test_usb_copy_atomic.py`
 
 USB audio copies must not leave a truncated file that never self-heals.
@@ -5516,6 +5562,23 @@ USB audio copies must not leave a truncated file that never self-heals.
 - `  TestNeedsCopy.test_unreadable_source_errs_toward_copying()`
 - `TestEndToEndHealing`
 - `  TestEndToEndHealing.test_a_truncated_track_is_repaired_on_the_next_sync()`
+
+### `tests/test_usb_device_scan.py`
+
+GET /api/usb/devices without a stick took 4.2-4.9 s per call (PC test 2026-11-22).
+
+- `fake_drives()` — Kernel32 stub: every drive is FIXED (3) — the case that needs the bus check.
+- `test_no_stick_scan_never_asks_for_bus_types()`
+- `test_fixed_usb_drive_with_rekordbox_is_listed()`
+- `test_fixed_internal_disk_with_pioneer_folder_is_skipped()`
+- `test_powershell_is_the_fallback_when_the_ioctl_fails()`
+- `test_removable_drive_needs_no_bus_lookup()`
+- `test_ioctl_refuses_anything_but_a_drive_letter()`
+- `test_ioctl_reads_the_system_drive()`
+- `counted_scan()` — `_scan_uncached` replaced by a counter; the cache starts empty.
+- `test_a_slow_scan_is_not_stale_on_arrival()`
+- `test_parallel_callers_share_one_scan()`
+- `test_profiles_read_scans_once_and_flags_connected()`
 
 ### `tests/test_usb_export_fields.py`
 
@@ -5631,6 +5694,16 @@ Tests for app/usb_mysettings.py — Pioneer MYSETTING file schema + I/O.
 - `test_io_degrades_without_pyrekordbox()`
 - `test_enum_options_empty_without_pyrekordbox()`
 
+### `tests/test_usb_profile_route.py`
+
+POST /api/usb/profiles merges a partial body into the stored profile (PC test 2026-11-22).
+
+- `store()`
+- `test_partial_post_keeps_the_stored_fields()`
+- `test_new_profile_still_gets_the_defaults()`
+- `test_full_object_from_the_ui_overwrites_everything()`
+- `test_partial_post_fills_defaults_an_old_profile_lacks()`
+
 ### `tests/test_usb_relocate.py`
 
 Tests for the USB relocation pass (`app/usb_one_library.py`).
@@ -5715,6 +5788,20 @@ Re-syncing a stick that already holds an export (PC test 2026-11-22).
 - `test_diff_after_a_playlist_sync_is_empty_for_that_selection()`
 - `test_files_already_on_the_stick_are_not_counted_as_copied()`
 - `test_diff_counts_the_folders_above_the_selection()`
+
+### `tests/test_usb_settings_seed.py`
+
+Settings files on an initialized stick (PC test 2026-11-22).
+
+- `no_sleep()`
+- `test_crc16_xmodem_check_value()`
+- `test_devsetting_layout()`
+- `test_initialize_route_writes_valid_settings()`
+- `test_initialize_keeps_real_settings()`
+- `test_seed_replaces_zero_filled_files()`
+- `test_seed_never_overwrites_real_files()`
+- `test_seed_keeps_a_file_it_cannot_judge()` — Non-zero bytes are somebody's settings, even when we cannot parse them.
+- `test_sync_structure_repairs_a_stick_initialized_by_the_old_code()`
 
 ### `tests/test_validate_real_world.py`
 

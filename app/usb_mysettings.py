@@ -23,10 +23,24 @@ from __future__ import annotations
 
 import logging
 import re
+import struct
 from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+# DEVSETTING.DAT, 140 B: u32 0x60, "PIONEER DJ" / "rekordbox" / version (32 B each),
+# u32 32, 32 B body, u16 CRC-16/XMODEM over the body, u16 0
+# (docs/reference/rbxport/export.md §6). pyrekordbox cannot build this file (no
+# version, 24-byte entries undefined). Version + body bytes are what rekordbox 7.1.4
+# wrote into its own DEVSETTING.DAT (read 2026-11-23); they are its device prefs
+# (waveform colour, position, overview, key display).
+_DEVSETTING_VERSION = "7.1.4"
+_DEVSETTING_BODY = bytes.fromhex("7856341201000000010201010201").ljust(32, b"\x00")
+DEVSETTING_SIZE = 140
+
+# A settings file larger than this is nothing we wrote; never judged blank.
+_SETTINGS_MAX_BYTES = 4096
 
 try:
     # quiet_import: pyrekordbox's import sets logging.root to NOTSET, which
@@ -527,7 +541,9 @@ def write_settings(
     Missing file_ids fall back to defaults.
 
     `only_create_missing=True` skips files that already exist on the stick —
-    used by the sync engine so we don't clobber a user's hand-edited stick.
+    used by the sync engine so we don't clobber a user's hand-edited stick. A
+    blank file (empty or all zeros, as an older `initialize` wrote) is not a
+    setting and gets replaced.
     """
     if not _PYRB_AVAILABLE:
         logger.warning("[mysettings] pyrekordbox unavailable — skipping write")
@@ -539,7 +555,7 @@ def write_settings(
     written: dict[str, str] = {}
     for file_id in ("MYSETTING", "MYSETTING2", "DJMMYSETTING"):
         target = pioneer / _file_filename(file_id)
-        if only_create_missing and target.exists():
+        if only_create_missing and not _needs_seed(target):
             continue
 
         cls = _file_class(file_id)
@@ -577,7 +593,76 @@ def write_settings(
     return written
 
 
+def _is_blank(path: Path) -> bool:
+    """True for an empty or all-zero file: no CDJ setting lives in it."""
+    try:
+        if path.stat().st_size > _SETTINGS_MAX_BYTES:
+            return False
+        return not path.read_bytes().strip(b"\x00")
+    except OSError:
+        return False
+
+
+def _needs_seed(path: Path) -> bool:
+    """Missing or blank — the only states a default may be written over."""
+    try:
+        if not path.exists():
+            return True
+    except OSError:
+        return False
+    return _is_blank(path)
+
+
+def _crc16_xmodem(data: bytes) -> int:
+    crc = 0
+    for byte in data:
+        crc ^= byte << 8
+        for _ in range(8):
+            crc = ((crc << 1) ^ 0x1021) if crc & 0x8000 else crc << 1
+            crc &= 0xFFFF
+    return crc
+
+
+def build_devsetting() -> bytes:
+    """A valid 140-byte DEVSETTING.DAT with rekordbox's device defaults."""
+
+    def field(text: str) -> bytes:
+        return text.encode("ascii").ljust(32, b"\x00")
+
+    header = (
+        struct.pack("<I", 0x60)
+        + field("PIONEER DJ")
+        + field("rekordbox")
+        + field(_DEVSETTING_VERSION)
+        + struct.pack("<I", len(_DEVSETTING_BODY))
+    )
+    return header + _DEVSETTING_BODY + struct.pack("<HH", _crc16_xmodem(_DEVSETTING_BODY), 0)
+
+
+def write_devsetting(usb_root: Path) -> str | None:
+    """Seed PIONEER/DEVSETTING.DAT when missing or blank. Returns the path written."""
+    pioneer = Path(usb_root) / "PIONEER"
+    target = pioneer / _file_filename("DEVSETTING")
+    if not _needs_seed(target):
+        return None
+    try:
+        pioneer.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(build_devsetting())
+    except OSError as exc:
+        logger.error("[mysettings] write %s failed: %s", target, exc)
+        return None
+    logger.info("[mysettings] wrote %s (%d B)", target, DEVSETTING_SIZE)
+    return str(target)
+
+
 def write_defaults(usb_root: Path) -> dict[str, str]:
-    """Convenience: write all-defaults MYSETTING files (used at sync time
-    when the user hasn't customised anything)."""
-    return write_settings(usb_root, values={}, only_create_missing=True)
+    """Seed all four settings files with defaults where missing or blank.
+
+    Used by `initialize` and at sync time. A file holding real settings (the
+    user's, or written by a player) is never touched.
+    """
+    written = write_settings(usb_root, values={}, only_create_missing=True)
+    dev = write_devsetting(usb_root)
+    if dev:
+        written["DEVSETTING"] = dev
+    return written

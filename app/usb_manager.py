@@ -14,6 +14,7 @@ import shutil
 import string
 import subprocess
 import sys
+import threading
 import time
 import xml.etree.ElementTree as ET
 from collections.abc import Generator
@@ -57,6 +58,124 @@ def _drive_letter(drive: str) -> str | None:
         return None
     candidate = drive.strip().rstrip("\\").rstrip("/").rstrip(":")
     return candidate.upper() if re.fullmatch(r"[A-Za-z]", candidate) else None
+
+
+# STORAGE_BUS_TYPE (winioctl.h) -> the names PowerShell's Get-Disk prints.
+_STORAGE_BUS_NAMES = {
+    0: "Unknown",
+    1: "SCSI",
+    2: "ATAPI",
+    3: "ATA",
+    4: "1394",
+    5: "SSA",
+    6: "Fibre Channel",
+    7: "USB",
+    8: "RAID",
+    9: "iSCSI",
+    10: "SAS",
+    11: "SATA",
+    12: "SD",
+    13: "MMC",
+    14: "Virtual",
+    15: "File Backed Virtual",
+    16: "Spaces",
+    17: "NVMe",
+    18: "SCM",
+    19: "UFS",
+}
+_IOCTL_STORAGE_QUERY_PROPERTY = 0x002D1400
+_FILE_SHARE_READ_WRITE = 0x1 | 0x2
+_OPEN_EXISTING = 3
+
+
+class _StoragePropertyQuery(ctypes.Structure):
+    _fields_ = [
+        ("PropertyId", ctypes.c_int),  # StorageDeviceProperty = 0
+        ("QueryType", ctypes.c_int),  # PropertyStandardQuery = 0
+        ("AdditionalParameters", ctypes.c_ubyte * 1),
+    ]
+
+
+class _StorageDeviceDescriptor(ctypes.Structure):
+    _fields_ = [
+        ("Version", ctypes.c_ulong),
+        ("Size", ctypes.c_ulong),
+        ("DeviceType", ctypes.c_ubyte),
+        ("DeviceTypeModifier", ctypes.c_ubyte),
+        ("RemovableMedia", ctypes.c_ubyte),
+        ("CommandQueueing", ctypes.c_ubyte),
+        ("VendorIdOffset", ctypes.c_ulong),
+        ("ProductIdOffset", ctypes.c_ulong),
+        ("ProductRevisionOffset", ctypes.c_ulong),
+        ("SerialNumberOffset", ctypes.c_ulong),
+        ("BusType", ctypes.c_int),
+        ("RawPropertiesLength", ctypes.c_ulong),
+        ("RawDeviceProperties", ctypes.c_ubyte * 1),
+    ]
+
+
+def _bus_type_ioctl(drive: str) -> str | None:
+    """Bus type ("USB", "NVMe", …) of the disk behind a drive letter, or None.
+
+    IOCTL_STORAGE_QUERY_PROPERTY on the volume handle: well under a millisecond,
+    where Get-Disk + Get-Partition cost two PowerShell starts (~4 s per scan).
+    Zero access rights are enough for this query, so it needs no admin.
+    """
+    if sys.platform != "win32":
+        return None
+    letter = _drive_letter(drive)
+    if letter is None:
+        return None
+    from ctypes import wintypes
+
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    k32.CreateFileW.restype = wintypes.HANDLE
+    k32.CreateFileW.argtypes = [
+        wintypes.LPCWSTR,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.HANDLE,
+    ]
+    k32.DeviceIoControl.restype = wintypes.BOOL
+    k32.DeviceIoControl.argtypes = [
+        wintypes.HANDLE,
+        wintypes.DWORD,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+        ctypes.POINTER(wintypes.DWORD),
+        ctypes.c_void_p,
+    ]
+    k32.CloseHandle.argtypes = [wintypes.HANDLE]
+
+    handle = k32.CreateFileW(
+        f"\\\\.\\{letter}:", 0, _FILE_SHARE_READ_WRITE, None, _OPEN_EXISTING, 0, None
+    )
+    if handle in (None, wintypes.HANDLE(-1).value):
+        return None
+    try:
+        query = _StoragePropertyQuery(0, 0)
+        desc = _StorageDeviceDescriptor()
+        returned = wintypes.DWORD(0)
+        ok = k32.DeviceIoControl(
+            handle,
+            _IOCTL_STORAGE_QUERY_PROPERTY,
+            ctypes.byref(query),
+            ctypes.sizeof(query),
+            ctypes.byref(desc),
+            ctypes.sizeof(desc),
+            ctypes.byref(returned),
+            None,
+        )
+        if not ok or returned.value < _StorageDeviceDescriptor.BusType.offset + 4:
+            return None
+        return _STORAGE_BUS_NAMES.get(desc.BusType, "Unknown")
+    finally:
+        k32.CloseHandle(handle)
 
 
 # GetDriveTypeW return values.
@@ -190,6 +309,7 @@ class UsbDetector:
     # settings view); a per-drive probe timeout skips one bad drive instead
     # of stalling the whole scan.
     _scan_cache = None  # (monotonic_ts, list[dict]) | None
+    _scan_lock = threading.Lock()
     _SCAN_TTL_SEC = 3.0
     _PROBE_TIMEOUT_SEC = 4.0
 
@@ -325,6 +445,21 @@ class UsbDetector:
             return {}
 
     @classmethod
+    def _bus_type_for(cls, drive: str, bus_types: dict) -> str:
+        """Bus type of one drive: given map, else the IOCTL, else PowerShell."""
+        known = bus_types.get(drive)
+        if known:
+            return known
+        try:
+            found = _bus_type_ioctl(drive)
+        except (OSError, AttributeError, ValueError) as e:
+            logger.debug("usb scan: bus-type IOCTL failed for %s: %s", drive, e)
+            found = None
+        if found is None:
+            found = cls._get_bus_types().get(drive)
+        return found or "Unknown"
+
+    @classmethod
     def scan(cls) -> list[dict]:
         """Scan all removable drives and return Rekordbox USB info.
 
@@ -333,15 +468,19 @@ class UsbDetector:
         Caching collapses them to one real scan and stops a slow scan from
         being paid three times back-to-back. A fresh scan runs once the
         cache expires (``_SCAN_TTL_SEC``).
-        """
-        now = time.monotonic()
-        cached = cls._scan_cache
-        if cached and (now - cached[0]) < cls._SCAN_TTL_SEC:
-            return cached[1]
 
-        devices = cls._scan_uncached()
-        cls._scan_cache = (now, devices)
-        return devices
+        The lock makes parallel callers (the USB view requests devices and
+        profiles at once) wait for one scan instead of each running their own.
+        The timestamp is taken after the scan: stamped before it, a scan slower
+        than the TTL was stale on arrival and the next caller scanned again.
+        """
+        with cls._scan_lock:
+            cached = cls._scan_cache
+            if cached and (time.monotonic() - cached[0]) < cls._SCAN_TTL_SEC:
+                return cached[1]
+            devices = cls._scan_uncached()
+            cls._scan_cache = (time.monotonic(), devices)
+            return devices
 
     @classmethod
     def _scan_uncached(cls) -> list[dict]:
@@ -360,7 +499,10 @@ class UsbDetector:
             logger.info("Scan complete. Found 0 total devices.")
             return []
 
-        bus_types = cls._get_bus_types()
+        # Bus types are looked up per drive, and only for fixed drives that hold
+        # a PIONEER folder (_probe_drive). Fetching them all up front through
+        # PowerShell cost ~4 s per scan, with or without a stick.
+        bus_types: dict[str, str] = {}
         devices = []
         with ThreadPoolExecutor(max_workers=min(8, len(drives))) as pool:
             futures = {pool.submit(cls._probe_drive, d, bus_types): d for d in drives}
@@ -399,19 +541,18 @@ class UsbDetector:
         is_rb = cls.is_rekordbox_usb(drive)
         bus_type = bus_types.get(drive, "Unknown")
 
-        # Strict filtering: if it's a fixed drive (type 3), it MUST be on a USB bus.
-        # This prevents internal NVMe/SATA hard drives from being recognized as USB sticks,
-        # even if they happen to contain a PIONEER directory.
-        is_usb_bus = bus_type == "USB"
-
-        if drive_type == 3 and not is_usb_bus:
-            logger.debug(f"Skipping fixed internal drive {drive} (BusType: {bus_type})")
-            return None
-
-        # Fixed drives (type 3) that ARE USB: only include if they actually have Rekordbox data.
-        if drive_type == 3 and not is_rb:
-            logger.debug(f"Skipping fixed USB drive without Rekordbox structure: {drive}")
-            return None
+        # Fixed drives (type 3) only count when they hold Rekordbox data AND sit on
+        # a USB bus — internal NVMe/SATA disks never show up as sticks, even with
+        # a PIONEER folder. The rekordbox check runs first because it is a cheap
+        # stat; the bus is queried only for the drives that pass it.
+        if drive_type == 3:
+            if not is_rb:
+                logger.debug(f"Skipping fixed drive without Rekordbox structure: {drive}")
+                return None
+            bus_type = cls._bus_type_for(drive, bus_types)
+            if bus_type != "USB":
+                logger.debug(f"Skipping fixed internal drive {drive} (BusType: {bus_type})")
+                return None
 
         logger.info(f"Scanning drive {drive}: type={drive_type}, bus={bus_type}, is_rb={is_rb}")
 
@@ -502,15 +643,11 @@ class UsbDetector:
             # /Contents/<Artist>/<Title>/<file>.m4a
             # We mirror that shape exactly — no extra .PIONEER nor DEVICE.PIONEER.
 
-            # Create default DEVSETTING files inside PIONEER
-            settings_files = {
-                "DEVSETTING.DAT": b"\x00" * 140,
-                "MYSETTING.DAT": b"\x00" * 148,
-                "MYSETTING2.DAT": b"\x00" * 148,
-                "DJMMYSETTING.DAT": b"\x00" * 160,
-            }
-            for name, content in settings_files.items():
-                (pioneer_path / name).write_bytes(content)
+            # Same valid defaults the sync seeds. Zero-filled files used to land
+            # here, and the sync's seeding skipped them as "already present".
+            from . import usb_mysettings
+
+            usb_mysettings.write_defaults(Path(drive))
 
             logger.info(f"Initialized Rekordbox library at {rb_path}")
 
@@ -548,10 +685,16 @@ class UsbProfileManager:
 
     @classmethod
     def get_profiles(cls) -> list[dict]:
+        # One scan serves the prune and the connection flag.
+        try:
+            devices = UsbDetector.scan()
+        except Exception as exc:
+            logger.warning("[Profiles] scan failed: %s", exc)
+            devices = []
         # Auto-prune obvious dupes on every read so the UI never shows
         # the long zombie list users get after several stick reformats.
         try:
-            removed = cls.prune_duplicates()
+            removed = cls.prune_duplicates(devices)
             if removed:
                 logger.info("[Profiles] auto-pruned %d duplicate(s)", removed)
         except Exception as exc:
@@ -560,7 +703,7 @@ class UsbProfileManager:
         data = cls._load_all()
         profiles = list(data.get("profiles", {}).values())
         # Enrich with connection status
-        connected = {d["device_id"] for d in UsbDetector.scan()}
+        connected = {d["device_id"] for d in devices}
         for p in profiles:
             p["connected"] = p["device_id"] in connected
         return profiles
@@ -596,7 +739,7 @@ class UsbProfileManager:
         return False
 
     @classmethod
-    def prune_duplicates(cls) -> int:
+    def prune_duplicates(cls, scan_results: list[dict] | None = None) -> int:
         """Collapse duplicate profiles + migrate to current device IDs.
 
         Windows assigns a NEW volume serial every time a stick is
@@ -622,17 +765,20 @@ class UsbProfileManager:
              last_sync. Delete the rest, inheriting playlists from the
              newest deleted sibling if the keeper had none.
 
+        `scan_results` is a device list the caller already holds; None scans.
+
         Returns the number of profiles deleted.
         """
         data = cls._load_all()
         profiles = data.get("profiles", {})
 
         # Snapshot the live device list once
-        try:
-            scan_results = UsbDetector.scan()
-        except Exception as e:
-            logger.warning("[Profiles] scan failed during prune: %s", e)
-            scan_results = []
+        if scan_results is None:
+            try:
+                scan_results = UsbDetector.scan()
+            except Exception as e:
+                logger.warning("[Profiles] scan failed during prune: %s", e)
+                scan_results = []
         scanned_by_id = {d["device_id"]: d for d in scan_results}
         connected_ids = set(scanned_by_id.keys())
 
@@ -1126,6 +1272,11 @@ class UsbSyncEngine:
         self.usb_rb = self.usb_pioneer / "rekordbox"
         self.usb_db_path = self.usb_rb / "exportLibrary.db"
         self.usb_anlz = self.usb_pioneer / "USBANLZ"
+        # One spelling per case-folded Contents/ folder, shared by both writers of
+        # this sync (Stenoz/STENOZ would otherwise flip between them).
+        from .usb_one_library import FolderNames
+
+        self.folder_names = FolderNames(self.usb_root / "Contents")
 
         # Filesystem-aware path limit:
         # FAT32  → 260 chars total (Windows MAX_PATH), 240 conservative limit
@@ -1431,7 +1582,8 @@ class UsbSyncEngine:
             source = from_db(global_db)
             writer = OneLibraryUsbWriter(
                 profile["drive"],
-                dest_resolver=self._get_safe_dest_path,
+                dest_resolver=self._raw_dest_path,
+                folder_names=self.folder_names,
             )
             # `usb_write_legacy_pdb` (default True) controls whether the
             # legacy export.pdb / exportExt.pdb files are written alongside
@@ -1554,6 +1706,15 @@ class UsbSyncEngine:
         return cleaned or "Unknown"
 
     def _get_safe_dest_path(self, artist: str, title: str, filename: str) -> Path:
+        """Destination of a track on the stick, folders in this stick's one spelling.
+
+        Case-only variants of an artist or title folder (Stenoz / STENOZ) resolve
+        to one name, so every path written into exportLibrary.db and rekordbox.xml
+        matches the case on disk (`usb_one_library.FolderNames`).
+        """
+        return self.folder_names.apply(self._raw_dest_path(artist, title, filename))
+
+    def _raw_dest_path(self, artist: str, title: str, filename: str) -> Path:
         """
         Build a safe destination path for a track on the USB drive.
 
@@ -1604,6 +1765,10 @@ class UsbSyncEngine:
 
         if not planned:
             return
+        # `planned` carries raw destinations: settle the folder spellings over the
+        # whole plan first, then move what is already on the stick.
+        self.folder_names.settle(d for _, d in planned)
+        planned = [(s, self.folder_names.apply(d)) for s, d in planned]
         report = relocate_audio_files(
             self.usb_root, planned, contents_dir=self.usb_root / "Contents"
         )
@@ -1635,7 +1800,7 @@ class UsbSyncEngine:
             planned.append(
                 (
                     local,
-                    self._get_safe_dest_path(
+                    self._raw_dest_path(
                         t.get("artist", "") or "", t.get("title", "") or "", local.name
                     ),
                 )
@@ -1822,7 +1987,7 @@ class UsbSyncEngine:
                 relocation_plan.append(
                     (
                         local_candidate,
-                        self._get_safe_dest_path(
+                        self._raw_dest_path(
                             artist_name_of(getattr(t, "artist_id", None)),
                             getattr(t, "title", "") or "",
                             getattr(t, "file_name_l", "") or os.path.basename(raw_path),
@@ -2276,19 +2441,6 @@ class UsbSyncEngine:
     def _remap_paths(self, profile: dict):
         """Update FolderPath in USB DB to use the USB drive letter."""
         pass
-
-    def _write_usb_settings(self):
-        """Write DEVSETTING.DAT and related config files to PIONEER root."""
-        settings_files = {
-            "DEVSETTING.DAT": b"\x00" * 140,
-            "MYSETTING.DAT": b"\x00" * 148,
-            "MYSETTING2.DAT": b"\x00" * 148,
-            "DJMMYSETTING.DAT": b"\x00" * 160,
-        }
-        for name, default_content in settings_files.items():
-            path = self.usb_pioneer / name
-            if not path.exists():
-                path.write_bytes(default_content)
 
 
 # --- USB Actions ---

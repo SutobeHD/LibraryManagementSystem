@@ -5555,8 +5555,15 @@ def usb_get_profiles():
 
 @app.post("/api/usb/profiles", dependencies=[Depends(require_session)])
 def usb_save_profile(r: UsbProfileReq):
-    """Create or update a USB device profile."""
-    profile = UsbProfileManager.save_profile(r.model_dump())
+    """Create or update a USB device profile.
+
+    Partial update: only the fields the request sets overwrite a stored profile.
+    Model defaults fill fields the stored profile lacks; a new profile gets all of them.
+    """
+    stored = UsbProfileManager.get_profile(r.device_id) or {}
+    profile = UsbProfileManager.save_profile(
+        {**r.model_dump(), **stored, **r.model_dump(exclude_unset=True)}
+    )
     return {"status": "success", "profile": profile}
 
 
