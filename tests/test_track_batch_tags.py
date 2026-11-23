@@ -5,6 +5,11 @@ only wrote the library: the file kept its old tags, while ``POST /api/track/{tid
 mirrored its fields into the file when ``write_tags_to_files`` is on (default true).
 Both routes now share one write-back and report it per track as ``file_tags``.
 
+Review follow-ups: an edit never re-embeds the library thumbnail (it replaced the
+file's own cover and dropped a back cover), an update without a file-tag field
+(ColorID alone) leaves the file untouched, two quick edits of one file write it in
+library order, and a streaming track is "skipped", not "failed".
+
 Every audio file is a fresh copy under ``tmp_path``; the library is the rbox stand-in
 from ``test_track_batch_writes``. Nothing outside ``tmp_path`` is opened.
 """
@@ -12,12 +17,14 @@ from ``test_track_batch_writes``. Nothing outside ``tmp_path`` is opened.
 from __future__ import annotations
 
 import shutil
+import threading
+import time
 import wave
 from pathlib import Path
 from typing import Any
 
 import pytest
-from mutagen.id3 import ID3
+from mutagen.id3 import APIC, ID3
 from mutagen.wave import WAVE
 
 from app import main
@@ -169,15 +176,104 @@ def test_unreadable_settings_report_error_and_keep_the_library_write(
     assert lib.tracks["1"]["Title"] == "New"
 
 
-def test_cover_art_is_embedded_like_the_single_track_edit(lib, files, tmp_path, auth_token) -> None:
-    cover = tmp_path / "cover.jpg"
-    cover.write_bytes(b"\xff\xd8\xff\xe0fake-jpeg")
-    lib.tracks["1"]["Artwork"] = str(cover)
+_PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
+_JPG = b"\xff\xd8\xff\xe0back-cover"
+_THUMB = b"\xff\xd8\xff\xe0library-thumbnail"
 
-    r = _batch(["1"], {"Title": "New"}, auth_token)
 
-    assert r.json()["file_tags"] == {"1": "written"}
-    assert ID3(str(files["1"])).getall("APIC")[0].data == cover.read_bytes()
+def _pictures(path: Path) -> set[tuple[int, str, str, bytes]]:
+    return {(a.type, a.mime, a.desc, a.data) for a in ID3(str(path)).getall("APIC")}
+
+
+@pytest.mark.parametrize("route", ["single", "batch"])
+def test_existing_pictures_survive_a_rating_write(lib, files, tmp_path, auth_token, route) -> None:
+    tags = ID3()
+    tags.add(APIC(encoding=3, mime="image/png", type=3, desc="front", data=_PNG))
+    tags.add(APIC(encoding=3, mime="image/jpeg", type=4, desc="back", data=_JPG))
+    tags.save(str(files["1"]))
+    thumb = tmp_path / "thumb.jpg"  # the library's own artwork: never embedded by an edit
+    thumb.write_bytes(_THUMB)
+    lib.tracks["1"]["Artwork"] = str(thumb)
+    before = _pictures(files["1"])
+
+    if route == "single":
+        r = _req("POST", "/api/track/1", {"Rating": 4}, auth_token)
+        assert r.json()["file_tags"] == "written"
+    else:
+        r = _batch(["1"], {"Rating": 4}, auth_token)
+        assert r.json()["file_tags"] == {"1": "written"}
+
+    assert _pictures(files["1"]) == before  # PNG front still image/png, back cover kept
+    assert ID3(str(files["1"])).getall("POPM")[0].rating == 196
+
+
+@pytest.mark.parametrize("route", ["single", "batch"])
+def test_a_colour_only_edit_leaves_the_file_byte_identical(
+    lib, files, master, tmp_path, auth_token, route
+) -> None:
+    thumb = tmp_path / "thumb.jpg"
+    thumb.write_bytes(_THUMB)
+    lib.tracks["1"]["Artwork"] = str(thumb)
+    before = files["1"].read_bytes()
+
+    if route == "single":
+        r = _req("POST", "/api/track/1", {"ColorID": 3}, auth_token)
+        assert r.json()["file_tags"] == "skipped"
+    else:
+        r = _batch(["1"], {"ColorID": 3}, auth_token)
+        assert r.json()["file_tags"] == {"1": "skipped"}
+
+    assert r.status_code == 200, r.text
+    assert int(master.rows["1"]["color_id"]) == 3  # the library still got the colour
+    assert files["1"].read_bytes() == before
+
+
+def test_a_streaming_track_is_skipped(lib, auth_token) -> None:
+    lib.tracks["3"]["path"] = "soundcloud:tracks:123456"
+
+    single = _req("POST", "/api/track/3", {"Rating": 2}, auth_token)
+    batch = _batch(["1", "3"], {"Title": "New"}, auth_token)
+
+    assert single.json()["file_tags"] == "skipped"  # was "failed"
+    assert batch.json()["file_tags"] == {"1": "written", "3": "skipped"}
+
+
+def test_two_quick_edits_of_one_file_end_with_the_later_value(lib, files, monkeypatch) -> None:
+    # The first edit's file write stalls; the second edit must wait for it instead of
+    # writing first and being overwritten by the older value.
+    real = main.audio_tags.write_tags
+    stalled, go = threading.Event(), threading.Event()
+
+    def slow(src: Any, updates: Any, artwork: Any = None) -> bool:
+        if updates.get("Title") == "first":
+            stalled.set()
+            go.wait(10)
+        return real(src, updates, artwork=artwork)
+
+    monkeypatch.setattr(main.audio_tags, "write_tags", slow)
+    answers: dict[str, Any] = {}
+
+    def edit(title: str) -> None:
+        answers[title] = main.batch_up(main.BatchReq(track_ids=["1"], updates={"Title": title}))
+
+    first = threading.Thread(target=edit, args=("first",))
+    second = threading.Thread(target=edit, args=("second",))
+    try:
+        first.start()
+        assert stalled.wait(10)
+        second.start()
+        time.sleep(0.3)  # time enough for the second edit to finish, if it did not wait
+        assert b"second" not in files["1"].read_bytes()
+    finally:
+        go.set()
+        first.join(10)
+        second.join(10)
+    assert not first.is_alive()
+    assert not second.is_alive()
+
+    assert answers["first"]["file_tags"] == answers["second"]["file_tags"] == {"1": "written"}
+    assert lib.tracks["1"]["Title"] == "second"
+    assert _frames(files["1"])["TIT2"] == "second"
 
 
 @pytest.mark.parametrize(

@@ -413,6 +413,8 @@ LibraryManagementSystem -- Audio Analyzer (Unified Wrapper)
 
 audio_tags — write metadata back to the source audio file.
 
+- `tag_fields()` — The part of a library update the file's tags store (``ColorID`` is not one).
+- `FileWriteLocks` — Context manager holding the tag-write lock of every file in ``paths``.
 - `write_tags()` — Mirror updates into the audio file's native tag format.
 - `load_artwork()` — Read an artwork file from disk into bytes, or None on any failure.
 - `read_tags()` — Read metadata tags from any supported audio file.
@@ -3689,6 +3691,8 @@ Tests for app/audio_tags.py — native tag write-back (mutates user files → HI
 
 - `test_rating_to_popm_scale()`
 - `test_normalize_fields_drops_none_and_unknown()`
+- `test_tag_fields_drop_what_no_file_tag_stores()`
+- `test_one_lock_per_file_whatever_the_spelling()`
 - `test_write_tags_unsupported_and_missing()`
 - `test_flac_tag_roundtrip()`
 
@@ -5319,7 +5323,10 @@ PATCH /api/tracks/batch writes the audio-file tags like the single-track edit.
 - `test_per_track_status_for_missing_path_and_missing_file()`
 - `test_a_crashing_tag_write_is_reported_for_that_track_only()`
 - `test_unreadable_settings_report_error_and_keep_the_library_write()`
-- `test_cover_art_is_embedded_like_the_single_track_edit()`
+- `test_existing_pictures_survive_a_rating_write()`
+- `test_a_colour_only_edit_leaves_the_file_byte_identical()`
+- `test_a_streaming_track_is_skipped()`
+- `test_two_quick_edits_of_one_file_end_with_the_later_value()`
 - `test_a_refused_batch_touches_no_file()`
 - `test_an_empty_batch_touches_no_file()`
 

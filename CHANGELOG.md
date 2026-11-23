@@ -17,6 +17,10 @@
   - Fixed: Title / Artist / Album edits from the track table and the batch bar
     now reach the audio file's tags too (setting `write_tags_to_files`, on by
     default), as single-track edits already did; the answer reports each file.
+  - Fixed: a track edit no longer replaces the file's own cover art with the
+    library thumbnail (a back cover was deleted, a PNG relabelled JPEG), a
+    colour-only edit leaves the file untouched, and two quick edits of one track
+    write the file in the order they reached the library.
   - Fixed: imported MP3s got FileType 0 in master.db instead of Rekordbox's 1.
     Every import now gets the code of its format (MP3 1, M4A 4, FLAC 5, WAV 11,
     AIFF 12).

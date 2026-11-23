@@ -43,7 +43,7 @@ desc = "Mutagen schreibt ID3/FLAC/MP4/Vorbis/AIFF/WAV inkl. Cover (Setting write
 paths = ["app/audio_tags.py", "tests/test_track_batch_tags.py"]
 depends_on = ["track-metadata-update"]
 todo = ["Route mit write_tags_to_files=true nicht im PC-Test (nur write_tags direkt auf Kopien)"]
-notes = "PC-Test 2026-11-22: write_tags auf Kopien in 5 Containern, Tags + Cover per mutagen zurückgelesen, PCM-md5 unverändert. src-tauri/src/audio/metadata.rs (lofty) ist toter Code. Fix 2026-11-23 (fix/track-writes): PATCH /api/tracks/batch schreibt jetzt dieselben Tags wie POST /api/track/{tid} (gemeinsames _file_tag_writeback in app/main.py, gleiches Setting + Cover), file_tags pro Track; Route-Tests auf tmp-Kopien (mp3/wav), nicht im PC-Test."
+notes = "PC-Test 2026-11-22: write_tags auf Kopien in 5 Containern, Tags + Cover per mutagen zurückgelesen, PCM-md5 unverändert. src-tauri/src/audio/metadata.rs (lofty) ist toter Code. Fix 2026-11-23 (fix/track-writes): PATCH /api/tracks/batch schreibt jetzt dieselben Tags wie POST /api/track/{tid} (gemeinsames _file_tag_writeback in app/main.py, gleiches Setting + Cover), file_tags pro Track; Route-Tests auf tmp-Kopien (mp3/wav), nicht im PC-Test. Review-Fix: Edits betten das Library-Thumbnail nicht mehr ein (ersetzte das eigene Cover, löschte Back-Cover, PNG wurde image/jpeg); nur Felder mit Datei-Tag schreiben (ColorID allein / Streaming -> skipped, Datei unverändert); Tag-Writes pro Datei gesperrt und in master.db-Reihenfolge (audio_tags.FileWriteLocks)."
 
 [[feature]]
 id = "native-tag-read"

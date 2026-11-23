@@ -17,7 +17,7 @@ import urllib.parse
 import uuid
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from concurrent.futures import Executor, ThreadPoolExecutor
-from contextlib import asynccontextmanager
+from contextlib import ExitStack, asynccontextmanager
 from pathlib import Path, PureWindowsPath
 from typing import Any, BinaryIO
 
@@ -3292,15 +3292,28 @@ def save_grid(r: GridReq):
     return {"status": "success" if db.save_track_beatgrid(r.track_id, r.beat_grid) else "error"}
 
 
+def _tag_file_paths(track_ids: list[str]) -> list[str]:
+    """Audio files of ``track_ids`` the tag write-back may touch (no streaming URIs)."""
+    paths = []
+    for tid in track_ids:
+        src = (db.get_track_details(tid) or {}).get("path")
+        if src and not str(src).startswith(_STREAMING_PREFIXES):
+            paths.append(str(src))
+    return paths
+
+
 def _file_tag_writeback(track_ids: list[str], updates: dict[str, Any]) -> dict[str, str]:
     """Mirror ``updates`` into each track's audio file tags, after the library write.
 
     Best effort: a failure here never undoes the library write. Per track "written",
-    "failed" (the tag writer refused), "skipped" (no file path, or
-    settings.write_tags_to_files=False, default true) or "error".
+    "failed" (the tag writer refused), "skipped" (nothing written: no field the file
+    stores, e.g. ColorID alone; no local file; settings.write_tags_to_files=False,
+    default true) or "error". Pictures stay as they are: the edits carry no artwork,
+    and re-embedding the library's thumbnail replaced the file's own cover and
+    dropped a back cover.
     """
     status = dict.fromkeys(track_ids, "skipped")
-    if not updates:  # write_tags would still embed the cover
+    if not audio_tags.tag_fields(updates):
         return status
     try:
         enabled = SettingsManager.load().get("write_tags_to_files", True)
@@ -3311,19 +3324,33 @@ def _file_tag_writeback(track_ids: list[str], updates: dict[str, Any]) -> dict[s
         return status
     for tid in status:
         try:
-            track = db.get_track_details(tid) or {}
-            src = track.get("path")
-            if src:
-                artwork_bytes = None
-                art_path = track.get("Artwork")
-                if art_path:
-                    artwork_bytes = audio_tags.load_artwork(art_path)
-                ok = audio_tags.write_tags(src, updates, artwork=artwork_bytes)
+            src = (db.get_track_details(tid) or {}).get("path")
+            if src and not str(src).startswith(_STREAMING_PREFIXES):
+                ok = audio_tags.write_tags(src, updates)
                 status[tid] = "written" if ok else "failed"
         except Exception as exc:
             logger.warning(f"Tag write-back skipped for {tid}: {exc}")
             status[tid] = "error"
     return status
+
+
+def _update_tracks_then_tags(
+    track_ids: list[str], updates: dict[str, Any]
+) -> dict[str, str] | None:
+    """Library write, then the file write-back. None when the library answers False.
+
+    Each file's tag-write lock is taken before the master.db lock is released, so two
+    edits of one track write its file in the order they wrote the library; the older
+    value never lands last. Raises what ``update_tracks_metadata`` raises.
+    """
+    paths = _tag_file_paths(track_ids) if audio_tags.tag_fields(updates) else []
+    file_locks = audio_tags.FileWriteLocks(paths)
+    with ExitStack() as held:
+        with db_lock():
+            if not db.update_tracks_metadata(track_ids, updates):
+                return None
+            held.enter_context(file_locks)
+        return _file_tag_writeback(track_ids, updates)
 
 
 @app.post("/api/track/{tid}", dependencies=[Depends(require_session)])
@@ -3337,10 +3364,7 @@ def update_track(tid: str, r: TrackUpdateReq):
     if not updates:
         return {"status": "no_change"}
     try:
-        if not db.update_tracks_metadata([tid], updates):
-            raise HTTPException(500, "Update returned False (unknown error)")
-    except HTTPException:
-        raise
+        file_tags = _update_tracks_then_tags([tid], updates)
     except TrackFieldError as e:
         raise HTTPException(400, str(e)) from e
     except UnknownTrackIds as e:
@@ -3348,7 +3372,9 @@ def update_track(tid: str, r: TrackUpdateReq):
     except Exception as e:
         logger.error(f"Update failed for {tid}: {e}")
         raise HTTPException(500, f"Update failed: {e!s}")
-    return {"status": "success", "file_tags": _file_tag_writeback([tid], updates)[tid]}
+    if file_tags is None:
+        raise HTTPException(500, "Update returned False (unknown error)")
+    return {"status": "success", "file_tags": file_tags[tid]}
 
 
 @app.patch("/api/tracks/batch", dependencies=[Depends(require_session)])
@@ -3364,7 +3390,7 @@ def batch_up(r: BatchReq):
     track_ids = list(dict.fromkeys(r.track_ids))
     try:
         updates = normalise_track_updates(r.updates, db.mode)
-        ok = db.update_tracks_metadata(track_ids, updates)
+        file_tags = _update_tracks_then_tags(track_ids, updates)
     except TrackFieldError as e:
         raise HTTPException(400, str(e)) from e
     except UnknownTrackIds as e:
@@ -3374,9 +3400,9 @@ def batch_up(r: BatchReq):
     except Exception as e:
         logger.error(f"Batch update failed for {len(track_ids)} track(s): {e}")
         raise HTTPException(500, f"Library update failed: {e!s}") from e
-    if not ok:
+    if file_tags is None:
         raise HTTPException(500, "Library update failed for one or more tracks.")
-    return {"status": "success", "file_tags": _file_tag_writeback(track_ids, updates)}
+    return {"status": "success", "file_tags": file_tags}
 
 
 @app.post("/api/system/heartbeat")
