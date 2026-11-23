@@ -17,7 +17,7 @@
 
 import { camelotOf } from './trackSort.js';
 
-/** Tooltip for the search box. */
+// Tooltip for the search box.
 export const SEARCH_SYNTAX_HINT =
     'Filter: bpm:>140  bpm:138-142  rating:>=4  year:2024  key:8A  genre:"deep house"  label:  artist:  title:  album:  "exact phrase"';
 
@@ -170,13 +170,13 @@ export function compileToken(token) {
     return fallback(token);
 }
 
-/** Whole query -> one predicate `(track, hay) => boolean`; all tokens must match. */
+// Whole query -> one predicate `(track, hay) => boolean`; all tokens must match.
 export function compileQuery(query) {
     const preds = tokenizeQuery(query).map(compileToken).filter(Boolean);
     return (t, hay) => preds.every((pred) => pred(t, hay));
 }
 
-/** Tracks of `list` matching `query`; the list itself when the query is empty. */
+// Tracks of `list` matching `query`; the list itself when the query is empty.
 export function filterTracks(list, query) {
     if (!query || !String(query).trim()) return list;
     const match = compileQuery(query);

@@ -17,21 +17,21 @@ desc = "Sortierbare Track-Liste: Spalten, Camelot-Key-Farben, Cover-Thumb, Drag,
 paths = ["frontend/src/components/TrackTable.jsx"]
 routes = ["/api/file/reveal"]
 related = ["inline-rating-color", "collection-view", "list-context-menus", "perf-frontend-virtualization"]
-todo = ["Date Added nicht sortierbar auf main (feat/sortable-columns hat es, ungemergt)", "23 Tracks ohne StockDate zeigen '-' - auf created_at zurückfallen", "Title-Sortierung nach Codepunkt: Umlaute landen hinter Z"]
-notes = "PC-Test 2026-11-22 (Kopie der Library, main f3ce85d): Virtualisiert (27 DOM-Zeilen bei 5037), Sortieren BPM/Title, Kontextmenü, Cover, Key-Farben. Virtualisiert seit PR #63 (in #60, perf-frontend-virtualization). LibraryView.jsx ist ein toter Vorgänger. B17 (Date Added leer) gefixt: Spalte zeigt StockDate, fehlendes Datum ist leer statt 'None'."
+notes = "PC-Test 2026-11-22 (Kopie der Library, main f3ce85d): Virtualisiert (27 DOM-Zeilen bei 5037), Sortieren BPM/Title, Kontextmenü, Cover, Key-Farben. Virtualisiert seit PR #63 (in #60, perf-frontend-virtualization). LibraryView.jsx ist ein toter Vorgänger. B17 (Date Added leer) gefixt: Spalte zeigt StockDate, fehlendes Datum ist leer statt 'None'. fix/track-table (2026-11-23, nicht im Browser geprüft): Sortierung aus feat/sortable-columns übernommen, Date Added sortierbar; Textspalten per Intl.Collator (Umlaute beim Grundbuchstaben, Zahlen numerisch, stabil); fehlendes StockDate = Tag aus created_at (live_database.py) - nach Merge neu testen."
 
 [[feature]]
 id = "library-feature-sorting"
 group = "Browsen & Suchen"
 name = "Nach Merkmalen sortieren"
 status = "unmerged"
-branch = "feat/sortable-columns"
+test = "testen"
+branch = "fix/track-table"
 parent = "track-table"
 desc = "Track-Liste nach mehr Merkmalen sortieren: Genre, Label, Jahr, My Tags, Format, Hinzugefügt, Farbe; Key nach Camelot-Rad; fehlende Werte immer unten."
 paths = ["frontend/src/utils/trackSort.js", "frontend/src/utils/trackSort.test.js"]
 related = ["collection-view", "smart-playlists", "genre-atlas-hints"]
-notes = "Wunsch 2026-11-07. Neue Spalten sind ab Werk aus (Rechtsklick auf den Tabellenkopf). Date Added liest StockDate; 23 Live-Tracks liefern dort den Text 'None' (live_database.py: str(None)) und zählen als leer. Tabelle bekommt eine Mindestbreite aus den sichtbaren Spalten, damit Title/Artist nicht auf 0 px schrumpfen."
-todo = ["Spalte Atlas-Genre (Vorschlag aus genre_atlas)", "LMS-Merkmale an die Track-Liste hängen (Route aus dem Analyse-Cache)", "Backend: StockDate leer statt 'None' senden"]
+notes = "Wunsch 2026-11-07, gebaut auf feat/sortable-columns (8c30c89); 2026-11-23 auf fix/track-table übernommen (virtualisierte TrackRow von main, Mindestbreite von main). Neue Spalten sind ab Werk aus (Rechtsklick auf den Tabellenkopf). Date Added liest StockDate ('None' zählt als leer, sortiert als Zahl JJJJMMTT). Text per Intl.Collator, 5037 Zeilen Title ~10 ms. Nicht im Browser geprüft."
+todo = ["Spalte Atlas-Genre (Vorschlag aus genre_atlas)", "LMS-Merkmale an die Track-Liste hängen (Route aus dem Analyse-Cache)"]
 
 [[feature]]
 id = "collection-view"
@@ -40,11 +40,12 @@ name = "Collection & Token-Suche"
 status = "shipped"
 test = "getestet"
 tested = "2026-11-23"
-desc = "Ganze Library als Collection-Knoten, Suche mit bpm:/key:/genre:/year:/rating:, Track löschen."
+desc = "Ganze Library als Collection-Knoten, Suche mit bpm:/key:/genre:/year:/rating: (Vergleiche, Bereiche, Werte in Anführungszeichen), Track löschen."
+paths = ["frontend/src/utils/trackSearch.js", "frontend/src/utils/trackSearch.test.js"]
 routes = ["/api/library/tracks", "/api/track/{tid}", "/api/track/delete", "/api/tracks/move"]
 depends_on = ["track-table", "live-master-db"]
-todo = ["Suche: rating:>=4 und genre:\"…\" liefern 0 Treffer ohne Hinweis", "Live-Modus: echtes Löschen aus master.db erst mit einer rbox-Version, die Content-Zeilen löschen kann (0.1.7 kann es nicht)", "POST /api/track/delete ist toter Endpunkt: POST /api/track/{tid} (Edit) ist vorher registriert und fängt 'delete' als ID ab", "XML-Modus: Entfernen-Dialog in der UI nicht im PC-Test geprüft (nur per Route-Test)"]
-notes = "PC-Test 2026-11-22: Suche bpm:/key:/genre:/year:/rating: = Trefferzahlen der DB; Light-Liste 3,4 MB in 0,04 s, Health dabei <35 ms (B3). /api/tracks/move ist ein Stub. /api/library/tracks ohne Pagination; light=true-Projektion in #60 (perf-backend-quickwins). Route kodiert ihr JSON selbst im Threadpool, pro Track ein json.dumps - blockiert den Event-Loop nicht mehr (B3, PR #82). Alle Listen-Views laden über fetchLibraryTracks() mit ?light=true (3,2 MB, ~0,2 s; PR #75). Editoren laden den Beatgrid mit PR #77. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): B3 (Collection 0 Tracks, Backend 18 s blockiert) in PR #75 + #82 gefixt - neu prüfen. Track löschen ehrlich gemacht (fix/track-delete, 2026-11-23): im Live-Modus kein Menüpunkt, DELETE /api/track/{id} -> 409 mit Hinweis, Cache bleibt unverändert; XML-Modus löscht weiter, eine Rückfrage statt zwei. PC-Test Live: Menü ohne Löschen, API 409, Track bleibt."
+todo = ["Live-Modus: echtes Löschen aus master.db erst mit einer rbox-Version, die Content-Zeilen löschen kann (0.1.7 kann es nicht)", "POST /api/track/delete ist toter Endpunkt: POST /api/track/{tid} (Edit) ist vorher registriert und fängt 'delete' als ID ab", "XML-Modus: Entfernen-Dialog in der UI nicht im PC-Test geprüft (nur per Route-Test)"]
+notes = "PC-Test 2026-11-22: Suche bpm:/key:/genre:/year:/rating: = Trefferzahlen der DB; Light-Liste 3,4 MB in 0,04 s, Health dabei <35 ms (B3). /api/tracks/move ist ein Stub. /api/library/tracks ohne Pagination; light=true-Projektion in #60 (perf-backend-quickwins). Route kodiert ihr JSON selbst im Threadpool, pro Track ein json.dumps - blockiert den Event-Loop nicht mehr (B3, PR #82). Alle Listen-Views laden über fetchLibraryTracks() mit ?light=true (3,2 MB, ~0,2 s; PR #75). Editoren laden den Beatgrid mit PR #77. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): B3 (Collection 0 Tracks, Backend 18 s blockiert) in PR #75 + #82 gefixt - neu prüfen. Track löschen ehrlich gemacht (fix/track-delete, 2026-11-23): im Live-Modus kein Menüpunkt, DELETE /api/track/{id} -> 409 mit Hinweis, Cache bleibt unverändert; XML-Modus löscht weiter, eine Rückfrage statt zwei. PC-Test Live: Menü ohne Löschen, API 409, Track bleibt. Suche (fix/track-table, 2026-11-23, nicht im Browser geprüft): Parser in utils/trackSearch.js; bpm:/rating:/year: mit > >= < <= =, Bereiche bleiben; Werte in \"…\" mit Leerzeichen; key: nach Camelot-Slot (key:1A trifft nicht mehr 11A); neu artist:/title:/album:; unbekannte oder kaputte Tokens -> Freitext, halb getippte filtern nichts; BPM 0 und Jahr 0 fallen aus Vergleichen; Syntax als Tooltip - nach Merge neu testen."
 
 [[feature]]
 id = "category-browser"

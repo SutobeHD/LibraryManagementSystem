@@ -1,5 +1,4 @@
-"""StockDate in live track dicts: a missing date must not become the string "None" (B17),
-and a NULL stock_date falls back to the day the row was created."""
+"""Live StockDate: never the text "None" (B17); a NULL date falls back to created_at's day."""
 
 from datetime import date, datetime
 from types import SimpleNamespace
