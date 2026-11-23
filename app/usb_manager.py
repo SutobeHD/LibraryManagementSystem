@@ -59,6 +59,124 @@ def _drive_letter(drive: str) -> str | None:
     return candidate.upper() if re.fullmatch(r"[A-Za-z]", candidate) else None
 
 
+# STORAGE_BUS_TYPE (winioctl.h) -> the names PowerShell's Get-Disk prints.
+_STORAGE_BUS_NAMES = {
+    0: "Unknown",
+    1: "SCSI",
+    2: "ATAPI",
+    3: "ATA",
+    4: "1394",
+    5: "SSA",
+    6: "Fibre Channel",
+    7: "USB",
+    8: "RAID",
+    9: "iSCSI",
+    10: "SAS",
+    11: "SATA",
+    12: "SD",
+    13: "MMC",
+    14: "Virtual",
+    15: "File Backed Virtual",
+    16: "Spaces",
+    17: "NVMe",
+    18: "SCM",
+    19: "UFS",
+}
+_IOCTL_STORAGE_QUERY_PROPERTY = 0x002D1400
+_FILE_SHARE_READ_WRITE = 0x1 | 0x2
+_OPEN_EXISTING = 3
+
+
+class _StoragePropertyQuery(ctypes.Structure):
+    _fields_ = [
+        ("PropertyId", ctypes.c_int),  # StorageDeviceProperty = 0
+        ("QueryType", ctypes.c_int),  # PropertyStandardQuery = 0
+        ("AdditionalParameters", ctypes.c_ubyte * 1),
+    ]
+
+
+class _StorageDeviceDescriptor(ctypes.Structure):
+    _fields_ = [
+        ("Version", ctypes.c_ulong),
+        ("Size", ctypes.c_ulong),
+        ("DeviceType", ctypes.c_ubyte),
+        ("DeviceTypeModifier", ctypes.c_ubyte),
+        ("RemovableMedia", ctypes.c_ubyte),
+        ("CommandQueueing", ctypes.c_ubyte),
+        ("VendorIdOffset", ctypes.c_ulong),
+        ("ProductIdOffset", ctypes.c_ulong),
+        ("ProductRevisionOffset", ctypes.c_ulong),
+        ("SerialNumberOffset", ctypes.c_ulong),
+        ("BusType", ctypes.c_int),
+        ("RawPropertiesLength", ctypes.c_ulong),
+        ("RawDeviceProperties", ctypes.c_ubyte * 1),
+    ]
+
+
+def _bus_type_ioctl(drive: str) -> str | None:
+    """Bus type ("USB", "NVMe", …) of the disk behind a drive letter, or None.
+
+    IOCTL_STORAGE_QUERY_PROPERTY on the volume handle: well under a millisecond,
+    where Get-Disk + Get-Partition cost two PowerShell starts (~4 s per scan).
+    Zero access rights are enough for this query, so it needs no admin.
+    """
+    if sys.platform != "win32":
+        return None
+    letter = _drive_letter(drive)
+    if letter is None:
+        return None
+    from ctypes import wintypes
+
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    k32.CreateFileW.restype = wintypes.HANDLE
+    k32.CreateFileW.argtypes = [
+        wintypes.LPCWSTR,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.HANDLE,
+    ]
+    k32.DeviceIoControl.restype = wintypes.BOOL
+    k32.DeviceIoControl.argtypes = [
+        wintypes.HANDLE,
+        wintypes.DWORD,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+        ctypes.POINTER(wintypes.DWORD),
+        ctypes.c_void_p,
+    ]
+    k32.CloseHandle.argtypes = [wintypes.HANDLE]
+
+    handle = k32.CreateFileW(
+        f"\\\\.\\{letter}:", 0, _FILE_SHARE_READ_WRITE, None, _OPEN_EXISTING, 0, None
+    )
+    if handle in (None, wintypes.HANDLE(-1).value):
+        return None
+    try:
+        query = _StoragePropertyQuery(0, 0)
+        desc = _StorageDeviceDescriptor()
+        returned = wintypes.DWORD(0)
+        ok = k32.DeviceIoControl(
+            handle,
+            _IOCTL_STORAGE_QUERY_PROPERTY,
+            ctypes.byref(query),
+            ctypes.sizeof(query),
+            ctypes.byref(desc),
+            ctypes.sizeof(desc),
+            ctypes.byref(returned),
+            None,
+        )
+        if not ok or returned.value < _StorageDeviceDescriptor.BusType.offset + 4:
+            return None
+        return _STORAGE_BUS_NAMES.get(desc.BusType, "Unknown")
+    finally:
+        k32.CloseHandle(handle)
+
+
 # GetDriveTypeW return values.
 DRIVE_UNKNOWN, DRIVE_NO_ROOT_DIR, DRIVE_REMOVABLE, DRIVE_FIXED = 0, 1, 2, 3
 DRIVE_REMOTE, DRIVE_CDROM, DRIVE_RAMDISK = 4, 5, 6
@@ -325,6 +443,21 @@ class UsbDetector:
             return {}
 
     @classmethod
+    def _bus_type_for(cls, drive: str, bus_types: dict) -> str:
+        """Bus type of one drive: given map, else the IOCTL, else PowerShell."""
+        known = bus_types.get(drive)
+        if known:
+            return known
+        try:
+            found = _bus_type_ioctl(drive)
+        except (OSError, AttributeError, ValueError) as e:
+            logger.debug("usb scan: bus-type IOCTL failed for %s: %s", drive, e)
+            found = None
+        if found is None:
+            found = cls._get_bus_types().get(drive)
+        return found or "Unknown"
+
+    @classmethod
     def scan(cls) -> list[dict]:
         """Scan all removable drives and return Rekordbox USB info.
 
@@ -360,7 +493,10 @@ class UsbDetector:
             logger.info("Scan complete. Found 0 total devices.")
             return []
 
-        bus_types = cls._get_bus_types()
+        # Bus types are looked up per drive, and only for fixed drives that hold
+        # a PIONEER folder (_probe_drive). Fetching them all up front through
+        # PowerShell cost ~4 s per scan, with or without a stick.
+        bus_types: dict[str, str] = {}
         devices = []
         with ThreadPoolExecutor(max_workers=min(8, len(drives))) as pool:
             futures = {pool.submit(cls._probe_drive, d, bus_types): d for d in drives}
@@ -399,19 +535,18 @@ class UsbDetector:
         is_rb = cls.is_rekordbox_usb(drive)
         bus_type = bus_types.get(drive, "Unknown")
 
-        # Strict filtering: if it's a fixed drive (type 3), it MUST be on a USB bus.
-        # This prevents internal NVMe/SATA hard drives from being recognized as USB sticks,
-        # even if they happen to contain a PIONEER directory.
-        is_usb_bus = bus_type == "USB"
-
-        if drive_type == 3 and not is_usb_bus:
-            logger.debug(f"Skipping fixed internal drive {drive} (BusType: {bus_type})")
-            return None
-
-        # Fixed drives (type 3) that ARE USB: only include if they actually have Rekordbox data.
-        if drive_type == 3 and not is_rb:
-            logger.debug(f"Skipping fixed USB drive without Rekordbox structure: {drive}")
-            return None
+        # Fixed drives (type 3) only count when they hold Rekordbox data AND sit on
+        # a USB bus — internal NVMe/SATA disks never show up as sticks, even with
+        # a PIONEER folder. The rekordbox check runs first because it is a cheap
+        # stat; the bus is queried only for the drives that pass it.
+        if drive_type == 3:
+            if not is_rb:
+                logger.debug(f"Skipping fixed drive without Rekordbox structure: {drive}")
+                return None
+            bus_type = cls._bus_type_for(drive, bus_types)
+            if bus_type != "USB":
+                logger.debug(f"Skipping fixed internal drive {drive} (BusType: {bus_type})")
+                return None
 
         logger.info(f"Scanning drive {drive}: type={drive_type}, bus={bus_type}, is_rb={is_rb}")
 
