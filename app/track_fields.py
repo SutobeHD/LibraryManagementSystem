@@ -74,6 +74,45 @@ class InvalidTrackFieldValue(TrackFieldError):
     """A known field carries a value the backend cannot store."""
 
 
+def _id_list(track_ids: Iterable[str], limit: int = 10) -> str:
+    ids = list(track_ids)
+    shown = ", ".join(ids[:limit])
+    return f"{shown} and {len(ids) - limit} more" if len(ids) > limit else shown
+
+
+class UnknownTrackIds(LookupError):
+    """The update names track ids the library does not hold. Nothing was written."""
+
+    def __init__(self, track_ids: Iterable[str]) -> None:
+        self.track_ids = list(track_ids)
+        super().__init__(f"Unknown track id(s): {_id_list(self.track_ids)}")
+
+
+class TrackWriteFailed(RuntimeError):
+    """A library write failed partway through an update.
+
+    The rows the update had already touched were written back from snapshots read
+    before its first write; ``unrestored`` names the rows whose restore failed too.
+    """
+
+    def __init__(
+        self,
+        track_id: str,
+        cause: BaseException,
+        restored: list[str],
+        unrestored: list[str],
+    ) -> None:
+        self.track_id = track_id
+        self.restored = restored
+        self.unrestored = unrestored
+        msg = f"Library write failed on track {track_id}: {cause}."
+        if unrestored:
+            msg += f" Could not restore track(s) {_id_list(unrestored)} - check them."
+        else:
+            msg += f" {len(restored)} track(s) restored to their earlier values."
+        super().__init__(msg)
+
+
 def writable_fields(backend: str) -> frozenset[str]:
     """Field keys ``backend`` (``"live"`` / ``"xml"``) persists."""
     return _WRITABLE[backend]

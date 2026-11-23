@@ -17,7 +17,7 @@ import urllib.parse
 import uuid
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from concurrent.futures import Executor, ThreadPoolExecutor
-from contextlib import asynccontextmanager
+from contextlib import ExitStack, asynccontextmanager
 from pathlib import Path, PureWindowsPath
 from typing import Any, BinaryIO
 
@@ -124,7 +124,7 @@ from .playcount_sync import (
 )
 from .rbep_parser import list_projects as rbep_list_projects
 from .rbep_parser import parse_project as rbep_parse_project
-from .rekordbox_bridge import RekordboxBridge
+from .rekordbox_bridge import PlaylistNotFoundError, RekordboxBridge
 from .services import (
     AudioEngine,
     BeatAnalyzer,
@@ -141,7 +141,12 @@ from .soundcloud_api import (
     SoundCloudSyncEngine,
 )
 from .soundcloud_downloader import sc_downloader
-from .track_fields import TrackFieldError
+from .track_fields import (
+    TrackFieldError,
+    TrackWriteFailed,
+    UnknownTrackIds,
+    normalise_track_updates,
+)
 from .usb_manager import (
     UsbActions,
     UsbDetector,
@@ -635,8 +640,12 @@ class MergeReq(BaseModel):
 
 
 class RbxSyncReq(BaseModel):
-    track_ids: list[str]
+    """Tracks by id (``playlist_name`` makes them one playlist) or one library playlist/folder."""
+
+    track_ids: list[str] = _Field(default_factory=list)
     filename: str | None = "rekordbox_export.xml"
+    playlist_id: str | None = None
+    playlist_name: str | None = None
 
 
 class RbxImportReq(BaseModel):
@@ -838,135 +847,104 @@ def _content_disposition_inline(filename: str) -> str:
 # in its threadpool instead of on the event loop.
 _STREAM_CHUNK_BYTES = 1024 * 1024
 
+#: Content-Type per stored format. AIFF never goes out raw (``playable_audio`` WAV view).
+_STREAM_MEDIA_TYPES = {
+    ".mp3": "audio/mpeg",
+    ".wav": "audio/wav",
+    ".flac": "audio/flac",
+    ".m4a": "audio/mp4",
+    ".ogg": "audio/ogg",
+}
 
-async def _wav_view_response(file_path: Path, range_header: str | None) -> Response:
-    """AIFF served as a virtual WAV with Range support (Chromium decodes no AIFF)."""
-    try:
-        view = await asyncio.to_thread(playable_audio.describe, file_path)
-    except playable_audio.WavViewError as e:
-        logger.warning("op=wav_view file=%s err=%s", file_path.name, e)
-        raise HTTPException(415, "Audio encoding not supported for playback") from e
 
+def _read_file_range(file_path: Path, start: int, end: int) -> Iterator[bytes]:
+    """Bytes ``start..end`` (inclusive) of ``file_path`` in 1 MiB reads. Blocking."""
+    with open(file_path, "rb") as f:
+        f.seek(start)
+        remaining = end - start + 1
+        while remaining > 0:
+            data = f.read(min(_STREAM_CHUNK_BYTES, remaining))
+            if not data:
+                break
+            remaining -= len(data)
+            yield data
+
+
+def _byte_range_response(
+    request: Request,
+    size: int,
+    read_range: Callable[[int, int], Iterator[bytes]],
+    media_type: str,
+    filename: str,
+) -> Response:
+    """One RFC 7233 Range answer for every stream route, raw file and WAV view alike.
+
+    Single range only (``a-b``, ``a-``, ``-n``; ``n`` past the size = whole file) -> 206.
+    No, malformed or multi-range header -> 200 with the whole file (RFC 7233 lets a
+    server ignore Range; no multipart/byteranges). Unsatisfiable -> 416 ``bytes */size``.
+    HEAD gets the same status and headers, no body, and reads nothing.
+    """
     headers = {
         "Accept-Ranges": "bytes",
-        "Content-Disposition": _content_disposition_inline(
-            playable_audio.wav_filename(file_path.name)
-        ),
+        "Content-Disposition": _content_disposition_inline(filename),
         "Cache-Control": "no-cache",
     }
-    start, end, status = 0, view.size - 1, 200
+    start, end, status = 0, size - 1, 200
+    range_header = request.headers.get("range")
     if range_header:
         try:
-            byte_range = playable_audio.parse_range(range_header, view.size)
+            byte_range = playable_audio.parse_range(range_header, size)
         except ValueError as e:
             return Response(
                 status_code=416,
-                headers={"Content-Range": f"bytes */{view.size}"},
+                headers={"Content-Range": f"bytes */{size}"},
                 content=f"Invalid range: {e}",
             )
-        if byte_range is not None:  # None: malformed header, ignored -> whole file
+        if byte_range is not None:
             start, end = byte_range
             status = 206
-            headers["Content-Range"] = f"bytes {start}-{end}/{view.size}"
+            headers["Content-Range"] = f"bytes {start}-{end}/{size}"
     headers["Content-Length"] = str(end - start + 1)
+    if request.method == "HEAD":
+        return Response(status_code=status, media_type=media_type, headers=headers)
     return StreamingResponse(
-        playable_audio.iter_range(view, start, end),
-        status_code=status,
-        media_type="audio/wav",
-        headers=headers,
+        read_range(start, end), status_code=status, media_type=media_type, headers=headers
     )
 
 
-@app.get("/api/stream")
-async def stream_audio(path: str, request: Request):
-    """Streams audio file with HTTP Range support — required for browser seeking.
+async def _audio_stream_response(path: str, request: Request) -> Response:
+    """Shared body of ``/api/stream`` and ``/api/audio/stream`` (GET + HEAD).
 
-    AIFF goes out as WAV (``_wav_view_response``); every other format as stored.
+    AIFF goes out as a virtual WAV (Chromium decodes no AIFF); every other format as stored.
     """
     file_path = validate_audio_path(path)
     if playable_audio.needs_wav_view(file_path):
-        return await _wav_view_response(file_path, request.headers.get("range"))
-
-    mime_types = {
-        ".mp3": "audio/mpeg",
-        ".wav": "audio/wav",
-        ".aiff": "audio/aiff",
-        ".aif": "audio/aiff",
-        ".flac": "audio/flac",
-        ".m4a": "audio/mp4",
-        ".ogg": "audio/ogg",
-    }
-    ext = file_path.suffix.lower()
-    media_type = mime_types.get(ext, "application/octet-stream")
-
-    file_size = file_path.stat().st_size
-    range_header = request.headers.get("range") or request.headers.get("Range")
-
-    # No Range header → still expose Accept-Ranges so browsers know seeking is possible
-    if not range_header:
-
-        def _full() -> Iterator[bytes]:
-            with open(file_path, "rb") as f:
-                while True:
-                    chunk = f.read(_STREAM_CHUNK_BYTES)
-                    if not chunk:
-                        break
-                    yield chunk
-
-        return StreamingResponse(
-            _full(),
-            media_type=media_type,
-            headers={
-                "Accept-Ranges": "bytes",
-                "Content-Length": str(file_size),
-                "Content-Disposition": _content_disposition_inline(file_path.name),
-                "Cache-Control": "no-cache",
-            },
+        try:
+            view = await asyncio.to_thread(playable_audio.describe, file_path)
+        except playable_audio.WavViewError as e:
+            logger.warning("op=wav_view file=%s err=%s", file_path.name, e)
+            raise HTTPException(415, "Audio encoding not supported for playback") from e
+        return _byte_range_response(
+            request,
+            view.size,
+            lambda start, end: playable_audio.iter_range(view, start, end),
+            "audio/wav",
+            playable_audio.wav_filename(file_path.name),
         )
 
-    # Parse "bytes=START-END"
-    try:
-        units, _, rng = range_header.partition("=")
-        if units.strip().lower() != "bytes":
-            raise ValueError("only byte ranges supported")
-        start_s, _, end_s = rng.strip().partition("-")
-        start = int(start_s) if start_s else 0
-        end = int(end_s) if end_s else file_size - 1
-        end = min(end, file_size - 1)
-        if start > end or start < 0:
-            raise ValueError("invalid range")
-    except Exception as e:
-        return Response(
-            status_code=416,
-            headers={"Content-Range": f"bytes */{file_size}"},
-            content=f"Invalid range: {e}",
-        )
-
-    chunk_size = end - start + 1
-
-    def _ranged() -> Iterator[bytes]:
-        with open(file_path, "rb") as f:
-            f.seek(start)
-            remaining = chunk_size
-            while remaining > 0:
-                data = f.read(min(_STREAM_CHUNK_BYTES, remaining))
-                if not data:
-                    break
-                remaining -= len(data)
-                yield data
-
-    return StreamingResponse(
-        _ranged(),
-        status_code=206,
-        media_type=media_type,
-        headers={
-            "Accept-Ranges": "bytes",
-            "Content-Range": f"bytes {start}-{end}/{file_size}",
-            "Content-Length": str(chunk_size),
-            "Content-Disposition": _content_disposition_inline(file_path.name),
-            "Cache-Control": "no-cache",
-        },
+    return _byte_range_response(
+        request,
+        file_path.stat().st_size,
+        lambda start, end: _read_file_range(file_path, start, end),
+        _STREAM_MEDIA_TYPES.get(file_path.suffix.lower(), "application/octet-stream"),
+        file_path.name,
     )
+
+
+@app.api_route("/api/stream", methods=["GET", "HEAD"])
+async def stream_audio(path: str, request: Request):
+    """Streams an audio file with HTTP Range support — required for browser seeking."""
+    return await _audio_stream_response(path, request)
 
 
 def _waveform_body(file_path: Path, pps: int) -> bytes:
@@ -3199,17 +3177,13 @@ async def analyze_track(tid: str):
         raise HTTPException(500, safe_error_message(e))
 
 
-@app.get("/api/audio/stream")
+@app.api_route("/api/audio/stream", methods=["GET", "HEAD"])
 async def stream_audio_file(path: str, request: Request):
-    """Streams an audio file from the local filesystem (AIFF as WAV, see /api/stream)."""
-    logger.info(f"Stream request for: {path}")
+    """Same response as ``/api/stream``, under the URL DawEngine uses.
 
-    # SECURITY: Validate against allowed audio roots to prevent path traversal
-    valid_path = validate_audio_path(path)
-    if playable_audio.needs_wav_view(valid_path):
-        return await _wav_view_response(valid_path, request.headers.get("range"))
-
-    return FileResponse(valid_path, headers={"Accept-Ranges": "bytes"})
+    Was a ``FileResponse``, which on Starlette 0.35 ignores Range (200 + whole body).
+    """
+    return await _audio_stream_response(path, request)
 
 
 # ── Pioneer "My Tag" (mode-agnostic — XML + Live both supported) ──────────────
@@ -3287,60 +3261,117 @@ def save_grid(r: GridReq):
     return {"status": "success" if db.save_track_beatgrid(r.track_id, r.beat_grid) else "error"}
 
 
+def _tag_file_paths(track_ids: list[str]) -> list[str]:
+    """Audio files of ``track_ids`` the tag write-back may touch (no streaming URIs)."""
+    paths = []
+    for tid in track_ids:
+        src = (db.get_track_details(tid) or {}).get("path")
+        if src and not str(src).startswith(_STREAMING_PREFIXES):
+            paths.append(str(src))
+    return paths
+
+
+def _file_tag_writeback(track_ids: list[str], updates: dict[str, Any]) -> dict[str, str]:
+    """Mirror ``updates`` into each track's audio file tags, after the library write.
+
+    Best effort: a failure here never undoes the library write. Per track "written",
+    "failed" (the tag writer refused), "skipped" (nothing written: no field the file
+    stores, e.g. ColorID alone; no local file; settings.write_tags_to_files=False,
+    default true) or "error". Pictures stay as they are: the edits carry no artwork,
+    and re-embedding the library's thumbnail replaced the file's own cover and
+    dropped a back cover.
+    """
+    status = dict.fromkeys(track_ids, "skipped")
+    if not audio_tags.tag_fields(updates):
+        return status
+    try:
+        enabled = SettingsManager.load().get("write_tags_to_files", True)
+    except Exception as exc:
+        logger.warning(f"Tag write-back skipped, settings unreadable: {exc}")
+        return dict.fromkeys(track_ids, "error")
+    if not enabled:
+        return status
+    for tid in status:
+        try:
+            src = (db.get_track_details(tid) or {}).get("path")
+            if src and not str(src).startswith(_STREAMING_PREFIXES):
+                ok = audio_tags.write_tags(src, updates)
+                status[tid] = "written" if ok else "failed"
+        except Exception as exc:
+            logger.warning(f"Tag write-back skipped for {tid}: {exc}")
+            status[tid] = "error"
+    return status
+
+
+def _update_tracks_then_tags(
+    track_ids: list[str], updates: dict[str, Any]
+) -> dict[str, str] | None:
+    """Library write, then the file write-back. None when the library answers False.
+
+    Each file's tag-write lock is taken before the master.db lock is released, so two
+    edits of one track write its file in the order they wrote the library; the older
+    value never lands last. Raises what ``update_tracks_metadata`` raises.
+    """
+    paths = _tag_file_paths(track_ids) if audio_tags.tag_fields(updates) else []
+    file_locks = audio_tags.FileWriteLocks(paths)
+    with ExitStack() as held:
+        with db_lock():
+            if not db.update_tracks_metadata(track_ids, updates):
+                return None
+            held.enter_context(file_locks)
+        return _file_tag_writeback(track_ids, updates)
+
+
 @app.post("/api/track/{tid}", dependencies=[Depends(require_session)])
 def update_track(tid: str, r: TrackUpdateReq):
+    """Edit one track. 404 for an unknown id, 400 for a value the backend refuses.
+
+    ``file_tags`` reports the best-effort write-back into the audio file.
+    """
     _reject_while_rekordbox_runs("editing tracks")
     updates = {k: v for k, v in r.model_dump().items() if v is not None}
     if not updates:
         return {"status": "no_change"}
     try:
-        if not db.update_tracks_metadata([tid], updates):
-            raise HTTPException(500, "Update returned False (unknown error)")
-
-        # Best-effort write-back to the source audio file's tags. Disabled by
-        # toggling settings.write_tags_to_files=False (default true).
-        tag_status = "skipped"
-        try:
-            cfg = SettingsManager.load()
-            if cfg.get("write_tags_to_files", True):
-                track = db.get_track_details(tid) or {}
-                src = track.get("path")
-                if src:
-                    artwork_bytes = None
-                    art_path = track.get("Artwork")
-                    if art_path:
-                        artwork_bytes = audio_tags.load_artwork(art_path)
-                    ok = audio_tags.write_tags(src, updates, artwork=artwork_bytes)
-                    tag_status = "written" if ok else "failed"
-        except Exception as exc:
-            logger.warning(f"Tag write-back skipped for {tid}: {exc}")
-            tag_status = "error"
-
-        return {"status": "success", "file_tags": tag_status}
-    except HTTPException:
-        raise
+        file_tags = _update_tracks_then_tags([tid], updates)
     except TrackFieldError as e:
         raise HTTPException(400, str(e)) from e
+    except UnknownTrackIds as e:
+        raise HTTPException(404, str(e)) from e
     except Exception as e:
         logger.error(f"Update failed for {tid}: {e}")
         raise HTTPException(500, f"Update failed: {e!s}")
+    if file_tags is None:
+        raise HTTPException(500, "Update returned False (unknown error)")
+    return {"status": "success", "file_tags": file_tags[tid]}
 
 
 @app.patch("/api/tracks/batch", dependencies=[Depends(require_session)])
 def batch_up(r: BatchReq):
-    """Write the same fields to many tracks. 400 names a field or value the backend refuses.
+    """Write the same fields to many tracks, all or nothing.
 
-    A refused update leaves every track untouched. A failed write is a 500, not the old
-    200 `{"status": "error"}` that no caller read.
+    400 names a field or value the backend refuses, 404 every unknown track id; both
+    before the first write. A write that fails partway is a 500 once the tracks
+    already written are restored (live mode). ``file_tags`` maps each track id to its
+    best-effort write-back into the audio file, as the single-track edit reports it.
     """
     _reject_while_rekordbox_runs("editing tracks")
+    track_ids = list(dict.fromkeys(r.track_ids))
     try:
-        ok = db.update_tracks_metadata(r.track_ids, r.updates)
+        updates = normalise_track_updates(r.updates, db.mode)
+        file_tags = _update_tracks_then_tags(track_ids, updates)
     except TrackFieldError as e:
         raise HTTPException(400, str(e)) from e
-    if not ok:
+    except UnknownTrackIds as e:
+        raise HTTPException(404, str(e)) from e
+    except TrackWriteFailed as e:
+        raise HTTPException(500, str(e)) from e
+    except Exception as e:
+        logger.error(f"Batch update failed for {len(track_ids)} track(s): {e}")
+        raise HTTPException(500, f"Library update failed: {e!s}") from e
+    if file_tags is None:
         raise HTTPException(500, "Library update failed for one or more tracks.")
-    return {"status": "success"}
+    return {"status": "success", "file_tags": file_tags}
 
 
 @app.post("/api/system/heartbeat")
@@ -4492,20 +4523,39 @@ def _rbx_export_path(filename: str | None) -> Path:
 
 
 @app.post("/api/rekordbox/export", dependencies=[Depends(require_session)])
-def rbx_export(r: RbxSyncReq) -> dict[str, str]:
-    """Write the given tracks as a Rekordbox XML into ``EXPORT_DIR``. 400 on a bad name."""
+def rbx_export(r: RbxSyncReq) -> dict[str, Any]:
+    """Write tracks, or one playlist/folder with its NODE tree, as Rekordbox XML into ``EXPORT_DIR``.
+
+    Streaming tracks have no file and are left out (``skipped_streaming``). 400 on a bad
+    name, on ``playlist_id`` together with ``track_ids``, or when nothing exportable is
+    left; 404 for an unknown ``playlist_id``.
+    """
     output_path = _rbx_export_path(r.filename)
+    name = (r.playlist_name or "").strip() or None
+    if r.playlist_id and r.track_ids:
+        raise HTTPException(400, "Send either track_ids or playlist_id, not both.")
     try:
-        xml_path = RekordboxBridge.export_collection(r.track_ids, output_path)
-    except ValueError as e:  # none of the ids resolved to a track
+        if r.playlist_id:
+            result = RekordboxBridge.export_playlist(r.playlist_id, output_path, name)
+        else:
+            result = RekordboxBridge.export_collection(r.track_ids, output_path, name)
+    except PlaylistNotFoundError as e:
+        raise HTTPException(404, str(e)) from e
+    except ValueError as e:  # no id resolved to a track, or only streaming tracks
         raise HTTPException(400, str(e)) from e
     except Exception as e:
         logger.error(f"Rekordbox export failed: {e}")
         raise HTTPException(500, safe_error_message(e)) from e
+    message = f"Exported {result.exported} tracks to XML."
+    if result.skipped_streaming:
+        message += f" Skipped {result.skipped_streaming} streaming tracks (no local file)."
     return {
         "status": "success",
-        "message": f"Exported {len(r.track_ids)} tracks to XML.",
-        "path": str(xml_path),
+        "message": message,
+        "path": result.path,
+        "exported": result.exported,
+        "skipped_streaming": result.skipped_streaming,
+        "playlist": result.playlist,
     }
 
 
@@ -5998,9 +6048,8 @@ def analyze_audio(req: AudioImportReq):
     if not LIBROSA_AVAILABLE:
         logger.warning("Librosa not installed. Audio analysis will be mocked.")
 
-    file_path = Path(req.file_path)
-    if not file_path.exists() or not file_path.is_file():
-        raise HTTPException(status_code=404, detail="Audio file not found")
+    # Same sandbox as the stream routes: 400 bad path/extension, 404 missing, 403 outside roots.
+    file_path = validate_audio_path(req.file_path)
 
     task_id = f"analysis_{secrets.token_hex(8)}"
     return AudioAnalyzer.analyze_track(task_id, str(file_path), req.mode)
@@ -6080,6 +6129,51 @@ _ANALYZE_FULL_ERRORS: dict[str, tuple[int, str]] = {
         "The analysis files were written, but updating master.db failed. Check logs.",
     ),
 }
+_ANALYSIS_FAILED_DETAIL = "Analysis failed. Check logs for details."
+
+#: Writer result fields a client may see. Everything else (``anlz_paths``, raw ``error``
+#: text, exception messages) can carry absolute user paths and stays in the log.
+_PUBLIC_ANALYSIS_FIELDS = frozenset(
+    {
+        "track_id",
+        "index",
+        "total",
+        "analyzed",
+        "skipped",
+        "errors",
+        "status",
+        "reason",
+        "bpm",
+        "key",
+        "camelot",
+        "key_id",
+        "duration",
+        "lufs",
+        "beat_count",
+        "phrase_count",
+        "beat_method",
+        "key_method",
+        "db_updated",
+        "elapsed",
+    }
+)
+
+
+def _public_analysis_result(result: Mapping[str, Any]) -> dict[str, Any]:
+    """Writer result / batch progress line without file paths.
+
+    ``anlz_paths`` becomes ``anlz_files`` (the kinds written: ``dat``, ``ext``, ...);
+    an error's text is replaced by the fixed detail for its ``reason``.
+    """
+    public = {k: v for k, v in result.items() if k in _PUBLIC_ANALYSIS_FIELDS}
+    anlz_paths = result.get("anlz_paths")
+    if isinstance(anlz_paths, Mapping):
+        public["anlz_files"] = sorted(str(kind) for kind in anlz_paths)
+    if result.get("status") == "error":
+        public["error"] = _ANALYZE_FULL_ERRORS.get(
+            str(result.get("reason")), (500, _ANALYSIS_FAILED_DETAIL)
+        )[1]
+    return public
 
 
 @app.post("/api/track/{tid}/analyze-full", dependencies=[Depends(require_session)])
@@ -6104,11 +6198,11 @@ async def analyze_track_full(tid: str, req: AnalyzeFullReq = AnalyzeFullReq()):
         if result.get("status") == "error":
             logger.warning("analyze-full %s refused: %s", tid, result.get("error"))
             status_code, detail = _ANALYZE_FULL_ERRORS.get(
-                str(result.get("reason")), (500, "Analysis failed. Check logs for details.")
+                str(result.get("reason")), (500, _ANALYSIS_FAILED_DETAIL)
             )
             raise HTTPException(status_code, detail)
 
-        return {"status": "ok", "data": result}
+        return {"status": "ok", "data": _public_analysis_result(result)}
     except HTTPException:
         raise
     except Exception as e:
@@ -6140,8 +6234,9 @@ async def analyze_batch(req: AnalyzeBatchReq = AnalyzeBatchReq()):
     Batch-analyze tracks and write results to Rekordbox DB + ANLZ.
     If track_ids is None, automatically finds all unanalyzed tracks.
 
-    Returns a streaming response with progress updates (NDJSON). 409 while another
-    analysis-to-DB run (this route or analyze-full) is in flight.
+    Returns a streaming response with progress updates (NDJSON, one
+    ``_public_analysis_result`` line per track: ids, counters, status, results, no file
+    paths). 409 while another analysis-to-DB run (this route or analyze-full) is in flight.
     """
     from starlette.background import BackgroundTask
 
@@ -6171,7 +6266,7 @@ async def analyze_batch(req: AnalyzeBatchReq = AnalyzeBatchReq()):
             _analyze_batch_active += 1
         try:
             for progress in writer.analyze_batch(track_ids, force=req.force):
-                yield json.dumps(progress) + "\n"
+                yield json.dumps(_public_analysis_result(progress)) + "\n"
         finally:
             with _analyze_batch_count_lock:
                 _analyze_batch_active -= 1
@@ -7309,25 +7404,23 @@ async def usb_playcount_resolve(body: PlayCountResolveRequest):
     """
     Commit resolved play counts to the PC database and the USB XML.
 
-    Writes to PC via rbox (best-effort) and patches the USB XML atomically.
-    Updates the sync metadata timestamp on success.
+    Writes to the live library's master.db via rbox (best-effort, under ``db_lock``) and
+    patches the USB XML atomically. Updates the sync metadata timestamp on success.
+    Live mode: 409 while Rekordbox runs. XML library: no master.db, so only the USB XML
+    is patched and ``pc_db_skipped`` is true.
 
     Request body: {resolutions: [...], usb_root, usb_xml_path}
-    Returns: {status, data: {committed, errors}}
+    Returns: {status, data: {committed, usb_updated, pc_db_skipped, errors}}
     """
+    _reject_while_rekordbox_runs("syncing play counts")
+    live_db_path = _live_master_db_path()
+    pc_db_path = str(live_db_path) if live_db_path is not None else None
     logger.info(
         "[USB-PC] playcount resolve: %d resolutions, usb_root=%s",
         len(body.resolutions),
         body.usb_root,
     )
     try:
-        import os as _os
-
-        from .config import DB_FILENAME
-
-        rb_root = str(Path(_os.environ.get("APPDATA", "")) / "Pioneer" / "rekordbox")
-        pc_db_path = str(Path(rb_root) / DB_FILENAME) if hasattr(Path(rb_root), "__str__") else ""
-
         resolutions_dicts = [r.model_dump() for r in body.resolutions]
         result = await asyncio.get_event_loop().run_in_executor(
             None,
@@ -8265,4 +8358,6 @@ def duplicates_merge(body: DuplicateMergeRequest):
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    from .logging_utils import uvicorn_log_config
+
+    uvicorn.run(app, host="127.0.0.1", port=8000, log_config=uvicorn_log_config())

@@ -353,14 +353,10 @@ def test_route_other_formats_unchanged(sandbox_root: Path, route: str) -> None:
     assert r.status_code == 200
     assert r.content == data
     assert r.headers["content-type"] == "audio/mpeg"
+    # Both routes share one Range implementation (tests/test_stream_ranges.py).
     ranged = _get(route, src, headers={"Range": "bytes=10-19"})
-    if route == "/api/stream":
-        assert ranged.status_code == 206
-        assert ranged.content == data[10:20]
-    else:
-        # FileResponse on the pinned Starlette 0.35 ignores Range: whole file, as before.
-        assert ranged.status_code == 200
-        assert ranged.content == data
+    assert ranged.status_code == 206
+    assert ranged.content == data[10:20]
 
 
 def test_route_reads_aiff_off_the_event_loop(

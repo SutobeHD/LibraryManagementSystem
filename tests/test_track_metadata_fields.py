@@ -35,6 +35,7 @@ from app.track_fields import (
     XML_WRITABLE_FIELDS,
     InvalidTrackFieldValue,
     TrackFieldError,
+    UnknownTrackIds,
     UnsupportedTrackFields,
     normalise_track_updates,
 )
@@ -361,7 +362,9 @@ def test_xml_ui_rating_is_stored_on_the_ui_scale(xml_db) -> None:
 
 def test_xml_unknown_track_changes_nothing(xml_db) -> None:
     before = _lib(xml_db).read_bytes()
-    assert xml_db.update_tracks_metadata(["1", "nope"], {"Title": "Z"}) is False
+    with pytest.raises(UnknownTrackIds) as exc:
+        xml_db.update_tracks_metadata(["1", "nope"], {"Title": "Z"})
+    assert exc.value.track_ids == ["nope"]
     assert xml_db.xml_db.tracks["1"]["Title"] == "A"
     _assert_library_intact(xml_db, before)
 
@@ -499,7 +502,7 @@ def test_batch_route_success(live_main, conn, auth_token) -> None:
     body = {"track_ids": ["1"], "updates": {"Rating": 3, "ColorID": "5"}}
     r = _req("PATCH", "/api/tracks/batch", body, auth_token)
     assert r.status_code == 200, r.text
-    assert r.json() == {"status": "success"}
+    assert r.json() == {"status": "success", "file_tags": {"1": "skipped"}}
     assert (conn.item.rating, conn.item.color_id) == (3, "5")
 
 
@@ -510,10 +513,14 @@ def test_batch_route_xml_value_that_would_corrupt_the_file_is_400(xml_main, auth
     _assert_library_intact(xml_main, before)
 
 
-def test_batch_route_unknown_track_is_500(xml_main, auth_token) -> None:
-    body = {"track_ids": ["nope"], "updates": {"Rating": 3}}
+def test_batch_route_unknown_track_is_404(xml_main, auth_token) -> None:
+    before = _lib(xml_main).read_bytes()
+    body = {"track_ids": ["1", "nope"], "updates": {"Rating": 3}}
     r = _req("PATCH", "/api/tracks/batch", body, auth_token)
-    assert r.status_code == 500, r.text
+    assert r.status_code == 404, r.text
+    assert r.json()["detail"] == "Unknown track id(s): nope"
+    assert xml_main.xml_db.tracks["1"]["Rating"] == 204
+    _assert_library_intact(xml_main, before)
 
 
 def test_batch_route_failed_xml_save_is_500(xml_main, auth_token) -> None:

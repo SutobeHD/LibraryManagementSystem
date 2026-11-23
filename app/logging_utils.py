@@ -22,7 +22,9 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from pathlib import Path
+from typing import Any
 
 from .config import EXPORT_DIR, MUSIC_DIR, TEMP_DIR
 
@@ -48,18 +50,63 @@ _SENSITIVE_PREFIXES = [
 ]
 
 
+# A path separator as it shows up in log text: "\" or "/", doubled by a
+# repr / JSON dump, or percent-encoded in a URL query string.
+_SEP = r"(?:\\{1,2}|/|%5[cC]|%2[fF])"
+# Windows long-path / UNC spellings of a local drive: \\?\C:\..., \\localhost\C$\...
+_UNC = r"(?:(?:\\{2,4}|//|(?:%5[cC]){2})(?:\?|localhost|127\.0\.0\.1)" + _SEP + r")?"
+# What may follow a matched prefix: a separator or anything that ends a path
+# token. Keeps "...\Users\tb" from matching inside "...\Users\tbone".
+_END = r"(?=$|[\\/%\s'\":;,)\]}>|?&#])"
+
+
+def _prefix_pattern(prefix: str) -> str:
+    """Regex for one absolute path prefix in every spelling a log line can carry.
+
+    The old plain `str.replace` only caught the exact spelling, so
+    `C:/Users/<name>/Music/...` (1791 of 5037 library paths), a URL-encoded
+    query string in a uvicorn access line, the doubled backslashes of a list
+    repr and the UNC form all reached the logs with the account name in them.
+    """
+    parts = [part for part in re.split(r"[\\/]+", prefix) if part]
+    if not parts:
+        return ""
+    head, *rest = parts
+    if re.fullmatch(r"[A-Za-z]:", head):
+        # "C:" as typed, "C$" in an admin share, "C%3A" percent-encoded
+        first = re.escape(head[0]) + r"(?::|\$|%3[aA])"
+        lead = _UNC
+    else:
+        first = re.escape(head)
+        lead = _SEP if prefix[:1] in "\\/" else ""
+
+    def component(text: str) -> str:
+        return re.escape(text).replace(r"\ ", r"(?: |%20|\+)")
+
+    body = _SEP.join([first, *(component(c) for c in rest)])
+    return lead + body + _END
+
+
+def _build_scrubber(prefixes: list[str]) -> re.Pattern[str] | None:
+    patterns = [_prefix_pattern(p) for p in sorted(set(prefixes), key=len, reverse=True)]
+    patterns = [p for p in patterns if p]
+    return re.compile("|".join(patterns), re.IGNORECASE) if patterns else None
+
+
+_SCRUBBER = _build_scrubber(_SENSITIVE_PREFIXES)
+
+
 def safe_error_message_str(msg: str) -> str:
     """Strip absolute paths from a rendered log/error string.
 
     Operates on already-rendered text — call sites pass `str(exc)`,
     `Formatter.format` output, or `record.exc_text`. Replaces each
-    sensitive prefix with ``[...]``.
+    sensitive prefix with ``[...]``, whatever the slash direction, case,
+    doubling, percent-encoding or UNC spelling.
     """
-    if not msg:
+    if not msg or _SCRUBBER is None:
         return msg
-    for sensitive in _SENSITIVE_PREFIXES:
-        msg = msg.replace(sensitive, "[...]")
-    return msg
+    return _SCRUBBER.sub("[...]", msg)
 
 
 class RedactingFormatter(logging.Formatter):
@@ -83,3 +130,47 @@ class RedactingFormatter(logging.Formatter):
         if record.exc_text:
             record.exc_text = safe_error_message_str(record.exc_text)
         return safe_error_message_str(s)
+
+
+def _redacting(base: type[logging.Formatter]) -> type[logging.Formatter]:
+    """A subclass of `base` whose output and cached traceback are scrubbed."""
+
+    class _Redacting(base):  # type: ignore[valid-type,misc]
+        def format(self, record: logging.LogRecord) -> str:
+            s = super().format(record)
+            if record.exc_text:
+                record.exc_text = safe_error_message_str(record.exc_text)
+            return safe_error_message_str(s)
+
+    _Redacting.__name__ = f"Redacting{base.__name__}"
+    return _Redacting
+
+
+def uvicorn_log_config() -> dict[str, Any]:
+    """uvicorn's own logging config with scrubbing formatters.
+
+    uvicorn's "uvicorn" / "uvicorn.access" loggers do not propagate to the root
+    logger, so `RedactingFormatter` never saw them: access lines carried the
+    request query string (`/api/stream?path=C%3A%5CUsers%5C<name>...`) and the
+    "Exception in ASGI application" traceback carried every frame's file path.
+    Pass this as `uvicorn.run(..., log_config=uvicorn_log_config())`.
+    """
+    import copy
+
+    from uvicorn.config import LOGGING_CONFIG
+
+    config = copy.deepcopy(LOGGING_CONFIG)
+    config["formatters"]["default"]["()"] = RedactingUvicornDefaultFormatter
+    config["formatters"]["access"]["()"] = RedactingUvicornAccessFormatter
+    return config
+
+
+try:
+    from uvicorn.logging import AccessFormatter as _UvicornAccess
+    from uvicorn.logging import DefaultFormatter as _UvicornDefault
+
+    RedactingUvicornDefaultFormatter = _redacting(_UvicornDefault)
+    RedactingUvicornAccessFormatter = _redacting(_UvicornAccess)
+except ImportError:  # uvicorn is a runtime dependency; keep the module importable without it
+    RedactingUvicornDefaultFormatter = RedactingFormatter
+    RedactingUvicornAccessFormatter = RedactingFormatter

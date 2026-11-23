@@ -21,7 +21,11 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import os
+import threading
+from collections.abc import Iterable
 from pathlib import Path
+from types import TracebackType
 from typing import Any
 
 import mutagen
@@ -65,6 +69,69 @@ def _normalize_fields(updates: dict[str, Any]) -> dict[str, Any]:
         if canonical:
             out[canonical] = v
     return out
+
+
+def tag_fields(updates: dict[str, Any]) -> dict[str, Any]:
+    """The part of a library update the file's tags store (``ColorID`` is not one)."""
+    return _normalize_fields(updates)
+
+
+# One lock per audio file: mutagen rewrites the whole tag block, so two writes must
+# never interleave on it. Re-entrant, because the edit routes hold it from their
+# master.db write through ``write_tags``. Grows with the files written, bounded by
+# the library.
+_file_locks: dict[str, Any] = {}
+_file_locks_guard = threading.Lock()
+
+
+def _file_key(path: str | Path) -> str:
+    try:
+        resolved = str(Path(path).resolve())
+    except (OSError, RuntimeError):
+        resolved = os.path.abspath(path)
+    return os.path.normcase(resolved)
+
+
+def _file_lock(key: str) -> Any:
+    with _file_locks_guard:
+        lock = _file_locks.get(key)
+        if lock is None:
+            lock = _file_locks[key] = threading.RLock()
+        return lock
+
+
+class FileWriteLocks:
+    """Context manager holding the tag-write lock of every file in ``paths``.
+
+    Keys are resolved at construction, so a caller can build it before taking another
+    lock and enter it inside that lock. Acquired in sorted order, so two holders
+    never deadlock.
+    """
+
+    def __init__(self, paths: Iterable[str | Path]) -> None:
+        keys = sorted({_file_key(p) for p in paths if p})
+        self._locks = [_file_lock(k) for k in keys]
+
+    def __enter__(self) -> FileWriteLocks:
+        taken: list[Any] = []
+        try:
+            for lock in self._locks:
+                lock.acquire()
+                taken.append(lock)
+        except BaseException:
+            for lock in reversed(taken):
+                lock.release()
+            raise
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
+        for lock in reversed(self._locks):
+            lock.release()
 
 
 def _rating_to_popm(stars: int) -> int:
@@ -349,7 +416,8 @@ def write_tags(
     if not fields and not artwork:
         return True
     try:
-        return handler(p, fields, artwork)
+        with _file_lock(_file_key(p)):
+            return handler(p, fields, artwork)
     except PermissionError as exc:
         # Common on Windows when Rekordbox or another player holds the file.
         logger.warning("Tag write blocked (file in use): %s — %s", path, exc)

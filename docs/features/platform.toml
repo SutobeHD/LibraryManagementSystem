@@ -136,12 +136,12 @@ id = "log-path-redaction"
 group = "Logging"
 name = "Log/Error-Redaction"
 status = "shipped"
-test = "testen"
+test = "getestet"
+tested = "2026-11-23"
 research = "security-error-handler-exc-info-leak"
 desc = "RedactingFormatter entfernt absolute Pfade aus Logs/Tracebacks, safe_error_message."
 paths = ["app/logging_utils.py", "tests/test_logging_redaction.py"]
-todo = ["Boot-Zeile 'Allowed audio roots: [...]' loggt die Pfade unredigiert (app/main.py, Kern-Loop-Test 2026-11-14)", "Scrub greift nur bei C:\\Users\\<name> mit Backslash: Pfade mit / oder Kleinschreibung landen ungefiltert im Log (main.py:3205, 1791 von 5037 Library-Pfaden)", "uvicorn-Access-Log und uvicorn-Traceback laufen am RedactingFormatter vorbei (Query-String mit Pfad)", "UNC-Form \\\\localhost\\C$\\Users\\<name> nicht gefiltert"]
-notes = "PC-Test 2026-11-22: Fehlerantworten an den Client sauber (23 Proben); Boot-Zeile seit dem Fix sauber."
+notes = "PC-Test 2026-11-22: Fehlerantworten an den Client sauber (23 Proben); Boot-Zeile seit dem Fix sauber. Scrub erkennt Pfade jetzt in jeder Schreibweise (fix/log-path-redaction, 2026-11-23): / oder \\, Groß/klein, doppelte Backslashes, URL-kodiert, UNC/\\?\\; uvicorn-Access- und Fehler-Logger laufen über scrubbende Formatter (log_config in app.main und backend_entry), run-backend.mjs zeigt ~ statt Home. PC-Test: 8 Pfad-Anfragen im laufenden Backend, 0 Zeilen mit Kontonamen."
 
 [[feature]]
 id = "sc-log-credential-scrub"

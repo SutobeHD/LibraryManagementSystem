@@ -71,7 +71,7 @@ Critical invariants:
 - **Index-page heap layout:** 24-byte structured prefix (`page_idx`, `next_btree`, const `0x03FFFFFF`, const `0`, `num_entries=0`, sentinel `0x1FFF`) + `0x1FFFFFF8` empty-slot padding to end. `next_btree = first_data_page` when table has data, else `0x03FFFFFF` sentinel.
 - **Empty tables = single index page** (`first == last`).
 - **Index-page header `u7 = num_b_tree_entries`** (= 0 for our writer).
-- **Chain-terminator `next_page` patched `0` → `next_unused_page`** so Rekordbox doesn't follow chain into page 0 (file header).
+- **Chain-terminator `next_page` → the table's own blank page** (never `0`, which would send Rekordbox into the file header; not the global `next_unused` either — `usb_pdb.py` `empty_per_type`, pinned by `tests/test_pdb_structure.py`).
 - **String encoder:** short ASCII / long UTF-16-LE.
 
 Run `pytest tests/test_pdb_structure.py` after any change. Fail = change is wrong unless reference fixture intentionally updated.
