@@ -4751,6 +4751,7 @@ Tests for app/playcount_sync.py — USB <-> PC play-count sync engine.
 - `test_save_meta_invalid_inputs_raise()`
 - `test_roundtrip_meta_is_json_serializable()`
 - `test_pc_db_write_holds_db_lock()` — Every master.db writer serialises on ``app.database._db_write_lock``.
+- `test_no_pc_db_skips_the_pc_side_and_patches_the_usb_xml()` — XML library (``pc_db_path=None``): rbox is never touched, the USB XML still is.
 
 ### `tests/test_popularity_engine.py`
 
@@ -4812,7 +4813,8 @@ Live master.db writers refuse while Rekordbox runs (B13); playlist create + XML 
 - `test_scan_failure_fails_open()`
 - `resolved()` — ``resolve_playcounts`` stub: records the master.db path the route hands it.
 - `test_playcount_resolve_writes_the_live_master_db()`
-- `test_playcount_resolve_outside_live_mode_is_409()`
+- `test_playcount_resolve_refused_while_rekordbox_runs()`
+- `test_playcount_resolve_in_xml_mode_patches_only_the_usb_xml()` — XML library: no master.db to write, but the USB half of the sync still runs.
 - `test_create_playlist_answers_the_id_string()`
 - `test_create_playlist_failure_is_500()`
 - `test_create_playlist_xml_library_answers_the_new_id()`

@@ -24,9 +24,11 @@
   - Fixed: analysis responses (`analyze-batch` progress lines, `analyze-full`)
     no longer contain absolute file paths.
   - Fixed: play-count sync (`/api/usb/playcount/resolve`) wrote a fixed
-    `%APPDATA%` master.db in every mode, even while Rekordbox was running. It
-    now refuses while Rekordbox runs, works only on the live library and holds
-    the database write lock.
+    `%APPDATA%` master.db in every mode, even while Rekordbox was running. With
+    the live library it now refuses while Rekordbox runs, writes the library's
+    own master.db and holds the database write lock; with an XML library it
+    updates only the USB stick and says so. Errors show the backend's reason
+    instead of "Request failed with status code 409".
 
 - USB export:
   - Fixed: every exported track lost its album and kept the OneLibrary

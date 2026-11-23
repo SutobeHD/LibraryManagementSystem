@@ -239,5 +239,28 @@ def test_pc_db_write_holds_db_lock(tmp_path, monkeypatch):
     )
 
     assert res["committed"] == 1
+    assert res["pc_db_skipped"] is False
     assert held == [True, True, True]
     assert not _taken_by_this_thread()  # released afterwards
+
+
+def test_no_pc_db_skips_the_pc_side_and_patches_the_usb_xml(tmp_path, monkeypatch):
+    """XML library (``pc_db_path=None``): rbox is never touched, the USB XML still is."""
+    import types
+
+    def _no_master_db(path: str) -> None:
+        raise AssertionError("master.db opened without a pc_db_path")
+
+    monkeypatch.setitem(sys.modules, "rbox", types.SimpleNamespace(MasterDb=_no_master_db))
+    xml = tmp_path / "export.xml"
+    xml.write_text(_XML, encoding="utf-8")
+
+    res = ps.resolve_playcounts(
+        [{"track_id": "10", "strategy": "take_usb", "pc_count": 1, "usb_count": 6}],
+        pc_db_path=None,
+        usb_xml_path=str(xml),
+    )
+
+    assert res == {"committed": 0, "usb_updated": 1, "pc_db_skipped": True, "errors": []}
+    rows = {r["track_id"]: r for r in ps.read_usb_xml_playcounts(str(xml))}
+    assert rows["10"]["play_count"] == 6

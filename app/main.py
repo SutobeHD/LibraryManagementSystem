@@ -7321,13 +7321,15 @@ async def usb_playcount_resolve(body: PlayCountResolveRequest):
 
     Writes to the live library's master.db via rbox (best-effort, under ``db_lock``) and
     patches the USB XML atomically. Updates the sync metadata timestamp on success.
-    409 while Rekordbox runs or outside live mode (no master.db to write).
+    Live mode: 409 while Rekordbox runs. XML library: no master.db, so only the USB XML
+    is patched and ``pc_db_skipped`` is true.
 
     Request body: {resolutions: [...], usb_root, usb_xml_path}
-    Returns: {status, data: {committed, errors}}
+    Returns: {status, data: {committed, usb_updated, pc_db_skipped, errors}}
     """
     _reject_while_rekordbox_runs("syncing play counts")
-    pc_db_path = _require_live_master_db("Play-count sync")
+    live_db_path = _live_master_db_path()
+    pc_db_path = str(live_db_path) if live_db_path is not None else None
     logger.info(
         "[USB-PC] playcount resolve: %d resolutions, usb_root=%s",
         len(body.resolutions),

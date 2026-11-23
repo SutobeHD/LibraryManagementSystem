@@ -284,76 +284,17 @@ def _apply_strategy(
     return usb_count, max(pc_lp, usb_lp)
 
 
-def resolve_playcounts(
-    resolutions: list[dict],
-    pc_db_path: str,
-    usb_xml_path: str,
-) -> dict:
+def _write_pc_playcounts(
+    pc_db_path: str, finals: dict[str, tuple[int, float]], errors: list[str]
+) -> int:
+    """Write ``finals`` into master.db via rbox under ``db_lock``; returns tracks updated.
+
+    Best-effort: every failure lands in ``errors`` instead of raising, so the USB XML
+    can still be patched.
     """
-    Commit resolved play counts to both the PC Rekordbox DB and the USB XML.
-
-    Each resolution dict must contain:
-      - track_id (str|int)
-      - strategy: "take_max" | "take_pc" | "take_usb" | "sum"
-      - pc_count (int)
-      - usb_count (int)
-      - pc_last_played (float)
-      - usb_last_played (float)
-
-    The PC DB update uses rbox if available (best-effort — logs errors but
-    doesn't raise so the USB XML can still be updated).  The USB XML is
-    patched in-place and written back atomically.
-
-    Args:
-        resolutions: List of resolution dicts (see above).
-        pc_db_path: Path to Rekordbox master.db.
-        usb_xml_path: Path to the exported Rekordbox XML on the USB drive.
-
-    Returns:
-        {"committed": int, "errors": list[str]}
-    """
-    logger.info(
-        "resolve_playcounts: %d resolutions, db=%s, xml=%s",
-        len(resolutions),
-        pc_db_path,
-        usb_xml_path,
-    )
-
-    if not isinstance(resolutions, list):
-        logger.error("resolve_playcounts: resolutions must be list, got %s", type(resolutions))
-        return {"committed": 0, "errors": ["resolutions must be a list"]}
-
-    errors: list[str] = []
-    committed = 0
-
-    # Build a lookup from track_id → (final_count, final_lp)
-    finals: dict[str, tuple[int, float]] = {}
-    for r in resolutions:
-        if not isinstance(r, dict):
-            errors.append(f"invalid resolution item (not a dict): {r!r}")
-            continue
-        tid = str(r.get("track_id", ""))
-        if not tid:
-            errors.append("resolution missing track_id")
-            continue
-        strategy = r.get("strategy", "take_max")
-        pc_c = int(r.get("pc_count") or 0)
-        usb_c = int(r.get("usb_count") or 0)
-        pc_lp = float(r.get("pc_last_played") or 0.0)
-        usb_lp = float(r.get("usb_last_played") or 0.0)
-        final_count, final_lp = _apply_strategy(strategy, pc_c, usb_c, pc_lp, usb_lp)
-        finals[tid] = (final_count, final_lp)
-        logger.debug(
-            "resolve_playcounts: track=%s strategy=%s → count=%d lp=%.0f",
-            tid,
-            strategy,
-            final_count,
-            final_lp,
-        )
-
-    # ── 1. Update PC database via rbox ─────────────────────────────────────
     from .database import db_lock
 
+    committed = 0
     try:
         import rbox  # type: ignore  # soft-dependency: rbox wheel
 
@@ -395,6 +336,91 @@ def resolve_playcounts(
     except Exception as exc:
         logger.error("resolve_playcounts: unexpected PC DB error — %s", exc)
         errors.append(f"PC DB error: {exc}")
+    return committed
+
+
+def resolve_playcounts(
+    resolutions: list[dict],
+    pc_db_path: str | None,
+    usb_xml_path: str,
+) -> dict:
+    """
+    Commit resolved play counts to both the PC Rekordbox DB and the USB XML.
+
+    Each resolution dict must contain:
+      - track_id (str|int)
+      - strategy: "take_max" | "take_pc" | "take_usb" | "sum"
+      - pc_count (int)
+      - usb_count (int)
+      - pc_last_played (float)
+      - usb_last_played (float)
+
+    The PC DB update uses rbox if available (best-effort — logs errors but
+    doesn't raise so the USB XML can still be updated).  The USB XML is
+    patched in-place and written back atomically.
+
+    Args:
+        resolutions: List of resolution dicts (see above).
+        pc_db_path: Path to Rekordbox master.db, or None to skip the PC side
+            (XML library: there is no master.db to write).
+        usb_xml_path: Path to the exported Rekordbox XML on the USB drive.
+
+    Returns:
+        {"committed": int (master.db tracks updated), "usb_updated": int (USB XML
+        tracks patched), "pc_db_skipped": bool, "errors": list[str]}
+    """
+    logger.info(
+        "resolve_playcounts: %d resolutions, db=%s, xml=%s",
+        len(resolutions),
+        pc_db_path,
+        usb_xml_path,
+    )
+    errors: list[str] = []
+    committed = 0
+
+    def _result(usb_updated: int) -> dict:
+        return {
+            "committed": committed,
+            "usb_updated": usb_updated,
+            "pc_db_skipped": pc_db_path is None,
+            "errors": errors,
+        }
+
+    if not isinstance(resolutions, list):
+        logger.error("resolve_playcounts: resolutions must be list, got %s", type(resolutions))
+        errors.append("resolutions must be a list")
+        return _result(0)
+
+    # Build a lookup from track_id → (final_count, final_lp)
+    finals: dict[str, tuple[int, float]] = {}
+    for r in resolutions:
+        if not isinstance(r, dict):
+            errors.append(f"invalid resolution item (not a dict): {r!r}")
+            continue
+        tid = str(r.get("track_id", ""))
+        if not tid:
+            errors.append("resolution missing track_id")
+            continue
+        strategy = r.get("strategy", "take_max")
+        pc_c = int(r.get("pc_count") or 0)
+        usb_c = int(r.get("usb_count") or 0)
+        pc_lp = float(r.get("pc_last_played") or 0.0)
+        usb_lp = float(r.get("usb_last_played") or 0.0)
+        final_count, final_lp = _apply_strategy(strategy, pc_c, usb_c, pc_lp, usb_lp)
+        finals[tid] = (final_count, final_lp)
+        logger.debug(
+            "resolve_playcounts: track=%s strategy=%s → count=%d lp=%.0f",
+            tid,
+            strategy,
+            final_count,
+            final_lp,
+        )
+
+    # ── 1. Update PC database via rbox ─────────────────────────────────────
+    if pc_db_path is None:
+        logger.info("resolve_playcounts: no master.db (XML library) — PC side skipped")
+    else:
+        committed = _write_pc_playcounts(pc_db_path, finals, errors)
 
     # ── 2. Patch USB XML ────────────────────────────────────────────────────
     usb_path = Path(usb_xml_path)
@@ -402,8 +428,9 @@ def resolve_playcounts(
         msg = f"USB XML not found: {usb_path}"
         logger.error("resolve_playcounts: %s", msg)
         errors.append(msg)
-        return {"committed": committed, "errors": errors}
+        return _result(0)
 
+    updated_in_xml = 0
     try:
         tree = ET.parse(str(usb_path))
         root = tree.getroot()
@@ -413,7 +440,6 @@ def resolve_playcounts(
         if tracks_elem is None:
             raise ValueError("No COLLECTION element found in USB XML")
 
-        updated_in_xml = 0
         for track_elem in tracks_elem.findall("TRACK"):
             tid = track_elem.get("TrackID", "")
             if tid in finals:
@@ -438,8 +464,9 @@ def resolve_playcounts(
         msg = f"USB XML update failed: {exc}"
         logger.error("resolve_playcounts: %s", msg)
         errors.append(msg)
+        updated_in_xml = 0  # nothing reached the stick
 
-    return {"committed": committed, "errors": errors}
+    return _result(updated_in_xml)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

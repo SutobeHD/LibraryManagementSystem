@@ -581,14 +581,14 @@ New module for three-way play-count diffing between PC and USB.
 | `load_usb_sync_meta` | `(usb_root: str) -> dict` | Reads `PIONEER/RB_EDITOR_SYNC.json` |
 | `save_usb_sync_meta` | `(usb_root: str, meta: dict) -> None` | Atomic write via .tmp |
 | `diff_playcounts` | `(pc_tracks, usb_tracks, last_sync_ts) -> dict` | Returns `{auto, conflicts}` |
-| `resolve_playcounts` | `(resolutions, pc_db_path, usb_xml_path) -> dict` | Commits to DB + XML |
+| `resolve_playcounts` | `(resolutions, pc_db_path: str \| None, usb_xml_path) -> dict` | Commits to DB (skipped when `pc_db_path` is None) + XML |
 | `read_usb_xml_playcounts` | `(usb_xml_path: str) -> list[dict]` | Parses Rekordbox XML |
 
 **API endpoints added to `app/main.py`**:
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/usb/playcount/diff` | Diff PC vs USB play counts |
-| POST | `/api/usb/playcount/resolve` `[AUTH]` `[RB]` | Commit resolved play counts to the live library's master.db (`_require_live_master_db`: 409 outside live mode) under `db_lock()`, then patch the USB XML |
+| POST | `/api/usb/playcount/resolve` `[AUTH]` `[RB]` | Commit resolved play counts: live mode → the live library's master.db (`_live_master_db_path`) under `db_lock()`, then the USB XML. XML library → USB XML only, `pc_db_skipped: true`. Returns `{committed (master.db tracks), usb_updated (USB XML tracks), pc_db_skipped, errors}` |
 
 ---
 
