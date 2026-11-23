@@ -14,6 +14,7 @@ Drives are faked (kernel32 stub, tmp folders); nothing is written to a real driv
 
 from __future__ import annotations
 
+import os
 import sys
 import threading
 import time
@@ -76,7 +77,8 @@ def _drive(tmp_path: Path, name: str, rekordbox: bool) -> str:
     root.mkdir()
     if rekordbox:
         (root / "PIONEER" / "rekordbox").mkdir(parents=True)
-    return str(root) + "\\"
+    # os.sep, not "\\": on Linux CI a trailing backslash is part of the name.
+    return str(root) + os.sep
 
 
 def test_no_stick_scan_never_asks_for_bus_types(fake_drives, monkeypatch, tmp_path) -> None:
