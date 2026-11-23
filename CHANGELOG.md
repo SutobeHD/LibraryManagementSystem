@@ -55,6 +55,26 @@
   - Added: `scripts/compare_rekordbox.py` (A/B accuracy vs a real library) +
     `scripts/selftest_analysis.py` (autonomous synthetic-ground-truth accuracy,
     MIREX Acc-1/Acc-2). Self-test with RNN: BPM Acc-2 100%, KEY exact 100%.
+  - Fixed: BPM on constant-tempo tracks where the beat tracker slips in a
+    break, intro or outro. The single regression line failed there and the BPM
+    fell back to a value quantised to 1.25 ms per beat (135.0 → 135.21,
+    170.0 → 170.21). A second "comb" fit now takes the beats that share one
+    phase: exact BPM, and a uniform grid when at least 85 % of the beats sit on
+    that line. A/B against Rekordbox on 60 real tracks: BPM identical 40 → 56,
+    median grid error 11.3 → 6.0 ms. Analysis cache version 5 — tracks are
+    re-analysed once.
+  - Fixed: a uniform beat grid that sat on the off-beat (tracker locked onto
+    open hi-hat + off-beat bass) moves half a beat onto the kicks — only when
+    the kick band (150–2000 Hz) is at least twice as strong between the beats
+    as on them, on most beats, and the track's first sound sits between the
+    beats too. 1 of 50 real uniform grids moved (210 → 20 ms against
+    Rekordbox); two more at a 1.4× margin stay put because Rekordbox agrees
+    with the shift for one and not for the other.
+  - Fixed: beat grids of `.m4a` / `.mp4` files sat about 48 ms late. The
+    47.9 ms AAC encoder-delay shift was applied although the decoder already
+    drops the priming samples; 8 of 8 real `.m4a` tracks went from 49–56 ms
+    to 1–8 ms against Rekordbox. Raw `.aac` and files with an iTunSMPB tag
+    keep their shift (no such file measured).
 - Reliability hardening (codebase-wide bug-hunt — 16 fixes + 15 new test files,
   full pytest suite 658 passing):
   - Fixed: Rekordbox XML import called a non-existent `db.update_track`, so every

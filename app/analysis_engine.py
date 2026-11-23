@@ -175,7 +175,11 @@ _ZERO_DELAY_FORMATS = {".flac", ".wav", ".aiff", ".aif", ".ogg", ".opus"}
 # Rekordbox compensates ~22.5ms; we use exact value when LAME header is present.
 _MP3_DEFAULT_DELAY_S = 0.0225
 
-# AAC/M4A typical encoder delay (Apple/Nero: ~2112 samples = 47.9ms @ 44.1kHz)
+# AAC typical encoder delay (Apple/Nero: ~2112 priming samples = 47.9ms @ 44.1kHz).
+# Raw ADTS .aac only. In an MP4 container (.m4a/.mp4) the decoder already drops
+# the priming samples through the edit list and Rekordbox's grid carries no
+# such offset: 8 of 8 real .m4a tracks sat 49-56 ms behind Rekordbox with this
+# shift and 1-8 ms without it (lossless files: 1-11 ms).
 _AAC_DEFAULT_DELAY_S = 0.0479
 
 
@@ -183,10 +187,11 @@ def get_encoder_delay(file_path: str) -> float:
     """
     Return encoder delay (seconds) to compensate beat-grid alignment.
 
-    For lossy codecs (MP3, AAC), the encoder prepends silence which the decoder
-    plays back -- this shifts all timestamps. Rekordbox compensates this.
+    For MP3 and raw AAC the encoder prepends silence which the decoder plays
+    back -- this shifts all timestamps. Rekordbox compensates this.
 
-    For lossless (FLAC, WAV, AIFF) and ungapped containers (Ogg, Opus), delay = 0.
+    For lossless (FLAC, WAV, AIFF), ungapped containers (Ogg, Opus) and AAC in
+    an MP4 container without an iTunSMPB tag, delay = 0.
     """
     ext = os.path.splitext(file_path)[1].lower()
     if ext in _ZERO_DELAY_FORMATS:
@@ -229,7 +234,7 @@ def get_encoder_delay(file_path: str) -> float:
                         return float(priming) / float(sr)
             except Exception:
                 pass
-        return _AAC_DEFAULT_DELAY_S
+        return _AAC_DEFAULT_DELAY_S if ext == ".aac" else 0.0
 
     return 0.0
 
@@ -738,6 +743,22 @@ _BPM_INTEGER_SNAP = 0.05
 # most this much at the ends of the track; beyond it the fitted BPM stays.
 _GRID_MAX_SNAP_DRIFT_S = 0.010
 
+# Comb refit, the second chance for a track the line above calls unsteady. On
+# constant-tempo tracks the tracker often slips for a stretch (break, intro,
+# outro): the beats before and after still sit on one line, but the gap-by-gap
+# count is off by then, so the line through all of them fails and the 8-beat
+# span median that used to take over is quantised to 1.25 ms per beat
+# (135 BPM came out as 135.21). The comb takes the count from the period
+# instead: beats within _GRID_COMB_BAND of a beat of one phase are inliers.
+# That band is much tighter than _GRID_OUTLIER_FRAC, so a slipped stretch drops
+# out instead of bending the line; _GRID_COMB_MIN_INLIER_FRAC of the beats on
+# the line make the track steady (a tempo change at half time leaves ~0.6).
+_GRID_COMB_BAND = 0.1  # of one beat period
+_GRID_COMB_SEARCH = 0.015  # period search range around the 8-beat-span median
+_GRID_COMB_BINS = 40  # phase bins per beat
+_GRID_COMB_MIN_INLIER_FRAC = 0.85
+_GRID_COMB_MIN_BEATS = 16
+
 
 class _GridFit(NamedTuple):
     period: float  # seconds per tracked beat
@@ -747,14 +768,16 @@ class _GridFit(NamedTuple):
     inlier_frac: float
     first: float  # first / last inlier beat time, seconds
     last: float
+    min_inlier_frac: float = _GRID_MIN_INLIER_FRAC
+
+    @property
+    def on_one_line(self) -> bool:
+        """The inliers are jitter around a straight line (no bend, no second phase)."""
+        return self.rms <= _GRID_STEADY_RMS_S and self.quarter_bias <= _GRID_STEADY_QUARTER_BIAS_S
 
     @property
     def steady(self) -> bool:
-        return (
-            self.rms <= _GRID_STEADY_RMS_S
-            and self.quarter_bias <= _GRID_STEADY_QUARTER_BIAS_S
-            and self.inlier_frac >= _GRID_MIN_INLIER_FRAC
-        )
+        return self.on_one_line and self.inlier_frac >= self.min_inlier_frac
 
 
 def _fit_beat_grid(beat_times: np.ndarray) -> _GridFit | None:
@@ -820,6 +843,78 @@ def _fit_beat_grid(beat_times: np.ndarray) -> _GridFit | None:
     )
 
 
+def _comb_fit_beat_grid(beat_times: np.ndarray) -> _GridFit | None:
+    """Tempo line through the beats that share one phase, whatever lies between them.
+
+    Searches the period (around the median 8-beat span) at which most beats
+    fall on one phase, then numbers every beat ``round((t - intercept) /
+    period)`` and least-squares fits the beats within ``_GRID_COMB_BAND`` of
+    the line, a few times over. A stretch where the tracker slipped, skipped
+    or ran at another tempo stays outside the band and only costs inliers.
+
+    Returns ``None`` for fewer than ``_GRID_COMB_MIN_BEATS`` beats.
+    """
+    t = np.asarray(beat_times, dtype=float)
+    n = len(t)
+    if n < _GRID_COMB_MIN_BEATS:
+        return None
+    p0 = float(np.median(t[8:] - t[:-8])) / 8.0
+    span = float(t[-1] - t[0])
+    if p0 <= 0 or span <= 0:
+        return None
+    # Period step: the last beat moves a quarter of the band from one candidate
+    # to the next, so the true period cannot fall between two of them.
+    step = _GRID_COMB_BAND * p0 * p0 / (4.0 * span)
+    periods = np.arange(p0 * (1.0 - _GRID_COMB_SEARCH), p0 * (1.0 + _GRID_COMB_SEARCH), step)
+    half = max(1, round(_GRID_COMB_BAND * _GRID_COMB_BINS))
+    rel = t - t[0]
+    best_count, period, phase = -1, p0, 0.0
+    for start in range(0, len(periods), 256):
+        chunk = periods[start : start + 256, None]
+        bins = (np.mod(rel[None, :], chunk) / chunk * _GRID_COMB_BINS).astype(int)
+        bins = np.minimum(bins, _GRID_COMB_BINS - 1)
+        bins += _GRID_COMB_BINS * np.arange(len(chunk))[:, None]
+        hist = np.bincount(bins.ravel(), minlength=_GRID_COMB_BINS * len(chunk))
+        hist = hist.reshape(len(chunk), _GRID_COMB_BINS)
+        # Beats per phase window of 2 * half bins, wrapping around the beat.
+        cum = np.cumsum(np.concatenate([hist, hist[:, : 2 * half]], axis=1), axis=1)
+        window = cum[:, 2 * half - 1 :][:, :_GRID_COMB_BINS].copy()
+        window[:, 1:] -= cum[:, : _GRID_COMB_BINS - 1]
+        row, col = np.unravel_index(int(np.argmax(window)), window.shape)
+        if int(window[row, col]) > best_count:
+            best_count = int(window[row, col])
+            period = float(chunk[row, 0])
+            phase = (int(col) + half) / _GRID_COMB_BINS * period
+    intercept = float(t[0]) + phase
+    mask = np.zeros(n, dtype=bool)
+    k = np.zeros(n)
+    for _ in range(6):
+        k = np.round((t - intercept) / period)
+        new_mask = np.abs(t - (intercept + period * k)) <= _GRID_COMB_BAND * period
+        if int(new_mask.sum()) < _GRID_MIN_BEATS:
+            return None
+        if np.array_equal(new_mask, mask):
+            break
+        mask = new_mask
+        period, intercept = (float(v) for v in np.polyfit(k[mask], t[mask], 1))
+        if period <= 0:
+            return None
+    k = np.round((t - intercept) / period)
+    resid = (t - (intercept + period * k))[mask]
+    k_anchor = float(np.round(np.mean(k[mask])))
+    quarter_bias = max(float(abs(np.mean(q))) for q in np.array_split(resid, 4))
+    return _GridFit(
+        period=period,
+        anchor=intercept + period * k_anchor,
+        rms=float(np.sqrt(np.mean(resid**2))),
+        quarter_bias=quarter_bias,
+        inlier_frac=float(mask.mean()),
+        first=float(t[mask][0]),
+        last=float(t[mask][-1]),
+        min_inlier_frac=_GRID_COMB_MIN_INLIER_FRAC,
+    )
+
+
 def _uniform_beats(anchor: float, period: float, first: float, last: float) -> np.ndarray:
     """Beat times ``anchor + m * period`` covering ``[first, last]`` (half a period slack)."""
     m_lo = int(np.ceil((first - 0.5 * period - anchor) / period))
@@ -841,6 +936,60 @@ def _snap_bpm(bpm: float, half_span_s: float = 0.0) -> float:
         if drift <= _GRID_MAX_SNAP_DRIFT_S:
             return float(nearest)
     return round(bpm, 2)
+
+
+# Half-beat phase of a uniform grid. The tracker sometimes locks onto the
+# off-beat (open hi-hat plus off-beat bass) and the uniform grid inherits that
+# phase. The punch of the kick tells the two phases apart: level rises of the
+# 150-2000 Hz band — above the sub-bass, below the hats; the band-pass has to
+# be steep or an off-beat sub-bass leaks in — are summed on the grid and half a
+# beat later. Over 50 real uniform grids the later/on-grid ratio was <= 0.87
+# for 47. Of the three above, Rekordbox sits half a beat away from us at 2.92
+# and 1.40 but agrees with us at 1.45, so only a ratio of _PHASE_MIN_RATIO
+# moves the grid — and only when the later phase also wins on most beats
+# (_PHASE_MIN_WINS) and the first sound of the track sits between the beats
+# as well (_PHASE_START_TOL).
+_PHASE_BAND_HZ = (150.0, 2000.0)
+_PHASE_FRAME_S = 0.005
+_PHASE_WINDOW_S = 0.02  # a beat's punch counts within this much of its grid time
+_PHASE_MIN_RATIO = 2.0
+_PHASE_MIN_WINS = 0.6
+_PHASE_START_TOL = 0.15  # of one beat
+
+
+def _punch_onsets(y: np.ndarray, sr: int) -> tuple[np.ndarray, float]:
+    """Rise of the 150-2000 Hz level per frame, and the frame length in seconds."""
+    sos = signal.butter(  # type: ignore[union-attr]
+        4, _PHASE_BAND_HZ, "bandpass", fs=sr, output="sos"
+    )
+    band = signal.sosfilt(sos, y)  # type: ignore[union-attr]
+    hop = max(1, round(sr * _PHASE_FRAME_S))
+    n = len(band) // hop
+    level = np.sqrt(np.mean(band[: n * hop].reshape(n, hop) ** 2, axis=1))
+    return np.maximum(0.0, np.diff(level, prepend=level[:1])), hop / sr
+
+
+def _grid_on_the_off_beat(
+    y: np.ndarray, sr: int, grid_times: np.ndarray, period: float, first_signal_t: float
+) -> bool:
+    """True when the kicks fall half a beat after ``grid_times`` instead of on them."""
+    onsets, frame_s = _punch_onsets(y, sr)
+    reach = max(1, round(_PHASE_WINDOW_S / frame_s))
+    grid = np.asarray(grid_times, dtype=float)
+    on = np.round(grid / frame_s).astype(int)
+    off = np.round((grid + period / 2.0) / frame_s).astype(int)
+    inside = (on - reach >= 0) & (off + reach < len(onsets))
+    if int(inside.sum()) < _GRID_MIN_BEATS:
+        return False
+    window = np.arange(-reach, reach + 1)
+    on_beat = onsets[on[inside][:, None] + window].max(axis=1)
+    off_beat = onsets[off[inside][:, None] + window].max(axis=1)
+    if float(off_beat.sum()) < _PHASE_MIN_RATIO * float(on_beat.sum()):
+        return False
+    if float(np.mean(off_beat > on_beat)) < _PHASE_MIN_WINS:
+        return False
+    start = ((first_signal_t - float(grid[0])) / period) % 1.0
+    return abs(start - 0.5) <= _PHASE_START_TOL
 
 
 def detect_beats_madmom(
@@ -899,12 +1048,16 @@ def detect_beats_madmom(
             if len(beats_madmom) < 4:
                 return None
 
-            # Tempo from a regression line through all beats (steady tracks),
-            # else from the median 8-beat span (an 8x finer step than one
-            # 10 ms-quantised gap).
+            # Tempo from a regression line through the beats: the line through
+            # all of them when it is steady, else the comb line through the
+            # beats of one phase. Only when neither holds, from the median
+            # 8-beat span (an 8x finer step than one 10 ms-quantised gap).
             fit = _fit_beat_grid(beats_madmom)
+            if fit is None or not fit.steady:
+                comb = _comb_fit_beat_grid(beats_madmom)
+                fit = comb if comb is not None and comb.on_one_line else None
             steady = fit is not None and fit.steady
-            if steady and fit is not None:
+            if fit is not None:
                 tracked_period = fit.period
             elif len(beats_madmom) >= 16:
                 tracked_period = float(np.median(beats_madmom[8:] - beats_madmom[:-8])) / 8.0
@@ -932,9 +1085,11 @@ def detect_beats_madmom(
             if uniform and fit is not None:
                 half_span = max(fit.anchor - fit.first, fit.last - fit.anchor)
                 bpm = _snap_bpm(bpm_raw, half_span)
-                grid_times = _uniform_beats(
-                    fit.anchor, 60.0 / bpm, float(beats_madmom[0]), float(beats_madmom[-1])
-                )
+                beat_s = 60.0 / bpm
+                span = (float(beats_madmom[0]), float(beats_madmom[-1]))
+                grid_times = _uniform_beats(fit.anchor, beat_s, *span)
+                if _grid_on_the_off_beat(y, sr, grid_times, beat_s, first_signal_t):
+                    grid_times = _uniform_beats(fit.anchor + beat_s / 2.0, beat_s, *span)
                 grid_mode = "uniform"
             else:
                 bpm = _snap_bpm(bpm_raw)
