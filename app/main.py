@@ -5961,9 +5961,8 @@ def analyze_audio(req: AudioImportReq):
     if not LIBROSA_AVAILABLE:
         logger.warning("Librosa not installed. Audio analysis will be mocked.")
 
-    file_path = Path(req.file_path)
-    if not file_path.exists() or not file_path.is_file():
-        raise HTTPException(status_code=404, detail="Audio file not found")
+    # Same sandbox as the stream routes: 400 bad path/extension, 404 missing, 403 outside roots.
+    file_path = validate_audio_path(req.file_path)
 
     task_id = f"analysis_{secrets.token_hex(8)}"
     return AudioAnalyzer.analyze_track(task_id, str(file_path), req.mode)
@@ -6043,6 +6042,51 @@ _ANALYZE_FULL_ERRORS: dict[str, tuple[int, str]] = {
         "The analysis files were written, but updating master.db failed. Check logs.",
     ),
 }
+_ANALYSIS_FAILED_DETAIL = "Analysis failed. Check logs for details."
+
+#: Writer result fields a client may see. Everything else (``anlz_paths``, raw ``error``
+#: text, exception messages) can carry absolute user paths and stays in the log.
+_PUBLIC_ANALYSIS_FIELDS = frozenset(
+    {
+        "track_id",
+        "index",
+        "total",
+        "analyzed",
+        "skipped",
+        "errors",
+        "status",
+        "reason",
+        "bpm",
+        "key",
+        "camelot",
+        "key_id",
+        "duration",
+        "lufs",
+        "beat_count",
+        "phrase_count",
+        "beat_method",
+        "key_method",
+        "db_updated",
+        "elapsed",
+    }
+)
+
+
+def _public_analysis_result(result: Mapping[str, Any]) -> dict[str, Any]:
+    """Writer result / batch progress line without file paths.
+
+    ``anlz_paths`` becomes ``anlz_files`` (the kinds written: ``dat``, ``ext``, ...);
+    an error's text is replaced by the fixed detail for its ``reason``.
+    """
+    public = {k: v for k, v in result.items() if k in _PUBLIC_ANALYSIS_FIELDS}
+    anlz_paths = result.get("anlz_paths")
+    if isinstance(anlz_paths, Mapping):
+        public["anlz_files"] = sorted(str(kind) for kind in anlz_paths)
+    if result.get("status") == "error":
+        public["error"] = _ANALYZE_FULL_ERRORS.get(
+            str(result.get("reason")), (500, _ANALYSIS_FAILED_DETAIL)
+        )[1]
+    return public
 
 
 @app.post("/api/track/{tid}/analyze-full", dependencies=[Depends(require_session)])
@@ -6067,11 +6111,11 @@ async def analyze_track_full(tid: str, req: AnalyzeFullReq = AnalyzeFullReq()):
         if result.get("status") == "error":
             logger.warning("analyze-full %s refused: %s", tid, result.get("error"))
             status_code, detail = _ANALYZE_FULL_ERRORS.get(
-                str(result.get("reason")), (500, "Analysis failed. Check logs for details.")
+                str(result.get("reason")), (500, _ANALYSIS_FAILED_DETAIL)
             )
             raise HTTPException(status_code, detail)
 
-        return {"status": "ok", "data": result}
+        return {"status": "ok", "data": _public_analysis_result(result)}
     except HTTPException:
         raise
     except Exception as e:
@@ -6103,8 +6147,9 @@ async def analyze_batch(req: AnalyzeBatchReq = AnalyzeBatchReq()):
     Batch-analyze tracks and write results to Rekordbox DB + ANLZ.
     If track_ids is None, automatically finds all unanalyzed tracks.
 
-    Returns a streaming response with progress updates (NDJSON). 409 while another
-    analysis-to-DB run (this route or analyze-full) is in flight.
+    Returns a streaming response with progress updates (NDJSON, one
+    ``_public_analysis_result`` line per track: ids, counters, status, results, no file
+    paths). 409 while another analysis-to-DB run (this route or analyze-full) is in flight.
     """
     from starlette.background import BackgroundTask
 
@@ -6134,7 +6179,7 @@ async def analyze_batch(req: AnalyzeBatchReq = AnalyzeBatchReq()):
             _analyze_batch_active += 1
         try:
             for progress in writer.analyze_batch(track_ids, force=req.force):
-                yield json.dumps(progress) + "\n"
+                yield json.dumps(_public_analysis_result(progress)) + "\n"
         finally:
             with _analyze_batch_count_lock:
                 _analyze_batch_active -= 1
