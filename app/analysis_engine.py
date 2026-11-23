@@ -1395,202 +1395,318 @@ def _detect_downbeat(y: np.ndarray, sr: int, beat_times: np.ndarray) -> int:
 # =========================================================================== #
 # 3. THREE-BAND WAVEFORM -- Full Rekordbox ANLZ compatibility
 # =========================================================================== #
+#
+# Value model measured against Rekordbox 7's own ANLZ files for the same audio
+# (tmp/wf harness, 2026-11) and docs/reference/rbxport/waveform.md:
+#   - detail columns = 1/150 s windows, height from the SAMPLE PEAK, squared
+#     (round(31 * peak^2) reproduces Rekordbox PWV3 at r >= 0.99);
+#   - previews pool the columns per bucket (never point-sample);
+#   - band split 200 Hz / 2 kHz, 2nd-order Butterworth;
+#   - 3-band and colour tags are 7-bit (0..127), PWV2 is 4-bit (1..15), PWAV
+#     heights 2..25. A 0 height in PWAV/PWV2 makes players treat the preview
+#     as unanalysed and rebuild it.
 
-# Corrected crossover frequencies (per rekordbox_analysis_deep_dive.md)
-LOW_CUTOFF = 200.0  # Hz -- below this is "Low" (kick, sub-bass)  [was 180]
-HIGH_CUTOFF = 2500.0  # Hz -- above this is "High" (hi-hat, cymbals) [was 3000]
+LOW_CUTOFF = 200.0  # Hz -- below this is "Low" (kick, sub-bass)
+HIGH_CUTOFF = 2000.0  # Hz -- above this is "High" (hi-hat, cymbals) [was 2500, unsourced]
+_WF_FILTER_ORDER = 2
+
+_PWAV_ENTRIES = 400
+_PWV2_ENTRIES = 100
+_PWV4_ENTRIES = 1200
+_PWV6_ENTRIES = 1200
+
+# Fitted to Rekordbox's own values (tmp/wf harness, 2026-11).
+_WHITE_GAIN = 7.0  # whiteness = gain * (1 - low share) + offset, 0..7
+_WHITE_OFFSET = 0.0
+_PWAV_GAIN = 27.0  # PWAV height = gain * bucket RMS / track max + offset
+_PWAV_OFFSET = -3.0
+_PWV2_DB_RANGE = 24.0  # PWV2: dB below the loudest bucket that maps to the floor
+_PWV2_GAIN = 14.0
+_PWV2_OFFSET = 1.0
+_PWV4_BAND_WEIGHTS = (1.0, 0.8, 0.65)  # low, mid, high (rbxport least-error weights)
+_PWV5_BAND_WEIGHTS = (2.0, 2.0, 3.0)  # high counts 1.5x before the strongest-channel normalise
+_PWV7_P99_TARGET = (98.0, 87.0, 80.0)  # low, mid, high 99th-percentile level
+_PWV6_P99_TARGET = (55.0, 45.0, 55.0)
+
+# MP3 samples Rekordbox's decode has in front of ours (libsndfile/mpg123 trims
+# gapless MP3s). Measured on 10 MP3s, sample-exact against Rekordbox PWV3:
+#   no Xing/Info frame               ->    0 (4 files)
+#   Xing/Info frame, no LAME tag     -> 1106 (2 files; rule: 529 + 576)
+#   Xing/Info frame + LAME delay 576 -> 2256-2258 (4 files; rule: frame + 529 + delay)
+# Without it those MP3 waveforms ran 25-51 ms ahead of Rekordbox. VBRI frames
+# (no sample) follow the no-LAME rule.
+_MP3_DECODER_DELAY = 529
+_MP3_DEFAULT_ENCODER_DELAY = 576
+_MP3_HEADER_SCAN = 65536
+
+
+def _mp3_lead_in_samples(data: bytes) -> tuple[int, int] | None:
+    """(lead-in samples, sample rate) from the bytes at the first MPEG audio frame.
+
+    `data` starts after any ID3v2 tag. None if no valid frame header is found.
+    """
+    pos = 0
+    end = min(len(data) - 4, _MP3_HEADER_SCAN)
+    while pos < end and not (data[pos] == 0xFF and (data[pos + 1] & 0xE0) == 0xE0):
+        pos += 1
+    if pos >= end:
+        return None
+    b1, b2, b3 = data[pos + 1], data[pos + 2], data[pos + 3]
+    version = (b1 >> 3) & 0x03  # 3 = MPEG-1, 2 = MPEG-2, 0 = MPEG-2.5
+    sr_idx = (b2 >> 2) & 0x03
+    if version == 1 or sr_idx == 3:
+        return None
+    sr = (44100, 48000, 32000)[sr_idx] >> {3: 0, 2: 1, 0: 2}[version]
+    mono = (b3 >> 6) == 3
+    side_info = (17 if mono else 32) if version == 3 else (9 if mono else 17)
+    frame_samples = 1152 if version == 3 else 576
+
+    xing = pos + 4 + side_info
+    if data[xing : xing + 4] in (b"Xing", b"Info"):
+        flags = int.from_bytes(data[xing + 4 : xing + 8], "big")
+        lame = xing + 8 + (4 if flags & 1 else 0) + (4 if flags & 2 else 0)
+        lame += (100 if flags & 4 else 0) + (4 if flags & 8 else 0)
+        if data[lame : lame + 4] == b"LAME" and len(data) >= lame + 24:
+            enc_delay = (data[lame + 21] << 4) | (data[lame + 22] >> 4)
+            return frame_samples + _MP3_DECODER_DELAY + enc_delay, sr
+        return _MP3_DECODER_DELAY + _MP3_DEFAULT_ENCODER_DELAY, sr
+    if data[pos + 36 : pos + 40] == b"VBRI":
+        return _MP3_DECODER_DELAY + _MP3_DEFAULT_ENCODER_DELAY, sr
+    return 0, sr
+
+
+def waveform_lead_in_s(file_path: str) -> float:
+    """Silence (s) to prepend to the decoded audio so waveform columns sit on
+    Rekordbox's timeline. Non-zero for MP3 only; other formats decode in sync."""
+    if os.path.splitext(file_path)[1].lower() != ".mp3":
+        return 0.0
+    try:
+        with open(file_path, "rb") as f:
+            head = f.read(10)
+            if head[:3] == b"ID3" and len(head) == 10:
+                size = (head[6] << 21) | (head[7] << 14) | (head[8] << 7) | head[9]
+                f.seek(10 + size + (10 if head[5] & 0x10 else 0))
+            else:
+                f.seek(0)
+            data = f.read(_MP3_HEADER_SCAN + 512)
+    except OSError as e:
+        logger.warning("op=waveform_lead_in file=%s err=%s", os.path.basename(file_path), e)
+        return 0.0
+    found = _mp3_lead_in_samples(data)
+    if found is None:
+        return 0.0
+    lead, sr = found
+    return lead / sr
+
+
+def _column_peak(x: np.ndarray, hop: int, n_cols: int) -> np.ndarray:
+    """max |x| per hop-sized column; the last, short column is zero-padded."""
+    pad = n_cols * hop - len(x)
+    m = (
+        np.pad(x, (0, pad)).reshape(n_cols, hop)
+        if pad > 0
+        else x[: n_cols * hop].reshape(n_cols, hop)
+    )
+    return np.maximum(m.max(axis=1), -m.min(axis=1)).astype(np.float64)
+
+
+def _column_energy(x: np.ndarray, hop: int, n_cols: int) -> np.ndarray:
+    """Sum of x^2 per hop-sized column (same column grid as _column_peak)."""
+    pad = n_cols * hop - len(x)
+    m = (
+        np.pad(x, (0, pad)).reshape(n_cols, hop)
+        if pad > 0
+        else x[: n_cols * hop].reshape(n_cols, hop)
+    )
+    m64 = m.astype(np.float64, copy=False)
+    return np.einsum("ij,ij->i", m64, m64)
+
+
+def _pool_columns(arr: np.ndarray, n: int, how: str = "max") -> np.ndarray:
+    """Reduce detail columns to n preview buckets by pooling every column of a bucket.
+
+    Bucket i spans columns [i*N//n, (i+1)*N//n) (at least one column). "max"
+    keeps transients, "mean" averages, "sum" adds (energies). Point-sampling
+    (the old np.interp resample) skipped most columns of long tracks.
+    """
+    N = len(arr)
+    if N == 0:
+        return np.zeros(n)
+    starts = (np.arange(n, dtype=np.int64) * N) // n
+    if how == "max":
+        return np.maximum.reduceat(arr, starts).astype(np.float64)
+    sums = np.add.reduceat(arr, starts).astype(np.float64)
+    if how == "sum":
+        return sums
+    counts = np.maximum(np.diff(np.append(starts, N)), 1)
+    return sums / counts
+
+
+def _peak_height(peak: np.ndarray, top: int) -> np.ndarray:
+    """Squared-peak height curve: top * peak^2, peak = |sample| in 0..1."""
+    return np.round(top * np.clip(peak, 0.0, 1.0) ** 2)
+
+
+def _scale_to(arr: np.ndarray, target: float, ref: float) -> np.ndarray:
+    """Scale arr so its `ref` reference value lands on `target`; 0 stays 0."""
+    return arr * (target / ref) if ref > 1e-12 else np.zeros_like(arr)
 
 
 def generate_waveform_data(
     y: np.ndarray,
     sr: int,
     detail_fps: int = 150,  # Rekordbox: 150 entries per second
+    lead_in_s: float = 0.0,
 ) -> dict[str, Any]:
     """
     Generate ALL waveform data required for Rekordbox ANLZ files:
-    - PWAV: Monochrome preview (400 columns)
-    - PWV2: Tiny preview (100 columns)
-    - PWV3: Monochrome detail (150/sec)
-    - PWV4: Color preview (1200 entries, 6 bytes/entry)  [NEW]
-    - PWV5: Color detail (150/sec, 2 bytes/entry with RGB + height)
-    - PWV6: 3-band preview (3 bytes/entry: [lo,mi,hi])  [CDJ-3000]
-    - PWV7: 3-band detail (3 bytes/entry: [lo,mi,hi], 150/sec)  [CDJ-3000]
-    - 3-Band float arrays for our frontend rendering
-    """
-    duration = len(y) / sr
-    total_detail_entries = int(duration * detail_fps)
+    - PWAV: Monochrome preview (400 columns, height 2..25 + whiteness)
+    - PWV2: Tiny preview (100 columns, height 1..15, no whiteness)
+    - PWV3: Monochrome detail (150/sec, height 0..31 + whiteness)
+    - PWV4: Color preview (1200 x [level, 0, 0, low, mid, high], 0..127)
+    - PWV5: Color detail (150/sec, u16 R=low G=mid B=high 3 bit + height 5 bit)
+    - PWV6: 3-band preview (1200 x [low, mid, high], 0..127)  [CDJ-3000]
+    - PWV7: 3-band detail (150/sec x [low, mid, high], 0..127)  [CDJ-3000]
+    - 3-Band float arrays (rgb_low/mid/high, 0..1 per band)
 
-    if total_detail_entries < 1:
+    lead_in_s: silence prepended so columns line up with Rekordbox's decode
+    timeline (MP3 decoder lead-in, see waveform_lead_in_s).
+    """
+    if lead_in_s > 0:
+        y = np.concatenate([np.zeros(round(lead_in_s * sr), dtype=y.dtype), y])
+    hop = max(1, round(sr / detail_fps))
+    n_cols = -(-len(y) // hop)
+    duration = len(y) / sr if sr else 0.0
+
+    if n_cols < 1 or int(duration * detail_fps) < 1:
         return _empty_waveform()
 
-    # -- 3-Band Filtering (4th-order Butterworth) -------------------------
-    sos_low = signal.butter(4, LOW_CUTOFF, btype="low", fs=sr, output="sos")
-    sos_mid = signal.butter(4, [LOW_CUTOFF, HIGH_CUTOFF], btype="band", fs=sr, output="sos")
-    sos_high = signal.butter(4, HIGH_CUTOFF, btype="high", fs=sr, output="sos")
+    # -- 3-band split (2nd-order Butterworth, 200 Hz / 2 kHz) --------------
+    hi_fc = min(HIGH_CUTOFF, 0.45 * sr)
+    sos_low = signal.butter(_WF_FILTER_ORDER, LOW_CUTOFF, btype="low", fs=sr, output="sos")
+    sos_mid = signal.butter(
+        _WF_FILTER_ORDER, [LOW_CUTOFF, hi_fc], btype="band", fs=sr, output="sos"
+    )
+    sos_high = signal.butter(_WF_FILTER_ORDER, hi_fc, btype="high", fs=sr, output="sos")
 
-    y_low = signal.sosfilt(sos_low, y)
-    y_mid = signal.sosfilt(sos_mid, y)
-    y_high = signal.sosfilt(sos_high, y)
+    peak = _column_peak(y, hop, n_cols)
+    energy = _column_energy(y, hop, n_cols)
+    band_peak = []
+    band_energy = []
+    for sos in (sos_low, sos_mid, sos_high):
+        b = signal.sosfilt(sos, y)
+        band_peak.append(_column_peak(b, hop, n_cols))
+        band_energy.append(_column_energy(b, hop, n_cols))
+        del b
+    lo_pk, mi_pk, hi_pk = band_peak
+    band_sum = lo_pk + mi_pk + hi_pk
 
-    # -- RMS per window ---------------------------------------------------
-    hop = int(sr / detail_fps)  # samples per waveform entry
-
-    def rms_array(sig: np.ndarray) -> np.ndarray:
-        n_frames = len(sig) // hop
-        if n_frames < 1:
-            return np.array([0.0])
-        trimmed = sig[: n_frames * hop].reshape(n_frames, hop)
-        return np.sqrt(np.mean(trimmed**2, axis=1))
-
-    rms_low = rms_array(y_low)
-    rms_mid = rms_array(y_mid)
-    rms_high = rms_array(y_high)
-    rms_full = rms_array(y)
-
-    # Ensure all same length
-    min_len = min(len(rms_low), len(rms_mid), len(rms_high), len(rms_full))
-    rms_low = rms_low[:min_len]
-    rms_mid = rms_mid[:min_len]
-    rms_high = rms_high[:min_len]
-    rms_full = rms_full[:min_len]
-
-    # -- Quantization (logarithmic, dB-like) ------------------------------
-    def quantize_log(arr: np.ndarray, max_val: int, gamma: float = 1.0) -> np.ndarray:
-        """
-        Convert RMS array to dB, normalize to [0,1], optionally apply gamma curve
-        for color-saturation boost (gamma<1.0 → brighter mids, more vivid colors).
-        """
-        eps = 1e-10
-        db = 20 * np.log10(arr + eps)
-        db_norm = np.clip((db + 60.0) / 60.0, 0.0, 1.0)
-        if gamma != 1.0:
-            db_norm = db_norm**gamma
-        return np.round(db_norm * max_val).astype(np.uint8)
-
-    # Gamma curve for color channels (R/G/B): boosts mid-range so bands
-    # are more visible vs. Rekordbox's vivid waveforms (was: blocky/dim).
-    COLOR_GAMMA = _S.color_gamma
-
-    def brightness_from_ratio(high_arr, total_arr, length):
-        """Compute brightness (whiteness) from high-freq to total ratio."""
-        h = _resample_array(high_arr, length)
-        t = _resample_array(total_arr, length)
-        bright = np.zeros(length, dtype=np.uint8)
-        mask = t > 1e-10
-        bright[mask] = np.clip((h[mask] / t[mask]) * 7.0, 0, 7).astype(np.uint8)
-        return bright
-
-    # -- PWAV: Monochrome Preview (400 columns) ---------------------------
-    preview_entries = 400
-    preview_rms = _resample_array(rms_full, preview_entries)
-    preview_heights = quantize_log(preview_rms, 31)
-    preview_bright = brightness_from_ratio(rms_high, rms_full, preview_entries)
-    pwav = ((preview_bright & 0x07) << 5) | (preview_heights & 0x1F)
-
-    # -- PWV2: Tiny Preview (100 columns) ---------------------------------
-    tiny_rms = _resample_array(rms_full, 100)
-    tiny_heights = quantize_log(tiny_rms, 31)
-    tiny_bright = brightness_from_ratio(rms_high, rms_full, 100)
-    pwv2 = ((tiny_bright & 0x07) << 5) | (tiny_heights & 0x1F)
+    # -- Whiteness (PWAV/PWV3 bits 7-5): non-bass share of the column ------
+    white_frac = np.ones(n_cols)
+    loud = band_sum > 1e-9
+    white_frac[loud] = 1.0 - lo_pk[loud] / band_sum[loud]
+    detail_white = np.clip(np.round(_WHITE_GAIN * white_frac + _WHITE_OFFSET), 0, 7)
 
     # -- PWV3: Monochrome Detail (150 entries/sec) ------------------------
-    detail_heights = quantize_log(rms_full, 31)
-    detail_bright = np.zeros(min_len, dtype=np.uint8)
-    mask3 = rms_full > 1e-10
-    detail_bright[mask3] = np.clip((rms_high[mask3] / rms_full[mask3]) * 7.0, 0, 7).astype(np.uint8)
-    pwv3 = ((detail_bright & 0x07) << 5) | (detail_heights & 0x1F)
+    detail_height = _peak_height(peak, 31)
+    pwv3 = (detail_white.astype(np.uint8) << 5) | detail_height.astype(np.uint8)
 
-    # -- PWV4: Color Preview (1200 entries, 6 bytes/entry) [NEW] ----------
-    # Each entry: [R_high, G_high, B_high, R_low, G_low, B_low]
-    # where high = upper half of waveform, low = lower half
-    pwv4_entries = 1200
-    pwv4_low = quantize_log(_resample_array(rms_low, pwv4_entries), 255, gamma=COLOR_GAMMA)
-    pwv4_mid = quantize_log(_resample_array(rms_mid, pwv4_entries), 255, gamma=COLOR_GAMMA)
-    pwv4_high_band = quantize_log(_resample_array(rms_high, pwv4_entries), 255, gamma=COLOR_GAMMA)
-    pwv4_height = quantize_log(_resample_array(rms_full, pwv4_entries), 255)
-    # Pack: 6 bytes per entry [R, G, B, height, R_low, B_low]
-    pwv4 = []
-    for i in range(pwv4_entries):
-        pwv4.append(
-            [
-                int(pwv4_high_band[i]),  # Red (high freq)
-                int(pwv4_mid[i]),  # Green (mid freq)
-                int(pwv4_low[i]),  # Blue (low freq)
-                int(pwv4_height[i]),  # Height
-                int(pwv4_mid[i] // 2),  # Lower half green (dimmer)
-                int(pwv4_low[i] // 2),  # Lower half blue (dimmer)
-            ]
-        )
+    # -- PWAV: Monochrome Preview (400 columns) ---------------------------
+    # Rekordbox follows the bucket's RMS level (r 0.95), scaled per track.
+    samples = _pool_columns(np.full(n_cols, float(hop)), _PWAV_ENTRIES, "sum")
+    pwav_rms = np.sqrt(_pool_columns(energy, _PWAV_ENTRIES, "sum") / samples)
+    pwav_level = _scale_to(pwav_rms, 1.0, float(pwav_rms.max()))
+    pwav_h = np.clip(np.round(_PWAV_GAIN * pwav_level + _PWAV_OFFSET), 2, 25)
+    pwav_white = np.clip(
+        np.round(_WHITE_GAIN * _pool_columns(white_frac, _PWAV_ENTRIES, "mean") + _WHITE_OFFSET),
+        0,
+        7,
+    )
+    pwav = (pwav_white.astype(np.uint8) << 5) | pwav_h.astype(np.uint8)
 
-    # -- PWV5: Color Detail (2 bytes/entry, 150/sec) ----------------------
-    r_vals = quantize_log(rms_high, 7, gamma=COLOR_GAMMA)  # 3 bits: 0-7
-    g_vals = quantize_log(rms_mid, 7, gamma=COLOR_GAMMA)  # 3 bits: 0-7
-    b_vals = quantize_log(rms_low, 7, gamma=COLOR_GAMMA)  # 3 bits: 0-7
-    h_vals = quantize_log(rms_full, 31)  # 5 bits: 0-31 (height stays linear-dB)
+    # -- PWV2: Tiny Preview (100 columns, height only) --------------------
+    # dB of the bass band's RMS per bucket tracks Rekordbox best (r 0.90).
+    samples2 = _pool_columns(np.full(n_cols, float(hop)), _PWV2_ENTRIES, "sum")
+    pwv2_rms = np.sqrt(_pool_columns(band_energy[0], _PWV2_ENTRIES, "sum") / samples2)
+    pwv2_db = 20.0 * np.log10(_scale_to(pwv2_rms, 1.0, float(pwv2_rms.max())) + 1e-9)
+    pwv2_level = np.clip(1.0 + pwv2_db / _PWV2_DB_RANGE, 0.0, 1.0)
+    pwv2 = np.clip(np.round(_PWV2_GAIN * pwv2_level + _PWV2_OFFSET), 1, 15).astype(np.uint8)
 
+    # -- PWV4: Color Preview (1200 x 6 bytes) ------------------------------
+    # b0 = overall level (peak >> 1), b1/b2 unknown -> 0, b3/b4/b5 = R/G/B =
+    # low/mid/high (bucket max, 7-bit).
+    p4_level = np.round(127 * np.clip(_pool_columns(peak, _PWV4_ENTRIES, "max"), 0, 1))
+    p4_bands = [
+        np.clip(np.round(127 * w * _pool_columns(bp, _PWV4_ENTRIES, "max")), 0, 127)
+        for bp, w in zip(band_peak, _PWV4_BAND_WEIGHTS, strict=True)
+    ]
+    pwv4 = [
+        [int(p4_level[i]), 0, 0, int(p4_bands[0][i]), int(p4_bands[1][i]), int(p4_bands[2][i])]
+        for i in range(_PWV4_ENTRIES)
+    ]
+
+    # -- PWV5: Color Detail (u16 R=low G=mid B=high, normalised) ------------
+    wl, wm, wh = (w * bp for w, bp in zip(_PWV5_BAND_WEIGHTS, band_peak, strict=True))
+    strongest = np.maximum(np.maximum(wl, wm), wh)
+    lit = strongest > 1e-9
+    r5 = np.zeros(n_cols)
+    g5 = np.zeros(n_cols)
+    b5 = np.zeros(n_cols)
+    r5[lit] = np.round(7 * wl[lit] / strongest[lit])
+    g5[lit] = np.round(5 * wm[lit] / strongest[lit])
+    b5[lit] = np.round(7 * wh[lit] / strongest[lit])
     pwv5 = (
-        (r_vals.astype(np.uint16) << 13)
-        | (g_vals.astype(np.uint16) << 10)
-        | (b_vals.astype(np.uint16) << 7)
-        | (h_vals.astype(np.uint16) << 2)
+        (r5.astype(np.uint16) << 13)
+        | (g5.astype(np.uint16) << 10)
+        | (b5.astype(np.uint16) << 7)
+        | (detail_height.astype(np.uint16) << 2)
     )
 
-    # -- PWV6: 3-Band Preview (3 bytes/entry, ~1200 entries) [CDJ-3000 .2EX]
-    # rbox reads as [low, mid, high] — byte order must match
-    pwv6_entries = 1200
-    pwv6_lo = quantize_log(_resample_array(rms_low, pwv6_entries), 255, gamma=COLOR_GAMMA)
-    pwv6_mi = quantize_log(_resample_array(rms_mid, pwv6_entries), 255, gamma=COLOR_GAMMA)
-    pwv6_hi = quantize_log(_resample_array(rms_high, pwv6_entries), 255, gamma=COLOR_GAMMA)
-    pwv6 = []
-    for i in range(pwv6_entries):
-        pwv6.append([int(pwv6_lo[i]), int(pwv6_mi[i]), int(pwv6_hi[i])])
+    # -- PWV7: 3-Band Detail (150/sec x [low, mid, high], 0..127) ---------
+    # Rekordbox scales each band per track (its PWVC words track that gain);
+    # each band's 99th percentile is pinned to Rekordbox's typical level.
+    pwv7_bands = [
+        np.clip(np.round(_scale_to(bp, t, float(np.percentile(bp, 99)))), 0, 127)
+        for bp, t in zip(band_peak, _PWV7_P99_TARGET, strict=True)
+    ]
+    pwv7 = np.stack(pwv7_bands, axis=1).astype(np.uint8).tolist()
 
-    # -- PWV7: 3-Band Detail (3 bytes/entry, 150/sec) [CDJ-3000 .2EX] -----
-    # rbox reads as Waveform3BandDetail: [low, mid, high] per entry
-    hd_lo = quantize_log(rms_low, 255, gamma=COLOR_GAMMA)
-    hd_mi = quantize_log(rms_mid, 255, gamma=COLOR_GAMMA)
-    hd_hi = quantize_log(rms_high, 255, gamma=COLOR_GAMMA)
-    pwv7 = []
-    for i in range(min_len):
-        pwv7.append([int(hd_lo[i]), int(hd_mi[i]), int(hd_hi[i])])
+    # -- PWV6: 3-Band Preview (1200 x [low, mid, high], 0..127) -----------
+    # Energy overview: band RMS per bucket, then per-track band scaling.
+    samples6 = _pool_columns(np.full(n_cols, float(hop)), _PWV6_ENTRIES, "sum")
+    pwv6_bands = []
+    for be, t in zip(band_energy, _PWV6_P99_TARGET, strict=True):
+        r = np.sqrt(_pool_columns(be, _PWV6_ENTRIES, "sum") / samples6)
+        pwv6_bands.append(np.clip(np.round(_scale_to(r, t, float(np.percentile(r, 99)))), 0, 127))
+    pwv6 = np.stack(pwv6_bands, axis=1).astype(np.uint8).tolist()
 
-    # -- 3-Band float arrays (for our frontend Canvas/WebGL) --------------
-    max_low = float(np.max(rms_low)) if np.max(rms_low) > 0 else 1.0
-    max_mid = float(np.max(rms_mid)) if np.max(rms_mid) > 0 else 1.0
-    max_high = float(np.max(rms_high)) if np.max(rms_high) > 0 else 1.0
+    # -- 3-Band float arrays (0..1 per band, for our own renderer) ---------
+    rgb = [_scale_to(bp, 1.0, float(bp.max())) for bp in band_peak]
 
     return {
         # Rekordbox binary-compatible data
         "pwav": pwav.tolist(),  # 400 bytes -- monochrome preview
         "pwv2": pwv2.tolist(),  # 100 bytes -- tiny preview
         "pwv3": pwv3.tolist(),  # N bytes -- monochrome detail
-        "pwv4": pwv4,  # 1200 x 6 bytes -- color preview [NEW]
+        "pwv4": pwv4,  # 1200 x 6 bytes -- color preview
         "pwv5": pwv5.tolist(),  # N x uint16 -- color detail
         "pwv6": pwv6,  # 1200 x [lo,mi,hi] -- 3-band preview
         "pwv7": pwv7,  # N x [lo,mi,hi] -- 3-band detail
         # Frontend float arrays
-        "rgb_low": (rms_low / max_low).tolist(),
-        "rgb_mid": (rms_mid / max_mid).tolist(),
-        "rgb_high": (rms_high / max_high).tolist(),
+        "rgb_low": rgb[0].tolist(),
+        "rgb_mid": rgb[1].tolist(),
+        "rgb_high": rgb[2].tolist(),
         # Metadata
         "detail_fps": detail_fps,
-        "detail_entries": min_len,
+        "detail_entries": n_cols,
         "duration": round(duration, 3),
     }
 
 
-def _resample_array(arr: np.ndarray, target_len: int) -> np.ndarray:
-    if len(arr) == target_len:
-        return arr
-    x_old = np.linspace(0, 1, len(arr))
-    x_new = np.linspace(0, 1, target_len)
-    return np.interp(x_new, x_old, arr)
-
-
 def _empty_waveform() -> dict[str, Any]:
     return {
-        "pwav": [0] * 400,
-        "pwv2": [0] * 100,
+        "pwav": [0] * _PWAV_ENTRIES,
+        "pwv2": [0] * _PWV2_ENTRIES,
         "pwv3": [],
         "pwv4": [],
         "pwv5": [],
@@ -2763,7 +2879,9 @@ def run_full_analysis(
 
         emit("waveform", 65)
         # Use native (or capped) SR audio so high-frequency band is visible
-        waveform_result = generate_waveform_data(y_for_waveform, waveform_sr)
+        waveform_result = generate_waveform_data(
+            y_for_waveform, waveform_sr, lead_in_s=waveform_lead_in_s(file_path)
+        )
         emit("waveform", 80)
 
         emit("phrases", 82)
