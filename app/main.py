@@ -3300,6 +3300,8 @@ def _file_tag_writeback(track_ids: list[str], updates: dict[str, Any]) -> dict[s
     settings.write_tags_to_files=False, default true) or "error".
     """
     status = dict.fromkeys(track_ids, "skipped")
+    if not updates:  # write_tags would still embed the cover
+        return status
     try:
         enabled = SettingsManager.load().get("write_tags_to_files", True)
     except Exception as exc:

@@ -199,3 +199,17 @@ def test_a_refused_batch_touches_no_file(
     assert r.status_code == status, r.text
     assert {tid: p.read_bytes() for tid, p in files.items()} == before
     assert master.rows["1"] == _row("1")
+
+
+def test_an_empty_batch_touches_no_file(lib, files, tmp_path, auth_token) -> None:
+    # write_tags embeds the cover even without a field: an empty update must not reach it.
+    cover = tmp_path / "cover.jpg"
+    cover.write_bytes(b"\xff\xd8\xff\xe0fake-jpeg")
+    lib.tracks["1"]["Artwork"] = str(cover)
+    before = files["1"].read_bytes()
+
+    r = _batch(["1"], {}, auth_token)
+
+    assert r.status_code == 200, r.text
+    assert r.json()["file_tags"] == {"1": "skipped"}
+    assert files["1"].read_bytes() == before
