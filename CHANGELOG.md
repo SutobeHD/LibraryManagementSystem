@@ -28,14 +28,95 @@
     to the root logger) get scrubbing formatters via `log_config`.
 
 - Library:
+  - Added: every track column sorts, Date Added and Colour included; Key sorts
+    on the Camelot wheel (Camelot and musical spellings mixed), missing values
+    stay at the bottom. New optional columns: Genre, Label, Year, My Tags,
+    Format (right-click the table header).
+  - Fixed: text columns sorted by code point, so titles with umlauts or accents
+    landed after Z. They now sort in the language's order, numbers inside
+    names by value ("Track 2" before "Track 10").
+  - Fixed: 23 tracks without a Rekordbox stock date showed "-" under Date
+    Added; they now show the day they were added to the library.
+  - Fixed: the Collection search found nothing for `rating:>=4` or
+    `genre:"deep house"`. Ratings, BPM and year take `>`, `>=`, `<`, `<=`
+    and `=`, BPM ranges like `bpm:138-142` still work, quoted values may
+    contain spaces, `key:8A` and `key:Am` find the same tracks (`key:A`
+    finds A and Am), and `artist:` / `title:` / `album:` filter their field.
+    A token the search cannot read is searched as plain text instead of
+    hiding every track; `12" mix` and `4:44` still find those titles.
   - Fixed: "Delete from Collection" in the live Rekordbox library only hid the
     track until the next restart (and answered 500) while the dialog promised a
     permanent delete. rbox 0.1.7 cannot delete a track row, so the live mode no
     longer offers it: the menu item is hidden and `DELETE /api/track/{id}`
     answers 409 with a hint to remove the track in Rekordbox. XML mode still
     removes tracks, now with one confirmation instead of two.
+  - Fixed: editing several tracks at once is all or nothing. A batch naming a
+    track the library does not hold answers 404 with that id and writes nothing
+    (the live library had already written the valid tracks and answered 500); a
+    write the live database refuses partway puts the tracks already written back.
+    Editing an unknown track answers 404 instead of 500.
+  - Fixed: Title / Artist / Album edits from the track table and the batch bar
+    now reach the audio file's tags too (setting `write_tags_to_files`, on by
+    default), as single-track edits already did; the answer reports each file.
+  - Fixed: a track edit no longer replaces the file's own cover art with the
+    library thumbnail (a back cover was deleted, a PNG relabelled JPEG), a
+    colour-only edit leaves the file untouched, and two quick edits of one track
+    write the file in the order they reached the library.
+  - Fixed: imported MP3s got FileType 0 in master.db instead of Rekordbox's 1.
+    Every import now gets the code of its format (MP3 1, M4A 4, FLAC 5, WAV 11,
+    AIFF 12).
+
+- Rekordbox XML export:
+  - Fixed: the export held no playlist (PLAYLISTS was an empty ROOT), so an
+    imported file lost the playlist and its order. `POST /api/rekordbox/export`
+    now takes `playlist_id` (a playlist, or a folder with its subfolders) or
+    `track_ids` + `playlist_name` and writes the playlist nodes in playlist
+    order. A plain track list (the whole-library push) still has no playlist.
+  - Fixed: SoundCloud and other streaming tracks got a made-up local
+    Location (`<backend folder>/soundcloud:tracks:…`). They are now left out,
+    and the response says how many were skipped.
+
+- API route hygiene:
+  - Fixed: a suffix range (`Range: bytes=-500`) on `/api/stream` returned the
+    first 501 bytes of a non-AIFF file instead of the last 500. Both stream
+    routes now share one RFC 7233 range
+    handler (single range -> 206, multi-range or malformed -> whole file,
+    unsatisfiable -> 416).
+  - Fixed: `/api/audio/stream` (DAW editor) ignored Range for MP3/FLAC/M4A/WAV
+    and sent FLAC/M4A with the wrong Content-Type. It now answers exactly like
+    `/api/stream`. Both routes answer `HEAD`.
+  - Fixed: `POST /api/audio/analyze` analysed any existing file; it now has the
+    same folder sandbox as playback (403 outside the library folders).
+  - Fixed: analysis responses (`analyze-batch` progress lines, `analyze-full`)
+    no longer contain absolute file paths.
+  - Fixed: play-count sync (`/api/usb/playcount/resolve`) wrote a fixed
+    `%APPDATA%` master.db in every mode, even while Rekordbox was running. With
+    the live library it now refuses while Rekordbox runs, writes the library's
+    own master.db and holds the database write lock; with an XML library it
+    updates only the USB stick and says so. Errors show the backend's reason
+    instead of "Request failed with status code 409".
 
 - USB export:
+  - Fixed: "Initialize" wrote the four settings files (DEVSETTING, MYSETTING,
+    MYSETTING2, DJMMYSETTING) as zero bytes, and later syncs never replaced them.
+    Initialize now writes valid defaults; a sync repairs a blank file but never
+    touches real settings. DEVSETTING.DAT is the 140-byte file rekordbox writes.
+  - Fixed: saving a USB profile with only some fields (e.g. a new label) reset
+    drive, type, sync mode and the playlist selection to defaults.
+  - Fixed: after a re-sync a cover slot could show the previous track's artwork,
+    also for a track without a cover. Covers are rewritten when their source
+    image changes and left alone when it does not; covers no track uses any more
+    are removed from the stick.
+  - Fixed: artist or title folders that differ only in case (Stenoz / STENOZ)
+    now get one spelling per stick, so the paths in `exportLibrary.db`,
+    `export.pdb` and `rekordbox.xml` match the case on disk.
+  - Fixed: the USB view took 4-8 s to list sticks and profiles even with no
+    stick plugged in (two PowerShell calls per scan, scanned twice per profiles
+    read). Device scan and profiles read now answer in milliseconds, and stored
+    profiles show without waiting for the device scan.
+  - Fixed: the OneLibrary template's empty artists, albums, genre and keys no
+    longer stay in `exportLibrary.db` / `export.pdb`; a track without a key or
+    genre now has none instead of an empty one.
   - Fixed: every exported track lost its album and kept the OneLibrary
     template's file type (M4A), sample rate (48 kHz), bit depth and file size,
     in `exportLibrary.db` and `export.pdb`. They now come from the file itself.

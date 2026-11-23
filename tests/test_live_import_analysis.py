@@ -34,6 +34,7 @@ class _Row:
         self.length: int | None = None
         self.analysed = 0
         self.analysis_data_path: str | None = None
+        self.file_type = 0  # what rbox create_content leaves for an mp3
 
 
 class _MasterDb:
@@ -67,7 +68,10 @@ class _MasterDb:
         if self.refuse_update:
             raise RuntimeError("database is locked")
         self.writes.append(
-            ("update_content", (item.bpm, item.length, item.analysed, item.analysis_data_path))
+            (
+                "update_content",
+                (item.bpm, item.length, item.analysed, item.analysis_data_path, item.file_type),
+            )
         )
 
     def update_content_key(self, tid: str, name: str) -> None:
@@ -241,6 +245,63 @@ def test_refused_analysis_write_leaves_the_cache_at_what_master_db_holds(
     assert tid == "1"
     assert live.tracks["1"]["BPM"] == 0.0  # not 127.66: master.db never got it
     assert live.tracks["1"]["TotalTime"] == 0.0
+
+
+def _content_writes(master: _MasterDb) -> list[tuple[Any, ...]]:
+    return [v for name, v in master.writes if name == "update_content"]
+
+
+@pytest.mark.parametrize(
+    ("name", "code"),
+    [
+        ("a.mp3", 1),  # create_content left 0, Rekordbox writes 1
+        ("a.MP3", 1),
+        ("a.m4a", 4),
+        ("a.flac", 5),
+        ("a.wav", 11),
+        ("a.aiff", 12),
+        ("a.aif", 12),
+    ],
+)
+def test_import_sets_file_type_in_the_same_write_as_bpm_and_length(
+    live: LiveRekordboxDB, master: _MasterDb, name: str, code: int
+) -> None:
+    track = {k: v for k, v in _TRACK.items() if k != "Title"}  # no text-metadata write
+    live.add_track({**track, "path": f"C:/music/{name}"})
+
+    assert master.row.file_type == code
+    assert _content_writes(master) == [(12766, 186, 0, None, code)]  # one update_content
+
+
+def test_import_without_analysis_still_writes_the_file_type(
+    live: LiveRekordboxDB, master: _MasterDb
+) -> None:
+    live.add_track({"path": "C:/music/a.mp3"})
+
+    assert _content_writes(master) == [(None, None, 0, None, 1)]
+    assert live.tracks["1"]["BPM"] == 0.0
+
+
+def test_import_of_an_unknown_format_leaves_file_type_alone(
+    live: LiveRekordboxDB, master: _MasterDb
+) -> None:
+    master.row.file_type = 7  # whatever create_content chose
+    live.add_track({"path": "C:/music/a.ogg"})
+
+    assert master.row.file_type == 7
+    assert _content_writes(master) == []
+
+
+def test_import_file_type_never_follows_old_library_rows(
+    live: LiveRekordboxDB, master: _MasterDb, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Older builds wrote AIFF = 6 into existing rows; the import must not copy it.
+    old_rows = [SimpleNamespace(key_id=None, file_type=6, folder_path="C:/x.aiff")] * 5
+    monkeypatch.setattr(master, "get_contents", lambda: old_rows)
+
+    live.add_track({**_TRACK, "path": "C:/music/a.aiff"})
+
+    assert master.row.file_type == 12
 
 
 def _fake_anlz_writer(written: list[dict[str, Any]], with_dat: bool = True):

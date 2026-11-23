@@ -1,9 +1,9 @@
 """Tests for app/playcount_sync.py — USB <-> PC play-count sync engine.
 
 Pure logic (_apply_strategy, diff_playcounts) plus the XML reader and the
-USB meta round-trip. rbox is a soft dependency; the PC-DB write path is not
-exercised here (it needs rbox + a real master.db), only the deterministic
-XML-patch + diff/resolve logic.
+USB meta round-trip. rbox is a soft dependency; the PC-DB write path runs only
+against a fake ``rbox.MasterDb`` (does it hold ``db_lock``), never a real
+master.db, next to the deterministic XML-patch + diff/resolve logic.
 """
 
 from __future__ import annotations
@@ -191,3 +191,76 @@ def test_roundtrip_meta_is_json_serializable(tmp_path):
     ps.save_usb_sync_meta(str(tmp_path), meta)
     raw = (tmp_path / ps._SYNC_META_FILENAME).read_text(encoding="utf-8")
     assert json.loads(raw)["tracks"]["a"]["last_played"] == 3.5
+
+
+# --- resolve_playcounts: PC-DB write holds db_lock --------------------------
+
+
+def test_pc_db_write_holds_db_lock(tmp_path, monkeypatch):
+    """Every master.db writer serialises on ``app.database._db_write_lock``."""
+    import threading
+    import types
+
+    from app.database import _db_write_lock
+
+    master = tmp_path / "master.db"
+    master.write_bytes(b"")  # only existence is checked; the fake MasterDb opens nothing
+    held: list[bool] = []
+
+    def _taken_by_this_thread() -> bool:
+        got: list[bool] = []
+
+        def _probe() -> None:  # an RLock is released by the thread that took it
+            got.append(_db_write_lock.acquire(timeout=0))
+            if got[0]:
+                _db_write_lock.release()
+
+        t = threading.Thread(target=_probe)
+        t.start()
+        t.join()
+        return not got[0]
+
+    class _FakeMasterDb:
+        def __init__(self, path: str) -> None:
+            assert path == str(master)
+            held.append(_taken_by_this_thread())
+
+        def set_play_count(self, tid: int, count: int) -> None:
+            held.append(_taken_by_this_thread())
+
+        def set_last_played(self, tid: int, lp: int) -> None:
+            held.append(_taken_by_this_thread())
+
+    monkeypatch.setitem(sys.modules, "rbox", types.SimpleNamespace(MasterDb=_FakeMasterDb))
+    res = ps.resolve_playcounts(
+        [{"track_id": "10", "strategy": "take_pc", "pc_count": 3, "usb_count": 1}],
+        pc_db_path=str(master),
+        usb_xml_path=str(tmp_path / "no.xml"),
+    )
+
+    assert res["committed"] == 1
+    assert res["pc_db_skipped"] is False
+    assert held == [True, True, True]
+    assert not _taken_by_this_thread()  # released afterwards
+
+
+def test_no_pc_db_skips_the_pc_side_and_patches_the_usb_xml(tmp_path, monkeypatch):
+    """XML library (``pc_db_path=None``): rbox is never touched, the USB XML still is."""
+    import types
+
+    def _no_master_db(path: str) -> None:
+        raise AssertionError("master.db opened without a pc_db_path")
+
+    monkeypatch.setitem(sys.modules, "rbox", types.SimpleNamespace(MasterDb=_no_master_db))
+    xml = tmp_path / "export.xml"
+    xml.write_text(_XML, encoding="utf-8")
+
+    res = ps.resolve_playcounts(
+        [{"track_id": "10", "strategy": "take_usb", "pc_count": 1, "usb_count": 6}],
+        pc_db_path=None,
+        usb_xml_path=str(xml),
+    )
+
+    assert res == {"committed": 0, "usb_updated": 1, "pc_db_skipped": True, "errors": []}
+    rows = {r["track_id"]: r for r in ps.read_usb_xml_playcounts(str(xml))}
+    assert rows["10"]["play_count"] == 6

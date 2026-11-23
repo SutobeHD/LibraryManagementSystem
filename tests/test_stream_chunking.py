@@ -1,8 +1,8 @@
 """GET /api/stream: file reads happen off the event loop, in 1 MiB chunks.
 
-The ``_full`` / ``_ranged`` helpers used to be ``async def`` generators doing
-blocking ``f.read(64 KiB)`` on the loop (1600 reads per 100 MB AIFF). They are
-sync generators now, so Starlette iterates them in its threadpool.
+The raw-file readers used to be ``async def`` generators doing blocking
+``f.read(64 KiB)`` on the loop (1600 reads per 100 MB AIFF). ``_read_file_range`` is
+a sync generator, so Starlette iterates it in its threadpool.
 
 ``open`` is shadowed in ``app.main``'s globals to record which thread reads
 and how much per call.
@@ -103,8 +103,9 @@ def test_full_stream_reads_off_loop_in_1mib_chunks(
 
     assert reads, "stream did not read through app.main.open"
     assert all(tid != loop_thread for tid, _ in reads), "file read on the event-loop thread"
-    assert all(n == main._STREAM_CHUNK_BYTES == MiB for _, n in reads)
-    assert len(reads) == 5  # 4 data chunks + the empty EOF read
+    assert MiB == main._STREAM_CHUNK_BYTES
+    # Reads stop at the announced size: 3 full chunks + the 12345-byte remainder.
+    assert [n for _, n in reads] == [MiB, MiB, MiB, 12345]
 
 
 def test_ranged_stream_reads_off_loop(
