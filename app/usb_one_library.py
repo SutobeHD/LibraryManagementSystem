@@ -964,6 +964,12 @@ class OneLibraryUsbWriter:
         total = len(all_tracks)
         used_slots = 0
         skipped_overflow = 0
+        # Which artwork image ids the new database points at, and from which
+        # source image each was made (rewrite on change, prune the rest).
+        from . import usb_artwork
+
+        art_manifest = usb_artwork.load_manifest(self.pioneer)
+        art_live: set[int] = set()
         # Which slot indices really carry a track. A failed slot leaves a gap, and
         # `placeholders[used_slots:]` would then delete a populated row instead.
         populated: set[int] = set()
@@ -1079,9 +1085,10 @@ class OneLibraryUsbWriter:
                 # (image_id is preserved from the placeholder slot) at the
                 # small variant. Done BEFORE update_content so the FK stays
                 # valid in case the user-data overlay shifts image_id.
+                art_id: int | None = None
                 if src_path is not None and _exists_safe(src_path):
                     try:
-                        self._write_track_artwork(db, slot, src_path)
+                        art_id = self._write_track_artwork(db, slot, src_path, art_manifest)
                     except Exception as exc:
                         logger.debug("[OneLibrary] artwork skipped for slot %s: %s", slot.id, exc)
 
@@ -1102,6 +1109,8 @@ class OneLibraryUsbWriter:
                 content_id_map[t["id"]] = str(slot.id)
                 populated.add(i)
                 used_slots += 1
+                if art_id is not None:
+                    art_live.add(art_id)
 
                 if i % 5 == 0 or i == slot_count - 1:
                     yield {
@@ -1129,6 +1138,14 @@ class OneLibraryUsbWriter:
         self._set_number_of_contents(db, used_slots)
 
         self._drop_template_refs(db, template_refs, used_refs)
+
+        # Cover files of slots that are gone, or whose track has no cover now,
+        # would otherwise stay on the stick (and an image id could show them).
+        try:
+            usb_artwork.prune_artwork(self.pioneer, art_live, art_manifest)
+            usb_artwork.save_manifest(self.pioneer, art_manifest)
+        except OSError as exc:
+            logger.warning("[OneLibrary] artwork cleanup skipped: %s", exc)
 
         # Stage 4 — playlist tree (create_playlist works, no template needed)
         yield {"stage": "playlists", "message": "Writing playlist tree…", "progress": 80}
@@ -1723,29 +1740,34 @@ class OneLibraryUsbWriter:
             len(playlist_entries_pdb),
         )
 
-    def _write_track_artwork(self, db, slot, audio_path: Path) -> None:
+    def _write_track_artwork(
+        self, db, slot, audio_path: Path, manifest: dict[str, str] | None = None
+    ) -> int | None:
         """Generate the bucketed artwork pair for one track and update the
         OneLibrary `image` row to point at the small JPEG.
 
         Reuses whichever image_id the placeholder slot already references
         (template-baseline images carry empty paths after anonymisation).
+        Returns the image id when the track has a cover on the stick, else None.
         """
         from . import usb_artwork
 
         image_id = getattr(slot, "image_id", None)
         if image_id in (None, 0):
-            # No FK — try to create a fresh image row (works on real DBs).
+            # No FK — try to create a fresh image row (works on real DBs). Empty
+            # path until a cover is written: a placeholder path would show
+            # image 1's cover for a track that has none.
             try:
-                img = db.create_image(usb_artwork.usb_relative_path(1))  # placeholder path
+                img = db.create_image("")
                 image_id = int(img.id)
                 slot.image_id = image_id
             except Exception as exc:
                 logger.debug("[OneLibrary] create_image failed: %s", exc)
-                return
+                return None
 
-        result = usb_artwork.write_artwork_pair(audio_path, int(image_id), self.pioneer)
+        result = usb_artwork.write_artwork_pair(audio_path, int(image_id), self.pioneer, manifest)
         if not result:
-            return  # no embedded art — leave existing image FK in place
+            return None  # no cover: the image row keeps the template's empty path
 
         # Point the image record at our small JPEG so CDJ list-view can find it
         try:
@@ -1755,6 +1777,8 @@ class OneLibraryUsbWriter:
                 db.update_image(img_row)
         except Exception as exc:
             logger.debug("[OneLibrary] update_image path skipped: %s", exc)
+            return None
+        return int(image_id)
 
     def _planned_dest(self, track: dict, src_path: Path) -> Path:
         """Where this track's audio belongs on the stick.
