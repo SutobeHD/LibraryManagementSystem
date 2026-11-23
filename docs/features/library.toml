@@ -11,12 +11,14 @@ id = "track-table"
 group = "Browsen & Suchen"
 name = "Track-Tabelle"
 status = "shipped"
-test = "testen"
+test = "getestet"
+tested = "2026-11-22"
 desc = "Sortierbare Track-Liste: Spalten, Camelot-Key-Farben, Cover-Thumb, Drag, Kontextmenü."
 paths = ["frontend/src/components/TrackTable.jsx"]
 routes = ["/api/file/reveal"]
 related = ["inline-rating-color", "collection-view", "list-context-menus", "perf-frontend-virtualization"]
-notes = "Virtualisiert seit PR #63 (in #60, perf-frontend-virtualization). LibraryView.jsx ist ein toter Vorgänger. B17 (Date Added leer) gefixt: Spalte zeigt StockDate, fehlendes Datum ist leer statt 'None'."
+todo = ["Date Added nicht sortierbar auf main (feat/sortable-columns hat es, ungemergt)", "23 Tracks ohne StockDate zeigen '-' - auf created_at zurückfallen", "Title-Sortierung nach Codepunkt: Umlaute landen hinter Z"]
+notes = "PC-Test 2026-11-22 (Kopie der Library, main f3ce85d): Virtualisiert (27 DOM-Zeilen bei 5037), Sortieren BPM/Title, Kontextmenü, Cover, Key-Farben. Virtualisiert seit PR #63 (in #60, perf-frontend-virtualization). LibraryView.jsx ist ein toter Vorgänger. B17 (Date Added leer) gefixt: Spalte zeigt StockDate, fehlendes Datum ist leer statt 'None'."
 
 [[feature]]
 id = "collection-view"
@@ -27,7 +29,8 @@ test = "testen"
 desc = "Ganze Library als Collection-Knoten, Suche mit bpm:/key:/genre:/year:/rating:, Track löschen."
 routes = ["/api/library/tracks", "/api/track/{tid}", "/api/track/delete", "/api/tracks/move"]
 depends_on = ["track-table", "live-master-db"]
-notes = "/api/tracks/move ist ein Stub. /api/library/tracks ohne Pagination; light=true-Projektion in #60 (perf-backend-quickwins). Route kodiert ihr JSON selbst im Threadpool, pro Track ein json.dumps - blockiert den Event-Loop nicht mehr (B3, PR #82). Alle Listen-Views laden über fetchLibraryTracks() mit ?light=true (3,2 MB, ~0,2 s; PR #75). Editoren laden den Beatgrid mit PR #77. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): B3 (Collection 0 Tracks, Backend 18 s blockiert) in PR #75 + #82 gefixt - neu prüfen."
+todo = ["FEHLER: 'Delete from Collection' löscht nur im Cache, DELETE /api/track/{id} -> 500 (live_database.py:1197); nach Neustart ist der Track zurück, UI sagt 'PERMANENTLY'", "Suche: rating:>=4 und genre:\"…\" liefern 0 Treffer ohne Hinweis"]
+notes = "PC-Test 2026-11-22: Suche bpm:/key:/genre:/year:/rating: = Trefferzahlen der DB; Light-Liste 3,4 MB in 0,04 s, Health dabei <35 ms (B3). /api/tracks/move ist ein Stub. /api/library/tracks ohne Pagination; light=true-Projektion in #60 (perf-backend-quickwins). Route kodiert ihr JSON selbst im Threadpool, pro Track ein json.dumps - blockiert den Event-Loop nicht mehr (B3, PR #82). Alle Listen-Views laden über fetchLibraryTracks() mit ?light=true (3,2 MB, ~0,2 s; PR #75). Editoren laden den Beatgrid mit PR #77. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): B3 (Collection 0 Tracks, Backend 18 s blockiert) in PR #75 + #82 gefixt - neu prüfen."
 
 [[feature]]
 id = "category-browser"
@@ -50,26 +53,28 @@ id = "playlist-tree-crud"
 group = "Playlists"
 name = "Playlist-Baum"
 status = "shipped"
-test = "testen"
+test = "getestet"
+tested = "2026-11-22"
 desc = "Ordner/Playlists anlegen, umbenennen, per Drag verschieben, duplizieren, löschen."
 paths = ["frontend/src/components/PlaylistBrowser.jsx"]
 routes = ["/api/playlists/tree", "/api/playlists/create", "/api/playlists/rename", "/api/playlists/move", "/api/playlists/delete"]
 depends_on = ["live-master-db"]
 related = ["standalone-library-mode"]
-notes = "Live-move_playlist war in leere Ordner und zurück nach ROOT kaputt (rbox: parent_id=None = Eltern behalten, seq ist ein Wert <= Anzahl). Fix auf fix/kernloop-0.1-bugs (B11): ROOT als \"root\", seq=None zum Anhängen, vor/nach per seq-Wert, Baum-Cache danach frisch aus master.db. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): B11 (Verschieben in leeren Ordner / zurück nach ROOT) in PR #82 gefixt - neu prüfen. /api/playlists/create gab den ganzen Knoten als id zurück (Duplizieren kopierte keine Tracks) und success auch ohne neue Playlist: jetzt id-String bzw. 500."
+notes = "PC-Test 2026-11-22 (Kopie der Library, main f3ce85d): Anlegen, Umbenennen, Duplizieren, in leeren Ordner ziehen, zurück nach ROOT, Löschen; jeder Schritt in master.db der Kopie nachgelesen (B11). Live-move_playlist war in leere Ordner und zurück nach ROOT kaputt (rbox: parent_id=None = Eltern behalten, seq ist ein Wert <= Anzahl). Fix auf fix/kernloop-0.1-bugs (B11): ROOT als \"root\", seq=None zum Anhängen, vor/nach per seq-Wert, Baum-Cache danach frisch aus master.db. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): B11 (Verschieben in leeren Ordner / zurück nach ROOT) in PR #82 gefixt - neu prüfen. /api/playlists/create gab den ganzen Knoten als id zurück (Duplizieren kopierte keine Tracks) und success auch ohne neue Playlist: jetzt id-String bzw. 500."
 
 [[feature]]
 id = "playlist-track-ops"
 group = "Playlists"
 name = "Tracks in Playlists (add/remove/reorder)"
 status = "partial"
-test = "testen"
+test = "getestet"
+tested = "2026-11-22"
 desc = "Track hinzufügen/entfernen, Drag-Reorder innerhalb der Playlist."
 paths = ["tests/test_live_playlist_ops.py", "tests/test_live_playlist_b11.py"]
 routes = ["/api/playlists/add-track", "/api/playlists/remove-track", "/api/playlists/reorder"]
 depends_on = ["playlist-tree-crud", "db-write-lock"]
 todo = ["Test-Playlist im echten Rekordbox anlegen, Add/Remove/Reorder prüfen, wegräumen"]
-notes = "Im Live-Modus auf main kaputt. Auf fix/kernloop-0.1-bugs (B11): add/remove frischen den playlists_tracks-Cache auf, reorder setzt den Track per rbox move_playlist_song an target_index (0-basiert, geklemmt wie XML); da6ba0d (rbox-Arity) liegt schon in PR #60. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): B11 (Add/Remove erst nach Reload sichtbar, Reorder ignorierte Ziel) in PR #82 gefixt - neu prüfen."
+notes = "PC-Test 2026-11-22 (Kopie der Library, main f3ce85d): 5 Tracks hinzugefügt, 2 entfernt, 3x umsortiert; track_no in der Kopie lückenlos und gleich der UI (B11). Im Live-Modus auf main kaputt. Auf fix/kernloop-0.1-bugs (B11): add/remove frischen den playlists_tracks-Cache auf, reorder setzt den Track per rbox move_playlist_song an target_index (0-basiert, geklemmt wie XML); da6ba0d (rbox-Arity) liegt schon in PR #60. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): B11 (Add/Remove erst nach Reload sichtbar, Reorder ignorierte Ziel) in PR #82 gefixt - neu prüfen."
 
 [[feature]]
 id = "smart-playlists"
@@ -157,13 +162,15 @@ id = "import-manager"
 group = "Import"
 name = "Import-Manager"
 status = "shipped"
-test = "testen"
+test = "getestet"
+tested = "2026-11-22"
 desc = "Drag-Drop/Ordner-Import, Ordner wird Playlist, 7-Stufen-Pipeline."
 paths = ["frontend/src/components/ImportView.jsx", "app/import_tracker.py", "tests/test_import*.py", "tests/test_live_import_analysis.py"]
 routes = ["/api/library/import-paths", "/api/audio/import", "/api/import/tasks"]
 depends_on = ["native-tag-read", "analysis-on-import", "anlz-writer"]
 related = ["download-manager-view", "import-progress-banner"]
-notes = "Live-Modus: Import schreibt BPM (centi), Länge, Key (Rekordbox-Schreibweise) in master.db und die ANLZ-Dateien in den Rekordbox-share unter /PIONEER/USBANLZ/<uuid[:3]>/<uuid[3:]>/ samt AnalysisDataPath + analysed=105 (B4, fix/kernloop-0.1-bugs). Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): B4 (BPM/Länge/Key/Analysepfad fehlten in master.db) in PR #82 gefixt - neu prüfen."
+todo = ["FileType beim Import: mp3 -> 0 (Rekordbox: 1), aiff -> 12 (Library-AIFFs: 6)", "Titel aus AIFF-Tags ungeprüft (Testdatei ohne ID3-Chunk)"]
+notes = "PC-Test 2026-11-22 (Kopie der Library, main f3ce85d): 3 neue Dateien (mp3/aiff/flac) per import-paths: BPM, Länge, Key in Camelot, ANLZ-Trio im share, analysed 105, Ordner wird Playlist (B4). Live-Modus: Import schreibt BPM (centi), Länge, Key (Rekordbox-Schreibweise) in master.db und die ANLZ-Dateien in den Rekordbox-share unter /PIONEER/USBANLZ/<uuid[:3]>/<uuid[3:]>/ samt AnalysisDataPath + analysed=105 (B4, fix/kernloop-0.1-bugs). Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): B4 (BPM/Länge/Key/Analysepfad fehlten in master.db) in PR #82 gefixt - neu prüfen."
 
 [[feature]]
 id = "import-quality-panel"

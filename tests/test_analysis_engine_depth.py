@@ -272,7 +272,7 @@ def test_cache_stores_the_depth(calls, wav, tmp_path):
 
     entry = get_default_cache()._index[os.path.abspath(wav)]
     assert entry["depth"] == "high"
-    assert entry["version"] == 5
+    assert entry["version"] == 6
 
 
 # --- AnalysisEngine wrappers ---------------------------------------------------

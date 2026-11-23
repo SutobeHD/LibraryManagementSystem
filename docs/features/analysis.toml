@@ -16,8 +16,8 @@ desc = "madmom-RNN-Beats mit Oktav-Prior, essentia-Key, Downbeat, Tempo-Wechsel,
 paths = ["app/analysis_engine.py"]
 depends_on = ["analysis-settings", "analysis-cache"]
 related = ["genre-definition-schema"]
-todo = ["Key nur 2/8 exakt gleich Rekordbox; essentia in .venv/Bundle nicht installiert -> K-S-Fallback", "Tempo-Anker (detect_tempo_changes, librosa) passen nicht zum gleichmäßigen Grid; XML-Export setzt den Anker bei 0.0 (Inizio=0) -> Grid-Phase falsch. Bei grid_mode uniform einen Anker am Downbeat schreiben (wie rekordbox_export.py)", "A/B 2026-11-21: Razor ~210 ms (halbe Periode) und Feel Alive ~58 ms Versatz zu Rekordbox - Phase/Downbeat prüfen (unverändert gegenüber main)"]
-notes = "B5 gefixt: BPM aus einer Regressionsgeraden über alle Beats (statt Median-Abstand im 10-ms-Raster), ganze Zahl nur bei <=0,05 BPM und <=10 ms Drift; stabile Tracks bekommen ein gleichmäßiges Grid wie Rekordbox (grid_mode uniform), schwankende behalten die erkannten Beats. A/B 2026-11-21 an 11 echten Tracks gegen Rekordbox: BPM exakt 1/11 -> 8/11, Grid-Abweichung Median 13,0 -> 9,7 ms. Analyse-Cache auf Version 4."
+todo = ["Key nur 2/8 exakt gleich Rekordbox; essentia in .venv/Bundle nicht installiert -> K-S-Fallback", "Tempo-Anker (detect_tempo_changes, librosa) passen nicht zum gleichmäßigen Grid; XML-Export setzt den Anker bei 0.0 (Inizio=0) -> Grid-Phase falsch. Bei grid_mode uniform einen Anker am Downbeat schreiben (wie rekordbox_export.py)", "Noch nicht identisch: 44322639 (148,15), 90129674 (135,21), 203290237 (RB 127,99), 126178621 (RB 204,74); engeres Kamm-Band (0,06) würde zwei davon fixen, gefährdet aber 59837644", "War Cry (179714711) liegt einen halben Beat neben Rekordbox; Phasen-Regel trennt ihn nicht von Heimweh (218275929), wo Rekordbox mit uns übereinstimmt"]
+notes = "B5 gefixt: BPM aus einer Regressionsgeraden über alle Beats (statt Median-Abstand im 10-ms-Raster), ganze Zahl nur bei <=0,05 BPM und <=10 ms Drift; stabile Tracks bekommen ein gleichmäßiges Grid wie Rekordbox (grid_mode uniform), schwankende behalten die erkannten Beats. A/B 2026-11-21 an 11 echten Tracks gegen Rekordbox: BPM exakt 1/11 -> 8/11, Grid-Abweichung Median 13,0 -> 9,7 ms. Analyse-Cache auf Version 4. Unruhige Tracks (fix/bpm-unsteady-tracks, 2026-11-22): Kamm-Fit, wenn der Tracker in Break/Intro verrutscht; Phasen-Check gegen den Kick (nur ab Verhältnis 2,0); .m4a ohne 47,9-ms-Delay. A/B 49 Tracks: BPM identisch 32 -> 46, Grid-Median 11,3 -> 4,9 ms, Mittel 36,1 -> 25,8 ms; Razor 210 -> 20 ms; kein Treffer verloren."
 
 [[feature]]
 id = "analysis-settings"
@@ -41,7 +41,7 @@ paths = ["app/analysis_extras.py", "tests/test_analysis_extras.py", "tests/test_
 parent = "analysis-settings"
 desc = "Einstellbar, wie tief ein Track analysiert wird: Rekordbox-Level (BPM, Key, Grid, Waveforms, Phrasen, Cues) oder Hoch (zusätzlich Lautheit, Stereo, Stimmung, Frequenzgrenze, Clipping, Dynamik, Bass-Anteil)."
 related = ["analysis-engine", "analysis-cache", "analysis-api-manual", "library-analysis-report"]
-notes = "Wunsch 2026-11-08, gebaut 2026-11-09 auf feat/library-measure (Handover §3.6.2): run_full_analysis(depth=) als letzter kwarg, Rekordbox-Stufe = Rekordbox-Daten + LUFS/Peak, Hoch = plus Stereo/Mood/Genre-Hint/Extras E1-E8 (app/analysis_extras.py); Cache ANALYSIS_VERSION 5 mit Tiefen-Rang (4 war doppelt vergeben: main B5 Regressions-BPM + diese Tiefe, beim Merge 2026-11-22 auf 5 gesetzt), kein Downgrade eines high-Eintrags, Cue-Toggles werden bei Cache-Treffer neu angewendet; Setting analysis_depth (Default rekordbox) über /api/settings, analysis_quality wird beim Laden verworfen; audio_analyzer-Regler mode entfernt; depth-Feld an /api/track/{tid}/analyze, analyze-full, /api/library/analyze-batch, /api/audio/analyze; UI: Settings-Karten + Pro-Lauf-Dialog (ConfirmModal mit Radios) im Kontextmenü Analysieren... und beim Drop-Detect. 1-Track-Smoke: rekordbox 30.7 s, high 29.6 s (+2.3 s Extras, Kaltstart-Rauschen)."
+notes = "Wunsch 2026-11-08, gebaut 2026-11-09 auf feat/library-measure (Handover §3.6.2): run_full_analysis(depth=) als letzter kwarg, Rekordbox-Stufe = Rekordbox-Daten + LUFS/Peak, Hoch = plus Stereo/Mood/Genre-Hint/Extras E1-E8 (app/analysis_extras.py); Cache ANALYSIS_VERSION 6 mit Tiefen-Rang (4 und 5 waren doppelt vergeben: main B5 Regressions-BPM bzw. Comb-Refit + diese Tiefe; Merges 2026-11-22 / 2026-11-23 setzten die nächste freie Nummer), kein Downgrade eines high-Eintrags, Cue-Toggles werden bei Cache-Treffer neu angewendet; Setting analysis_depth (Default rekordbox) über /api/settings, analysis_quality wird beim Laden verworfen; audio_analyzer-Regler mode entfernt; depth-Feld an /api/track/{tid}/analyze, analyze-full, /api/library/analyze-batch, /api/audio/analyze; UI: Settings-Karten + Pro-Lauf-Dialog (ConfirmModal mit Radios) im Kontextmenü Analysieren... und beim Drop-Detect. 1-Track-Smoke: rekordbox 30.7 s, high 29.6 s (+2.3 s Extras, Kaltstart-Rauschen)."
 todo = ["Stufen-Zeiten beider Level an 50 Tracks messen (bisher 1-Track-Smoke)", "process_import liest das Setting pro Datei statt pro Job (Folder-Scan-Loops in main.py)", "Batch-Analyse hat kein UI (analyze-batch streamt NDJSON, braucht fetch-Consumer); askAnalysisDepth({count}) ist vorbereitet", "/api/audio/analyze prüft file_path nur auf Existenz, kein validate_audio_path (vorbestehend, security-api-auth-hardening)"]
 
 [[feature]]
@@ -76,8 +76,8 @@ test = "testen"
 desc = "Rekordbox-Waveforms PWAV..PWV7 für die ANLZ-Dateien."
 depends_on = ["analysis-engine", "anlz-writer"]
 related = ["multiband-waveform-data"]
-todo = ["PWV5 R/B tauschen (R=low)", "PWV4 Byte-Order + 7-bit", "PWV2 ohne Whiteness, Höhe 1..15", "PWV6/7 0..127", "Crossover 2 kHz vereinheitlichen (Python/services/Rust)"]
-notes = "Abweichungen laut rbxport-Studie: docs/reference/rbxport/waveform.md §8."
+todo = ["PWV5 R/B tauschen (R=low)", "PWV4 Byte-Order + 7-bit", "PWV2 ohne Whiteness, Höhe 1..15", "PWV6/7 0..127", "Crossover 2 kHz vereinheitlichen (Python/services/Rust)", "Höhenkurve dB-log RMS statt ~31*Peak^2: Korrelation zu Rekordbox 0,45-0,77 (Ziel >= 0,9), ~2x zu hoch (analysis_engine.py:1303-1313)", "Vorschau-Reduktion tastet Punkte ab statt zu poolen (_resample_array :1427)", "PWVC-Payload immer 0; MP3-Waveform startet 27-53 ms zu früh"]
+notes = "PC-Test 2026-11-22 (5 Tracks vs Rekordbox-ANLZ, tmp/wf): alle 8 Tags da, Struktur byte-gleich; bestätigt: PWV5 R/B vertauscht, PWV4 Byte-Reihenfolge/7-Bit, PWV2 > 15, PWV6/7 > 127. Abweichungen laut rbxport-Studie: docs/reference/rbxport/waveform.md §8."
 
 # ── Pipelines ─────────────────────────────────────────────────────────────
 
@@ -98,13 +98,15 @@ id = "analysis-api-manual"
 group = "Pipelines"
 name = "Manuelle (Re-)Analyse & Batch"
 status = "partial"
-test = "testen"
+test = "getestet"
+tested = "2026-11-22"
 desc = "Async-Task, Einzel-Track, analyze-full (ANLZ + master.db), NDJSON-Batch, Status."
 paths = ["app/audio_analyzer.py", "app/analysis_db_writer.py"]
 routes = ["/api/audio/analyze", "/api/track/{tid}/analyze", "/api/track/{tid}/analyze-full", "/api/library/analyze-batch"]
 depends_on = ["analysis-engine", "anlz-writer", "live-master-db"]
 related = ["db-write-lock-retrofit"]
-notes = "Kein Frontend ruft die Routen. Schreibt unter db_lock analysed=105 + Key in Rekordbox-Schreibweise (Am, Dbm, F#); ein abgelehnter master.db-Write ist db_update_failed -> 500, nie still ok (B6, fix/kernloop-0.1-bugs). Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): B6 (analyze-full meldete ok trotz gescheitertem master.db-Write) in PR #82 gefixt - neu prüfen."
+todo = ["ANLZ0000.3EX wird nicht neu geschrieben (alte Rekordbox-Datei bleibt)", "NDJSON-Zeilen enthalten absolute Pfade", "/api/audio/analyze ohne validate_audio_path"]
+notes = "PC-Test 2026-11-22 (Kopie der Library, main f3ce85d): analyze-full (force/skip/404), analyze-batch NDJSON + 409 Single-Flight, /api/audio/analyze async; Key in Camelot, .bak-Sicherungen. B6 nur per Unit-Test. Kein Frontend ruft die Routen. Schreibt unter db_lock analysed=105 + Key in Rekordbox-Schreibweise (Am, Dbm, F#); ein abgelehnter master.db-Write ist db_update_failed -> 500, nie still ok (B6, fix/kernloop-0.1-bugs). Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): B6 (analyze-full meldete ok trotz gescheitertem master.db-Write) in PR #82 gefixt - neu prüfen."
 
 # ── Matching & Klassifikation ─────────────────────────────────────────────
 

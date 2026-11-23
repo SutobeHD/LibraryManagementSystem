@@ -35,11 +35,13 @@ logger = logging.getLogger(__name__)
 
 
 # Bump when output schema changes — invalidates all stale cache entries.
-# 4 was taken twice: on main for regression BPM + uniform grid for steady tracks (B5) and
-# on feat/library-measure for depth-aware entries. 5 covers both, so neither v4 kind hits.
-# 5: depth-aware entries (rekordbox / high); mood, genre_hint, stereo nullable; extras added;
-#    BPM from a regression line.
-ANALYSIS_VERSION = 5
+# Numbers taken on main and on feat/library-measure at the same time were merged to the
+# next free one, so no entry written by either side is served:
+# 4: main = regression BPM + uniform grid for steady tracks (B5); branch = depth-aware entries.
+# 5: main = comb refit (exact BPM + uniform grid where the tracker slipped); branch = both 4s.
+# 6: all of the above — depth-aware entries (rekordbox / high), mood / genre_hint / stereo
+#    nullable, extras, regression BPM, comb refit.
+ANALYSIS_VERSION = 6
 
 USE_CONTENT_HASH = False  # opt-in: also compare a quick xxhash/md5 sample
 

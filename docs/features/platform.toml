@@ -81,10 +81,11 @@ id = "cors-lockdown"
 group = "Auth & Security"
 name = "CORS-Lockdown"
 status = "shipped"
-test = "testen"
+test = "getestet"
+tested = "2026-11-22"
 research = "security-cors-allow-credentials-tightening"
 desc = "Nur localhost/tauri-Origins, explizite Methoden, allow_credentials=False, kein Auth-Cookie."
-notes = "Code in app/main.py (CORS_ALLOWED_ORIGINS). Cookie-Auth-PRs immer ablehnen. Test: testen - 2026-11-14 http://tauri.localhost ergänzt (Windows-Origin der Release-App, useHttpsScheme default false; fehlte -> jeder Preflight OPTIONS 400). Tests in tests/test_auth.py TestCaseM2. Installierte App vom User prüfen. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): B2 (http://tauri.localhost fehlte) in PR #80 gefixt - installierte App neu prüfen."
+notes = "PC-Test 2026-11-22 (Kopie der Library, main f3ce85d): 9 erlaubte Origins 200 + exakte ACAO, fremde/null/Look-alike 400; keine Credentials, keine Cookies. Code in app/main.py (CORS_ALLOWED_ORIGINS). Cookie-Auth-PRs immer ablehnen. Test: testen - 2026-11-14 http://tauri.localhost ergänzt (Windows-Origin der Release-App, useHttpsScheme default false; fehlte -> jeder Preflight OPTIONS 400). Tests in tests/test_auth.py TestCaseM2. Installierte App vom User prüfen. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): B2 (http://tauri.localhost fehlte) in PR #80 gefixt - installierte App neu prüfen."
 
 [[feature]]
 id = "audio-path-sandbox"
@@ -139,7 +140,8 @@ test = "testen"
 research = "security-error-handler-exc-info-leak"
 desc = "RedactingFormatter entfernt absolute Pfade aus Logs/Tracebacks, safe_error_message."
 paths = ["app/logging_utils.py", "tests/test_logging_redaction.py"]
-todo = ["Boot-Zeile 'Allowed audio roots: [...]' loggt die Pfade unredigiert (app/main.py, Kern-Loop-Test 2026-11-14)"]
+todo = ["Boot-Zeile 'Allowed audio roots: [...]' loggt die Pfade unredigiert (app/main.py, Kern-Loop-Test 2026-11-14)", "Scrub greift nur bei C:\\Users\\<name> mit Backslash: Pfade mit / oder Kleinschreibung landen ungefiltert im Log (main.py:3205, 1791 von 5037 Library-Pfaden)", "uvicorn-Access-Log und uvicorn-Traceback laufen am RedactingFormatter vorbei (Query-String mit Pfad)", "UNC-Form \\\\localhost\\C$\\Users\\<name> nicht gefiltert"]
+notes = "PC-Test 2026-11-22: Fehlerantworten an den Client sauber (23 Proben); Boot-Zeile seit dem Fix sauber."
 
 [[feature]]
 id = "sc-log-credential-scrub"

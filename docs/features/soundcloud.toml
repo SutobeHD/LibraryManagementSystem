@@ -194,11 +194,13 @@ id = "import-progress-banner"
 group = "Downloads"
 name = "Sticky Import-Banner"
 status = "shipped"
-test = "testen"
+test = "getestet"
+tested = "2026-11-22"
 desc = "Fortschrittsbanner auf jedem Screen, Klick öffnet den Manager."
 paths = ["frontend/src/components/ImportProgressBanner.jsx"]
 related = ["download-manager-view"]
-notes = "Polling seit PR #65 (in #60) über useTaskPolling mit Idle-Backoff."
+todo = ["Klick auf Banner öffnet Manager + Poll-Backoff ungeprüft"]
+notes = "PC-Test 2026-11-22 (Kopie der Library, main f3ce85d): Banner 'Import läuft — 0/3' mit Stufe und Datei, verschwindet nach dem Import. Polling seit PR #65 (in #60) über useTaskPolling mit Idle-Backoff."
 
 [[feature]]
 id = "download-format-setting"
