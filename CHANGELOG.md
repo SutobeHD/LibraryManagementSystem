@@ -18,6 +18,16 @@
     answers 409 with a hint to remove the track in Rekordbox. XML mode still
     removes tracks, now with one confirmation instead of two.
 
+- Rekordbox XML export:
+  - Fixed: the export held no playlist (PLAYLISTS was an empty ROOT), so an
+    imported file lost the playlist and its order. `POST /api/rekordbox/export`
+    now takes `playlist_id` (a playlist, or a folder with its subfolders) or
+    `track_ids` + `playlist_name` and writes the playlist nodes in playlist
+    order. A plain track list (the whole-library push) still has no playlist.
+  - Fixed: SoundCloud and other streaming tracks got a made-up local
+    Location (`<backend folder>/soundcloud:tracks:…`). They are now left out,
+    and the response says how many were skipped.
+
 - USB export:
   - Fixed: every exported track lost its album and kept the OneLibrary
     template's file type (M4A), sample rate (48 kHz), bit depth and file size,
