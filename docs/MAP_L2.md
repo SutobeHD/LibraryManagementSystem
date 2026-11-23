@@ -755,6 +755,7 @@ Log redaction helpers — scrub absolute paths from log lines + tracebacks.
 - `safe_error_message_str()` — Strip absolute paths from a rendered log/error string.
 - `RedactingFormatter` — `logging.Formatter` that scrubs paths from message + cached traceback.
 - `  RedactingFormatter.format()`
+- `uvicorn_log_config()` — uvicorn's own logging config with scrubbing formatters.
 
 ### `app/main.py`
 
@@ -787,7 +788,7 @@ Log redaction helpers — scrub absolute paths from log lines + tracebacks.
 - `AnalyzeFullReq`
 - `AnalyzeBatchReq`
 - `MergeReq`
-- `RbxSyncReq`
+- `RbxSyncReq` — Tracks by id (``playlist_name`` makes them one playlist) or one library playlist/folder.
 - `RbxImportReq`
 - `PlCreateReq`
 - `PlRenameReq`
@@ -932,7 +933,7 @@ Log redaction helpers — scrub absolute paths from log lines + tracebacks.
 - `LoadLibReq`
 - `load_lib()`
 - `unload_lib()`
-- `rbx_export()` — Write the given tracks as a Rekordbox XML into ``EXPORT_DIR``.
+- `rbx_export()` — Write tracks, or one playlist/folder with its NODE tree, as Rekordbox XML into ``EXPORT_DIR``.
 - `rbx_import()` — Imports tracks and metadata from a Rekordbox XML file.
 - `gen_smart()` — Rebuild the "By Label" auto-playlists.
 - `PathRequest` — Generic single-path body used by every endpoint that needs to point at
@@ -1197,8 +1198,11 @@ RBEP Parser — Parses Rekordbox Editor Project (.rbep) files.
 
 *(no module docstring)*
 
+- `PlaylistNotFoundError`
+- `RbxExportResult`
 - `RekordboxBridge`
-- `  RekordboxBridge.export_collection()` — Exports selected tracks to a Rekordbox-compatible XML.
+- `  RekordboxBridge.export_collection()` — Selected tracks as Rekordbox XML.
+- `  RekordboxBridge.export_playlist()` — One library playlist, or a folder with its subtree, as Rekordbox XML.
 - `  RekordboxBridge.import_library()` — Imports data from a Rekordbox XML and updates the local database.
 
 ### `app/rekordbox_export.py`
@@ -1473,12 +1477,15 @@ variant_schema — DDL + idempotent migration runner for the variants sidecar.
 
 Rekordbox collection XML (DJ_PLAYLISTS) writer for the /api/rekordbox/export bridge.
 
+- `is_streaming_path()` — True for a streaming-service URI (``soundcloud:tracks:123``): no local file exists.
+- `XmlPlaylist` — Playlist ``NODE`` (Type 1).
+- `XmlFolder` — Folder ``NODE`` (Type 0) of playlists and further folders.
 - `kind_for_path()` — Rekordbox ``Kind`` for the file's real extension ("MP3 File", "AIFF File"), or None.
 - `location_for_path()` — ``file://localhost/...`` URL, percent-encoded the way Rekordbox writes it.
 - `date_added()` — ``YYYY-MM-DD`` from the track's ``StockDate``; today only when it has none.
 - `xml_rating()` — Rekordbox XML rating (0/51/102/153/204/255) or None when unusable.
 - `RekordboxXML`
-- `  RekordboxXML.generate()` — Generates a Rekordbox-compatible XML collection.
+- `  RekordboxXML.generate()` — Write ``tracks_data`` (info, beatGrid, cues) as DJ_PLAYLISTS XML; return its path.
 - `  RekordboxXML.generate_for_track()` — Legacy wrapper for single track generation.
 
 
@@ -4407,6 +4414,13 @@ Unit tests for `app.logging_utils.RedactingFormatter`.
 - `test_safe_error_message_str_noop_on_clean_input()`
 - `test_non_exception_log_format_unchanged()` — A path-free `logger.info("hello")` must be byte-identical via
 - `test_allowed_roots_boot_line_hides_user_paths()` — The boot line used to log the list repr: doubled backslashes beat the scrub.
+- `test_every_spelling_of_the_home_path_is_scrubbed()`
+- `test_a_longer_name_sharing_the_prefix_is_left_alone()`
+- `test_text_after_the_prefix_survives()`
+- `test_uvicorn_access_line_is_scrubbed()`
+- `test_uvicorn_error_traceback_is_scrubbed()`
+- `test_uvicorn_log_config_is_a_valid_dict_config()`
+- `test_sidecar_entry_point_passes_the_log_config()`
 
 ### `tests/test_main_route_table.py`
 
@@ -5753,6 +5767,20 @@ Tests for app/xml_generator.py — Rekordbox collection XML export.
 - `test_control_characters_do_not_break_the_file()`
 - `test_tempo_uses_rekordbox_battito_attribute()`
 - `test_export_round_trips_through_the_xml_library_loader()`
+- `test_without_playlists_root_stays_alone_with_count_zero()`
+- `test_playlist_node_keeps_order_and_repeats()`
+- `test_folders_nest_with_child_count()`
+- `test_is_streaming_path()`
+- `test_streaming_tracks_left_out_of_collection_and_playlist()`
+- `test_playlist_export_round_trips_through_the_xml_library_loader()`
+- `export_dir()`
+- `test_route_exports_a_library_playlist_in_order()`
+- `test_route_playlist_export_keeps_the_verified_track_fields()`
+- `test_route_exports_a_folder_as_nested_nodes()`
+- `test_route_playlist_name_overrides_the_library_name()`
+- `test_route_track_ids_with_a_name_form_one_playlist()`
+- `test_route_track_ids_without_a_name_keep_root_alone()`
+- `test_route_refuses_without_writing()`
 
 
 ## scripts/ — Dev/Build Utilities

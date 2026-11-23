@@ -124,7 +124,7 @@ from .playcount_sync import (
 )
 from .rbep_parser import list_projects as rbep_list_projects
 from .rbep_parser import parse_project as rbep_parse_project
-from .rekordbox_bridge import RekordboxBridge
+from .rekordbox_bridge import PlaylistNotFoundError, RekordboxBridge
 from .services import (
     AudioEngine,
     BeatAnalyzer,
@@ -640,8 +640,12 @@ class MergeReq(BaseModel):
 
 
 class RbxSyncReq(BaseModel):
-    track_ids: list[str]
+    """Tracks by id (``playlist_name`` makes them one playlist) or one library playlist/folder."""
+
+    track_ids: list[str] = _Field(default_factory=list)
     filename: str | None = "rekordbox_export.xml"
+    playlist_id: str | None = None
+    playlist_name: str | None = None
 
 
 class RbxImportReq(BaseModel):
@@ -4554,20 +4558,39 @@ def _rbx_export_path(filename: str | None) -> Path:
 
 
 @app.post("/api/rekordbox/export", dependencies=[Depends(require_session)])
-def rbx_export(r: RbxSyncReq) -> dict[str, str]:
-    """Write the given tracks as a Rekordbox XML into ``EXPORT_DIR``. 400 on a bad name."""
+def rbx_export(r: RbxSyncReq) -> dict[str, Any]:
+    """Write tracks, or one playlist/folder with its NODE tree, as Rekordbox XML into ``EXPORT_DIR``.
+
+    Streaming tracks have no file and are left out (``skipped_streaming``). 400 on a bad
+    name, on ``playlist_id`` together with ``track_ids``, or when nothing exportable is
+    left; 404 for an unknown ``playlist_id``.
+    """
     output_path = _rbx_export_path(r.filename)
+    name = (r.playlist_name or "").strip() or None
+    if r.playlist_id and r.track_ids:
+        raise HTTPException(400, "Send either track_ids or playlist_id, not both.")
     try:
-        xml_path = RekordboxBridge.export_collection(r.track_ids, output_path)
-    except ValueError as e:  # none of the ids resolved to a track
+        if r.playlist_id:
+            result = RekordboxBridge.export_playlist(r.playlist_id, output_path, name)
+        else:
+            result = RekordboxBridge.export_collection(r.track_ids, output_path, name)
+    except PlaylistNotFoundError as e:
+        raise HTTPException(404, str(e)) from e
+    except ValueError as e:  # no id resolved to a track, or only streaming tracks
         raise HTTPException(400, str(e)) from e
     except Exception as e:
         logger.error(f"Rekordbox export failed: {e}")
         raise HTTPException(500, safe_error_message(e)) from e
+    message = f"Exported {result.exported} tracks to XML."
+    if result.skipped_streaming:
+        message += f" Skipped {result.skipped_streaming} streaming tracks (no local file)."
     return {
         "status": "success",
-        "message": f"Exported {len(r.track_ids)} tracks to XML.",
-        "path": str(xml_path),
+        "message": message,
+        "path": result.path,
+        "exported": result.exported,
+        "skipped_streaming": result.skipped_streaming,
+        "playlist": result.playlist,
     }
 
 
@@ -8327,4 +8350,6 @@ def duplicates_merge(body: DuplicateMergeRequest):
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    from .logging_utils import uvicorn_log_config
+
+    uvicorn.run(app, host="127.0.0.1", port=8000, log_config=uvicorn_log_config())

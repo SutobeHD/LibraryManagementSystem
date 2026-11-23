@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+- Logging:
+  - Fixed: user paths reached the logs with the account name whenever they were
+    not spelled exactly like the home folder — forward slashes (a third of the
+    library), other case, URL-encoded query strings in uvicorn access lines,
+    doubled backslashes from a list repr, UNC paths. The scrub now matches every
+    spelling, and uvicorn's own access and error loggers (which do not propagate
+    to the root logger) get scrubbing formatters via `log_config`.
+
 - Library:
   - Fixed: "Delete from Collection" in the live Rekordbox library only hid the
     track until the next restart (and answered 500) while the dialog promised a
@@ -24,6 +32,16 @@
   - Fixed: imported MP3s got FileType 0 in master.db instead of Rekordbox's 1.
     Every import now gets the code of its format (MP3 1, M4A 4, FLAC 5, WAV 11,
     AIFF 12).
+
+- Rekordbox XML export:
+  - Fixed: the export held no playlist (PLAYLISTS was an empty ROOT), so an
+    imported file lost the playlist and its order. `POST /api/rekordbox/export`
+    now takes `playlist_id` (a playlist, or a folder with its subfolders) or
+    `track_ids` + `playlist_name` and writes the playlist nodes in playlist
+    order. A plain track list (the whole-library push) still has no playlist.
+  - Fixed: SoundCloud and other streaming tracks got a made-up local
+    Location (`<backend folder>/soundcloud:tracks:…`). They are now left out,
+    and the response says how many were skipped.
 
 - USB export:
   - Fixed: every exported track lost its album and kept the OneLibrary

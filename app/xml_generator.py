@@ -1,14 +1,21 @@
 """Rekordbox collection XML (DJ_PLAYLISTS) writer for the /api/rekordbox/export bridge."""
 
+from __future__ import annotations
+
 import re
 import urllib.parse
 import xml.etree.ElementTree as ET
+from collections.abc import Sequence
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 # Rekordbox's own Kind strings where the extension alone is not the name.
 _KIND_ALIASES = {".aif": "AIFF", ".m4a": "M4A", ".mp4": "M4A", ".alac": "M4A"}
+# URI schemes of service tracks (`soundcloud:tracks:123`); same set as the USB sync's
+# `_is_streaming_pseudo_path`. A drive letter is one character, so `C:/` never matches.
+_STREAMING_SCHEMES = frozenset({"soundcloud", "spotify", "tidal", "beatport", "http", "https"})
 _DATE = re.compile(r"(\d{4})-(\d{2})-(\d{2})")
 _TRACK_ID = re.compile(r"[0-9]+")
 # Characters XML 1.0 cannot carry. ElementTree writes them unescaped, and Rekordbox (and
@@ -28,6 +35,45 @@ def _int(value: Any) -> int:
         return int(float(value))
     except (TypeError, ValueError):
         return 0
+
+
+def is_streaming_path(path: Any) -> bool:
+    """True for a streaming-service URI (``soundcloud:tracks:123``): no local file exists.
+
+    Such a path made ``location_for_path`` invent ``file://localhost/<cwd>/soundcloud:...``.
+    """
+    scheme, sep, _ = str(path or "").partition(":")
+    return bool(sep) and scheme.lower() in _STREAMING_SCHEMES
+
+
+@dataclass
+class XmlPlaylist:
+    """Playlist ``NODE`` (Type 1). ``tracks`` index ``tracks_data``, playlist order, repeats ok."""
+
+    name: str
+    tracks: list[int] = field(default_factory=list)
+
+
+@dataclass
+class XmlFolder:
+    """Folder ``NODE`` (Type 0) of playlists and further folders."""
+
+    name: str
+    children: list[XmlPlaylist | XmlFolder] = field(default_factory=list)
+
+
+def _playlist_node(parent: ET.Element, node: XmlPlaylist | XmlFolder, keys: dict[int, str]) -> None:
+    if isinstance(node, XmlFolder):
+        folder = ET.SubElement(parent, "NODE", Type="0", Name=_text(node.name))
+        folder.set("Count", str(len(node.children)))
+        for child in node.children:
+            _playlist_node(folder, child, keys)
+        return
+    entries = [keys[i] for i in node.tracks if i in keys]  # streaming tracks have no key
+    playlist = ET.SubElement(parent, "NODE", Name=_text(node.name), Type="1", KeyType="0")
+    playlist.set("Entries", str(len(entries)))
+    for key in entries:
+        ET.SubElement(playlist, "TRACK", Key=key)
 
 
 def kind_for_path(path: str) -> str | None:
@@ -117,15 +163,22 @@ def _assign_track_ids(tracks_data: list) -> list[str]:
 
 class RekordboxXML:
     @staticmethod
-    def generate(tracks_data: list, output_path: Path):
-        """
-        Generates a Rekordbox-compatible XML collection.
-        tracks_data: list of dicts containing track info, beatGrid, and cues.
-        """
-        root = ET.Element("DJ_PLAYLISTS", Version="1.0.0")
-        collection = ET.SubElement(root, "COLLECTION", Entries=str(len(tracks_data)))
+    def generate(
+        tracks_data: list, output_path: Path, playlists: Sequence[XmlPlaylist | XmlFolder] = ()
+    ) -> str:
+        """Write ``tracks_data`` (info, beatGrid, cues) as DJ_PLAYLISTS XML; return its path.
 
-        for data, track_id in zip(tracks_data, _assign_track_ids(tracks_data), strict=True):
+        Streaming tracks (``is_streaming_path``) are left out of COLLECTION and of every
+        playlist: they have no file a Location could point at. ``playlists`` go under the
+        ROOT node; none = ROOT alone, so Rekordbox imports the tracks without a playlist.
+        """
+        local = [i for i, d in enumerate(tracks_data) if not is_streaming_path(d.get("path"))]
+        keys = dict(zip(local, _assign_track_ids([tracks_data[i] for i in local]), strict=True))
+        root = ET.Element("DJ_PLAYLISTS", Version="1.0.0")
+        collection = ET.SubElement(root, "COLLECTION", Entries=str(len(local)))
+
+        for i in local:
+            data, track_id = tracks_data[i], keys[i]
             path = _text(data.get("path"))
             track = ET.SubElement(collection, "TRACK")
             track.set("TrackID", track_id)
@@ -210,8 +263,11 @@ class RekordboxXML:
                     mark.set("Green", str(cue.get("Green", 0)))
                     mark.set("Blue", str(cue.get("Blue", 0)))
 
-        # Playlists (Empty structure to satisfy Rekordbox)
-        ET.SubElement(root, "PLAYLISTS").append(ET.Element("NODE", Type="0", Name="ROOT"))
+        # Rekordbox wants PLAYLISTS > ROOT even when the export carries no playlist.
+        top = ET.SubElement(ET.SubElement(root, "PLAYLISTS"), "NODE", Type="0", Name="ROOT")
+        top.set("Count", str(len(playlists)))
+        for node in playlists:
+            _playlist_node(top, node, keys)
 
         tree = ET.ElementTree(root)
         ET.indent(tree, space="  ", level=0)
