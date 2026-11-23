@@ -273,6 +273,7 @@
 | `tests/__init__.py` | *(no module docstring)* |
 | `tests/conftest.py` | Pytest fixtures shared across the suite. |
 | `tests/test_analysis.py` | Regression tests for the analysis pipeline. |
+| `tests/test_analysis_api_hygiene.py` | POST /api/audio/analyze sandbox + path-free analyze-batch / analyze-full bodies. |
 | `tests/test_analysis_cache.py` | Tests for app/analysis_cache.py — persistent analysis-result cache. |
 | `tests/test_analysis_db_writer.py` | Unit tests for AnalysisDBWriter — the values it writes into Rekordbox master.db. |
 | `tests/test_analysis_edge.py` | Edge-case robustness for the analysis engine entry points. |
@@ -377,6 +378,7 @@
 | `tests/test_soundcloud_log_redaction.py` | Regression guard: no SoundCloud log record may carry a `client_id`. |
 | `tests/test_soundcloud_refresh_route.py` | Route tests for the persistent SoundCloud login (T-19). |
 | `tests/test_stream_chunking.py` | GET /api/stream: file reads happen off the event loop, in 1 MiB chunks. |
+| `tests/test_stream_ranges.py` | RFC 7233 Range + HEAD on both stream routes, raw files and the AIFF WAV view alike. |
 | `tests/test_stream_unicode_filename.py` | Regression: GET /api/stream 500 on non-latin-1 filenames. |
 | `tests/test_system_health.py` | Contract tests for ``GET /api/system/health`` -- unauth'd liveness probe. |
 | `tests/test_track_delete_routes.py` | Deleting a track (PC test 2026-11-22). |

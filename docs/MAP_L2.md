@@ -809,7 +809,7 @@ Log redaction helpers — scrub absolute paths from log lines + tracebacks.
 - `ArtistMusicBrainzReq` — The MusicBrainz artist the user picked out of the refresh's candidates.
 - `ArtistTrackAssignReq` — One manual correction to an artist's local tracks.
 - `DownloadNamesReq` — Artist/Title for a downloaded track: a taken suggestion, or the raw names an undo restores.
-- `stream_audio()` — Streams audio file with HTTP Range support — required for browser seeking.
+- `stream_audio()` — Streams an audio file with HTTP Range support — required for browser seeking.
 - `get_multiband_waveform()` — Returns 3-band waveform data for professional visualization.
 - `FileRevealReq`
 - `file_reveal()` — Open the OS file explorer pointing at the given audio file path.
@@ -868,7 +868,7 @@ Log redaction helpers — scrub absolute paths from log lines + tracebacks.
 - `get_cues()`
 - `get_beatgrid()`
 - `analyze_track()` — Analyzes a track to detect BPM and beat grid if missing from XML
-- `stream_audio_file()` — Streams an audio file from the local filesystem (AIFF as WAV, see /api/stream).
+- `stream_audio_file()` — Same response as ``/api/stream``, under the URL DawEngine uses.
 - `MyTagCreateReq`
 - `TrackMyTagsReq`
 - `list_mytags()`
@@ -2644,6 +2644,20 @@ Regression tests for the analysis pipeline.
 - `test_cue_toggles_via_settings()` — Setting RB_ANALYSIS_AUTO_HOT_CUES=0 disables hot cues globally.
 - `test_cue_toggles_kwarg_overrides_settings()` — Per-call kwarg overrides the global setting.
 - `test_e2e_anlz_write_roundtrip()`
+
+### `tests/test_analysis_api_hygiene.py`
+
+POST /api/audio/analyze sandbox + path-free analyze-batch / analyze-full bodies.
+
+- `sandbox_root()`
+- `submitted()`
+- `test_analyze_inside_the_sandbox_is_queued()`
+- `test_analyze_outside_the_sandbox_is_403()`
+- `test_analyze_non_audio_extension_is_400()`
+- `test_analyze_missing_file_stays_404()`
+- `live()`
+- `test_batch_lines_carry_no_paths()`
+- `test_analyze_full_ok_body_carries_no_paths()`
 
 ### `tests/test_analysis_cache.py`
 
@@ -4736,6 +4750,7 @@ Tests for app/playcount_sync.py — USB <-> PC play-count sync engine.
 - `test_resolve_rejects_non_list()`
 - `test_save_meta_invalid_inputs_raise()`
 - `test_roundtrip_meta_is_json_serializable()`
+- `test_pc_db_write_holds_db_lock()` — Every master.db writer serialises on ``app.database._db_write_lock``.
 
 ### `tests/test_popularity_engine.py`
 
@@ -4795,6 +4810,9 @@ Live master.db writers refuse while Rekordbox runs (B13); playlist create + XML 
 - `test_xml_mode_never_scans_for_rekordbox()`
 - `test_live_write_goes_through_while_rekordbox_is_closed()`
 - `test_scan_failure_fails_open()`
+- `resolved()` — ``resolve_playcounts`` stub: records the master.db path the route hands it.
+- `test_playcount_resolve_writes_the_live_master_db()`
+- `test_playcount_resolve_outside_live_mode_is_409()`
 - `test_create_playlist_answers_the_id_string()`
 - `test_create_playlist_failure_is_500()`
 - `test_create_playlist_xml_library_answers_the_new_id()`
@@ -5264,6 +5282,23 @@ GET /api/stream: file reads happen off the event loop, in 1 MiB chunks.
 - `test_ranged_stream_reads_off_loop()`
 - `test_open_ended_range_to_eof()`
 - `test_invalid_range_is_416()`
+
+### `tests/test_stream_ranges.py`
+
+RFC 7233 Range + HEAD on both stream routes, raw files and the AIFF WAV view alike.
+
+- `sandbox_root()`
+- `source()`
+- `test_suffix_range_returns_the_tail()`
+- `test_suffix_longer_than_the_file_is_the_whole_file()`
+- `test_closed_and_open_ranges()`
+- `test_unsatisfiable_range_is_416()`
+- `test_multi_range_and_malformed_serve_the_whole_file()`
+- `test_raw_formats_range_and_content_type()`
+- `test_head_reports_size_without_a_body()`
+- `test_head_with_range_mirrors_get()`
+- `test_head_reads_no_audio()`
+- `test_head_keeps_the_sandbox()`
 
 ### `tests/test_stream_unicode_filename.py`
 

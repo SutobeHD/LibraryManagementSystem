@@ -3170,8 +3170,10 @@ async def analyze_track(tid: str):
 
 @app.api_route("/api/audio/stream", methods=["GET", "HEAD"])
 async def stream_audio_file(path: str, request: Request):
-    """Same response as ``/api/stream`` (DawEngine's URL); Starlette 0.35's FileResponse
-    ignored Range, so this route no longer uses it."""
+    """Same response as ``/api/stream``, under the URL DawEngine uses.
+
+    Was a ``FileResponse``, which on Starlette 0.35 ignores Range (200 + whole body).
+    """
     return await _audio_stream_response(path, request)
 
 

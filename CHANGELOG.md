@@ -10,6 +10,24 @@
     answers 409 with a hint to remove the track in Rekordbox. XML mode still
     removes tracks, now with one confirmation instead of two.
 
+- API route hygiene:
+  - Fixed: a suffix range (`Range: bytes=-500`) on `/api/stream` returned the
+    first 501 bytes of a non-AIFF file instead of the last 500. Both stream
+    routes now share one RFC 7233 range
+    handler (single range -> 206, multi-range or malformed -> whole file,
+    unsatisfiable -> 416).
+  - Fixed: `/api/audio/stream` (DAW editor) ignored Range for MP3/FLAC/M4A/WAV
+    and sent FLAC/M4A with the wrong Content-Type. It now answers exactly like
+    `/api/stream`. Both routes answer `HEAD`.
+  - Fixed: `POST /api/audio/analyze` analysed any existing file; it now has the
+    same folder sandbox as playback (403 outside the library folders).
+  - Fixed: analysis responses (`analyze-batch` progress lines, `analyze-full`)
+    no longer contain absolute file paths.
+  - Fixed: play-count sync (`/api/usb/playcount/resolve`) wrote a fixed
+    `%APPDATA%` master.db in every mode, even while Rekordbox was running. It
+    now refuses while Rekordbox runs, works only on the live library and holds
+    the database write lock.
+
 - USB export:
   - Fixed: every exported track lost its album and kept the OneLibrary
     template's file type (M4A), sample rate (48 kHz), bit depth and file size,
