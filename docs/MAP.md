@@ -381,6 +381,8 @@
 | `tests/test_stream_ranges.py` | RFC 7233 Range + HEAD on both stream routes, raw files and the AIFF WAV view alike. |
 | `tests/test_stream_unicode_filename.py` | Regression: GET /api/stream 500 on non-latin-1 filenames. |
 | `tests/test_system_health.py` | Contract tests for ``GET /api/system/health`` -- unauth'd liveness probe. |
+| `tests/test_track_batch_tags.py` | PATCH /api/tracks/batch writes the audio-file tags like the single-track edit. |
+| `tests/test_track_batch_writes.py` | Track edits are all or nothing and name an unknown id (PC test 2026-11-22). |
 | `tests/test_track_delete_routes.py` | Deleting a track (PC test 2026-11-22). |
 | `tests/test_track_metadata_fields.py` | Track-metadata writes refuse fields and values the backend cannot store (issue K8). |
 | `tests/test_usb_artwork.py` | Cover art for the USB stick, with the real Pillow (B8, 0.1 core-loop test). |

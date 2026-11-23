@@ -17,7 +17,7 @@ import urllib.parse
 import uuid
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from concurrent.futures import Executor, ThreadPoolExecutor
-from contextlib import asynccontextmanager
+from contextlib import ExitStack, asynccontextmanager
 from pathlib import Path, PureWindowsPath
 from typing import Any, BinaryIO
 
@@ -124,7 +124,7 @@ from .playcount_sync import (
 )
 from .rbep_parser import list_projects as rbep_list_projects
 from .rbep_parser import parse_project as rbep_parse_project
-from .rekordbox_bridge import RekordboxBridge
+from .rekordbox_bridge import PlaylistNotFoundError, RekordboxBridge
 from .services import (
     AudioEngine,
     BeatAnalyzer,
@@ -141,7 +141,12 @@ from .soundcloud_api import (
     SoundCloudSyncEngine,
 )
 from .soundcloud_downloader import sc_downloader
-from .track_fields import TrackFieldError
+from .track_fields import (
+    TrackFieldError,
+    TrackWriteFailed,
+    UnknownTrackIds,
+    normalise_track_updates,
+)
 from .usb_manager import (
     UsbActions,
     UsbDetector,
@@ -635,8 +640,12 @@ class MergeReq(BaseModel):
 
 
 class RbxSyncReq(BaseModel):
-    track_ids: list[str]
+    """Tracks by id (``playlist_name`` makes them one playlist) or one library playlist/folder."""
+
+    track_ids: list[str] = _Field(default_factory=list)
     filename: str | None = "rekordbox_export.xml"
+    playlist_id: str | None = None
+    playlist_name: str | None = None
 
 
 class RbxImportReq(BaseModel):
@@ -3252,60 +3261,117 @@ def save_grid(r: GridReq):
     return {"status": "success" if db.save_track_beatgrid(r.track_id, r.beat_grid) else "error"}
 
 
+def _tag_file_paths(track_ids: list[str]) -> list[str]:
+    """Audio files of ``track_ids`` the tag write-back may touch (no streaming URIs)."""
+    paths = []
+    for tid in track_ids:
+        src = (db.get_track_details(tid) or {}).get("path")
+        if src and not str(src).startswith(_STREAMING_PREFIXES):
+            paths.append(str(src))
+    return paths
+
+
+def _file_tag_writeback(track_ids: list[str], updates: dict[str, Any]) -> dict[str, str]:
+    """Mirror ``updates`` into each track's audio file tags, after the library write.
+
+    Best effort: a failure here never undoes the library write. Per track "written",
+    "failed" (the tag writer refused), "skipped" (nothing written: no field the file
+    stores, e.g. ColorID alone; no local file; settings.write_tags_to_files=False,
+    default true) or "error". Pictures stay as they are: the edits carry no artwork,
+    and re-embedding the library's thumbnail replaced the file's own cover and
+    dropped a back cover.
+    """
+    status = dict.fromkeys(track_ids, "skipped")
+    if not audio_tags.tag_fields(updates):
+        return status
+    try:
+        enabled = SettingsManager.load().get("write_tags_to_files", True)
+    except Exception as exc:
+        logger.warning(f"Tag write-back skipped, settings unreadable: {exc}")
+        return dict.fromkeys(track_ids, "error")
+    if not enabled:
+        return status
+    for tid in status:
+        try:
+            src = (db.get_track_details(tid) or {}).get("path")
+            if src and not str(src).startswith(_STREAMING_PREFIXES):
+                ok = audio_tags.write_tags(src, updates)
+                status[tid] = "written" if ok else "failed"
+        except Exception as exc:
+            logger.warning(f"Tag write-back skipped for {tid}: {exc}")
+            status[tid] = "error"
+    return status
+
+
+def _update_tracks_then_tags(
+    track_ids: list[str], updates: dict[str, Any]
+) -> dict[str, str] | None:
+    """Library write, then the file write-back. None when the library answers False.
+
+    Each file's tag-write lock is taken before the master.db lock is released, so two
+    edits of one track write its file in the order they wrote the library; the older
+    value never lands last. Raises what ``update_tracks_metadata`` raises.
+    """
+    paths = _tag_file_paths(track_ids) if audio_tags.tag_fields(updates) else []
+    file_locks = audio_tags.FileWriteLocks(paths)
+    with ExitStack() as held:
+        with db_lock():
+            if not db.update_tracks_metadata(track_ids, updates):
+                return None
+            held.enter_context(file_locks)
+        return _file_tag_writeback(track_ids, updates)
+
+
 @app.post("/api/track/{tid}", dependencies=[Depends(require_session)])
 def update_track(tid: str, r: TrackUpdateReq):
+    """Edit one track. 404 for an unknown id, 400 for a value the backend refuses.
+
+    ``file_tags`` reports the best-effort write-back into the audio file.
+    """
     _reject_while_rekordbox_runs("editing tracks")
     updates = {k: v for k, v in r.model_dump().items() if v is not None}
     if not updates:
         return {"status": "no_change"}
     try:
-        if not db.update_tracks_metadata([tid], updates):
-            raise HTTPException(500, "Update returned False (unknown error)")
-
-        # Best-effort write-back to the source audio file's tags. Disabled by
-        # toggling settings.write_tags_to_files=False (default true).
-        tag_status = "skipped"
-        try:
-            cfg = SettingsManager.load()
-            if cfg.get("write_tags_to_files", True):
-                track = db.get_track_details(tid) or {}
-                src = track.get("path")
-                if src:
-                    artwork_bytes = None
-                    art_path = track.get("Artwork")
-                    if art_path:
-                        artwork_bytes = audio_tags.load_artwork(art_path)
-                    ok = audio_tags.write_tags(src, updates, artwork=artwork_bytes)
-                    tag_status = "written" if ok else "failed"
-        except Exception as exc:
-            logger.warning(f"Tag write-back skipped for {tid}: {exc}")
-            tag_status = "error"
-
-        return {"status": "success", "file_tags": tag_status}
-    except HTTPException:
-        raise
+        file_tags = _update_tracks_then_tags([tid], updates)
     except TrackFieldError as e:
         raise HTTPException(400, str(e)) from e
+    except UnknownTrackIds as e:
+        raise HTTPException(404, str(e)) from e
     except Exception as e:
         logger.error(f"Update failed for {tid}: {e}")
         raise HTTPException(500, f"Update failed: {e!s}")
+    if file_tags is None:
+        raise HTTPException(500, "Update returned False (unknown error)")
+    return {"status": "success", "file_tags": file_tags[tid]}
 
 
 @app.patch("/api/tracks/batch", dependencies=[Depends(require_session)])
 def batch_up(r: BatchReq):
-    """Write the same fields to many tracks. 400 names a field or value the backend refuses.
+    """Write the same fields to many tracks, all or nothing.
 
-    A refused update leaves every track untouched. A failed write is a 500, not the old
-    200 `{"status": "error"}` that no caller read.
+    400 names a field or value the backend refuses, 404 every unknown track id; both
+    before the first write. A write that fails partway is a 500 once the tracks
+    already written are restored (live mode). ``file_tags`` maps each track id to its
+    best-effort write-back into the audio file, as the single-track edit reports it.
     """
     _reject_while_rekordbox_runs("editing tracks")
+    track_ids = list(dict.fromkeys(r.track_ids))
     try:
-        ok = db.update_tracks_metadata(r.track_ids, r.updates)
+        updates = normalise_track_updates(r.updates, db.mode)
+        file_tags = _update_tracks_then_tags(track_ids, updates)
     except TrackFieldError as e:
         raise HTTPException(400, str(e)) from e
-    if not ok:
+    except UnknownTrackIds as e:
+        raise HTTPException(404, str(e)) from e
+    except TrackWriteFailed as e:
+        raise HTTPException(500, str(e)) from e
+    except Exception as e:
+        logger.error(f"Batch update failed for {len(track_ids)} track(s): {e}")
+        raise HTTPException(500, f"Library update failed: {e!s}") from e
+    if file_tags is None:
         raise HTTPException(500, "Library update failed for one or more tracks.")
-    return {"status": "success"}
+    return {"status": "success", "file_tags": file_tags}
 
 
 @app.post("/api/system/heartbeat")
@@ -4457,20 +4523,39 @@ def _rbx_export_path(filename: str | None) -> Path:
 
 
 @app.post("/api/rekordbox/export", dependencies=[Depends(require_session)])
-def rbx_export(r: RbxSyncReq) -> dict[str, str]:
-    """Write the given tracks as a Rekordbox XML into ``EXPORT_DIR``. 400 on a bad name."""
+def rbx_export(r: RbxSyncReq) -> dict[str, Any]:
+    """Write tracks, or one playlist/folder with its NODE tree, as Rekordbox XML into ``EXPORT_DIR``.
+
+    Streaming tracks have no file and are left out (``skipped_streaming``). 400 on a bad
+    name, on ``playlist_id`` together with ``track_ids``, or when nothing exportable is
+    left; 404 for an unknown ``playlist_id``.
+    """
     output_path = _rbx_export_path(r.filename)
+    name = (r.playlist_name or "").strip() or None
+    if r.playlist_id and r.track_ids:
+        raise HTTPException(400, "Send either track_ids or playlist_id, not both.")
     try:
-        xml_path = RekordboxBridge.export_collection(r.track_ids, output_path)
-    except ValueError as e:  # none of the ids resolved to a track
+        if r.playlist_id:
+            result = RekordboxBridge.export_playlist(r.playlist_id, output_path, name)
+        else:
+            result = RekordboxBridge.export_collection(r.track_ids, output_path, name)
+    except PlaylistNotFoundError as e:
+        raise HTTPException(404, str(e)) from e
+    except ValueError as e:  # no id resolved to a track, or only streaming tracks
         raise HTTPException(400, str(e)) from e
     except Exception as e:
         logger.error(f"Rekordbox export failed: {e}")
         raise HTTPException(500, safe_error_message(e)) from e
+    message = f"Exported {result.exported} tracks to XML."
+    if result.skipped_streaming:
+        message += f" Skipped {result.skipped_streaming} streaming tracks (no local file)."
     return {
         "status": "success",
-        "message": f"Exported {len(r.track_ids)} tracks to XML.",
-        "path": str(xml_path),
+        "message": message,
+        "path": result.path,
+        "exported": result.exported,
+        "skipped_streaming": result.skipped_streaming,
+        "playlist": result.playlist,
     }
 
 
@@ -8273,4 +8358,6 @@ def duplicates_merge(body: DuplicateMergeRequest):
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    from .logging_utils import uvicorn_log_config
+
+    uvicorn.run(app, host="127.0.0.1", port=8000, log_config=uvicorn_log_config())

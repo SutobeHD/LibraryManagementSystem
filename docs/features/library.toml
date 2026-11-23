@@ -170,8 +170,8 @@ paths = ["frontend/src/components/ImportView.jsx", "app/import_tracker.py", "tes
 routes = ["/api/library/import-paths", "/api/audio/import", "/api/import/tasks"]
 depends_on = ["native-tag-read", "analysis-on-import", "anlz-writer"]
 related = ["download-manager-view", "import-progress-banner"]
-todo = ["FileType beim Import: mp3 -> 0 (Rekordbox: 1), aiff -> 12 (Library-AIFFs: 6)", "Titel aus AIFF-Tags ungeprüft (Testdatei ohne ID3-Chunk)"]
-notes = "PC-Test 2026-11-22 (Kopie der Library, main f3ce85d): 3 neue Dateien (mp3/aiff/flac) per import-paths: BPM, Länge, Key in Camelot, ANLZ-Trio im share, analysed 105, Ordner wird Playlist (B4). Live-Modus: Import schreibt BPM (centi), Länge, Key (Rekordbox-Schreibweise) in master.db und die ANLZ-Dateien in den Rekordbox-share unter /PIONEER/USBANLZ/<uuid[:3]>/<uuid[3:]>/ samt AnalysisDataPath + analysed=105 (B4, fix/kernloop-0.1-bugs). Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): B4 (BPM/Länge/Key/Analysepfad fehlten in master.db) in PR #82 gefixt - neu prüfen."
+todo = ["Titel aus AIFF-Tags ungeprüft (Testdatei ohne ID3-Chunk)"]
+notes = "PC-Test 2026-11-22 (Kopie der Library, main f3ce85d): 3 neue Dateien (mp3/aiff/flac) per import-paths: BPM, Länge, Key in Camelot, ANLZ-Trio im share, analysed 105, Ordner wird Playlist (B4). Live-Modus: Import schreibt BPM (centi), Länge, Key (Rekordbox-Schreibweise) in master.db und die ANLZ-Dateien in den Rekordbox-share unter /PIONEER/USBANLZ/<uuid[:3]>/<uuid[3:]>/ samt AnalysisDataPath + analysed=105 (B4, fix/kernloop-0.1-bugs). Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): B4 (BPM/Länge/Key/Analysepfad fehlten in master.db) in PR #82 gefixt - neu prüfen. Fix 2026-11-23 (fix/track-writes): Import setzt FileType aus der Dateiendung (library_format_swap.file_type_for: mp3 1, m4a 4, flac 5, wav 11, aiff 12) im selben update_content wie BPM/Länge; AIFF 12 ist richtig, die 6 alter Library-Zeilen ist der alte Fehler und wird nie übernommen."
 
 [[feature]]
 id = "import-quality-panel"

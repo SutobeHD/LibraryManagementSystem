@@ -413,6 +413,8 @@ LibraryManagementSystem -- Audio Analyzer (Unified Wrapper)
 
 audio_tags — write metadata back to the source audio file.
 
+- `tag_fields()` — The part of a library update the file's tags store (``ColorID`` is not one).
+- `FileWriteLocks` — Context manager holding the tag-write lock of every file in ``paths``.
 - `write_tags()` — Mirror updates into the audio file's native tag format.
 - `load_artwork()` — Read an artwork file from disk into bytes, or None on any failure.
 - `read_tags()` — Read metadata tags from any supported audio file.
@@ -725,6 +727,7 @@ LibrarySource — uniform abstraction over Live (master.db) and XML modes.
 - `  LiveRekordboxDB.delete_track()` — Always False: rbox 0.1.7 cannot delete a djmdContent row.
 - `  LiveRekordboxDB.update_track_comment()`
 - `  LiveRekordboxDB.update_track_metadata()` — Write ``updates`` to one master.db row.
+- `  LiveRekordboxDB.update_tracks_metadata()` — Write ``updates`` to every row in ``track_ids``, all or nothing.
 - `  LiveRekordboxDB.list_mytags()` — Return all defined MyTag entries as [{id, name}, …].
 - `  LiveRekordboxDB.get_track_mytags()` — Return MyTag IDs assigned to the given track.
 - `  LiveRekordboxDB.create_mytag()` — Create a new MyTag definition.
@@ -752,6 +755,7 @@ Log redaction helpers — scrub absolute paths from log lines + tracebacks.
 - `safe_error_message_str()` — Strip absolute paths from a rendered log/error string.
 - `RedactingFormatter` — `logging.Formatter` that scrubs paths from message + cached traceback.
 - `  RedactingFormatter.format()`
+- `uvicorn_log_config()` — uvicorn's own logging config with scrubbing formatters.
 
 ### `app/main.py`
 
@@ -784,7 +788,7 @@ Log redaction helpers — scrub absolute paths from log lines + tracebacks.
 - `AnalyzeFullReq`
 - `AnalyzeBatchReq`
 - `MergeReq`
-- `RbxSyncReq`
+- `RbxSyncReq` — Tracks by id (``playlist_name`` makes them one playlist) or one library playlist/folder.
 - `RbxImportReq`
 - `PlCreateReq`
 - `PlRenameReq`
@@ -878,8 +882,8 @@ Log redaction helpers — scrub absolute paths from log lines + tracebacks.
 - `set_track_mytags()`
 - `save_cues()`
 - `save_grid()`
-- `update_track()`
-- `batch_up()` — Write the same fields to many tracks.
+- `update_track()` — Edit one track.
+- `batch_up()` — Write the same fields to many tracks, all or nothing.
 - `system_heartbeat()` — Lightweight keep-alive ping.
 - `HealthResponse` — Liveness/readiness payload.
 - `system_health()` — Unauthenticated liveness probe.
@@ -929,7 +933,7 @@ Log redaction helpers — scrub absolute paths from log lines + tracebacks.
 - `LoadLibReq`
 - `load_lib()`
 - `unload_lib()`
-- `rbx_export()` — Write the given tracks as a Rekordbox XML into ``EXPORT_DIR``.
+- `rbx_export()` — Write tracks, or one playlist/folder with its NODE tree, as Rekordbox XML into ``EXPORT_DIR``.
 - `rbx_import()` — Imports tracks and metadata from a Rekordbox XML file.
 - `gen_smart()` — Rebuild the "By Label" auto-playlists.
 - `PathRequest` — Generic single-path body used by every endpoint that needs to point at
@@ -1194,8 +1198,11 @@ RBEP Parser — Parses Rekordbox Editor Project (.rbep) files.
 
 *(no module docstring)*
 
+- `PlaylistNotFoundError`
+- `RbxExportResult`
 - `RekordboxBridge`
-- `  RekordboxBridge.export_collection()` — Exports selected tracks to a Rekordbox-compatible XML.
+- `  RekordboxBridge.export_collection()` — Selected tracks as Rekordbox XML.
+- `  RekordboxBridge.export_playlist()` — One library playlist, or a folder with its subtree, as Rekordbox XML.
 - `  RekordboxBridge.import_library()` — Imports data from a Rekordbox XML and updates the local database.
 
 ### `app/rekordbox_export.py`
@@ -1350,6 +1357,8 @@ Track-metadata field policy: which keys a library backend stores, and their valu
 - `TrackFieldError` — A track update the backend refuses as a whole.
 - `UnsupportedTrackFields` — The update names field keys this backend cannot write.
 - `InvalidTrackFieldValue` — A known field carries a value the backend cannot store.
+- `UnknownTrackIds` — The update names track ids the library does not hold.
+- `TrackWriteFailed` — A library write failed partway through an update.
 - `writable_fields()` — Field keys ``backend`` (``"live"`` / ``"xml"``) persists.
 - `normalise_track_updates()` — Allowlist the keys and type-check every value.
 
@@ -1468,12 +1477,15 @@ variant_schema — DDL + idempotent migration runner for the variants sidecar.
 
 Rekordbox collection XML (DJ_PLAYLISTS) writer for the /api/rekordbox/export bridge.
 
+- `is_streaming_path()` — True for a streaming-service URI (``soundcloud:tracks:123``): no local file exists.
+- `XmlPlaylist` — Playlist ``NODE`` (Type 1).
+- `XmlFolder` — Folder ``NODE`` (Type 0) of playlists and further folders.
 - `kind_for_path()` — Rekordbox ``Kind`` for the file's real extension ("MP3 File", "AIFF File"), or None.
 - `location_for_path()` — ``file://localhost/...`` URL, percent-encoded the way Rekordbox writes it.
 - `date_added()` — ``YYYY-MM-DD`` from the track's ``StockDate``; today only when it has none.
 - `xml_rating()` — Rekordbox XML rating (0/51/102/153/204/255) or None when unusable.
 - `RekordboxXML`
-- `  RekordboxXML.generate()` — Generates a Rekordbox-compatible XML collection.
+- `  RekordboxXML.generate()` — Write ``tracks_data`` (info, beatGrid, cues) as DJ_PLAYLISTS XML; return its path.
 - `  RekordboxXML.generate_for_track()` — Legacy wrapper for single track generation.
 
 
@@ -3700,6 +3712,8 @@ Tests for app/audio_tags.py — native tag write-back (mutates user files → HI
 
 - `test_rating_to_popm_scale()`
 - `test_normalize_fields_drops_none_and_unknown()`
+- `test_tag_fields_drop_what_no_file_tag_stores()`
+- `test_one_lock_per_file_whatever_the_spelling()`
 - `test_write_tags_unsupported_and_missing()`
 - `test_flac_tag_roundtrip()`
 
@@ -4331,6 +4345,10 @@ An imported track's analysis must reach master.db (B4, 0.1 core-loop test).
 - `test_imports_and_a_reanalysis_read_the_library_notation_once()`
 - `test_library_reload_reads_the_notation_again()`
 - `test_refused_analysis_write_leaves_the_cache_at_what_master_db_holds()`
+- `test_import_sets_file_type_in_the_same_write_as_bpm_and_length()`
+- `test_import_without_analysis_still_writes_the_file_type()`
+- `test_import_of_an_unknown_format_leaves_file_type_alone()`
+- `test_import_file_type_never_follows_old_library_rows()`
 - `test_attach_import_anlz_uses_rekordbox_share_layout()`
 - `test_attach_import_anlz_records_nothing_without_a_dat()`
 - `test_attach_import_anlz_removes_its_files_when_master_db_refuses()`
@@ -4410,6 +4428,13 @@ Unit tests for `app.logging_utils.RedactingFormatter`.
 - `test_safe_error_message_str_noop_on_clean_input()`
 - `test_non_exception_log_format_unchanged()` — A path-free `logger.info("hello")` must be byte-identical via
 - `test_allowed_roots_boot_line_hides_user_paths()` — The boot line used to log the list repr: doubled backslashes beat the scrub.
+- `test_every_spelling_of_the_home_path_is_scrubbed()`
+- `test_a_longer_name_sharing_the_prefix_is_left_alone()`
+- `test_text_after_the_prefix_survives()`
+- `test_uvicorn_access_line_is_scrubbed()`
+- `test_uvicorn_error_traceback_is_scrubbed()`
+- `test_uvicorn_log_config_is_a_valid_dict_config()`
+- `test_sidecar_entry_point_passes_the_log_config()`
 
 ### `tests/test_main_route_table.py`
 
@@ -4455,6 +4480,9 @@ metadata-fixer apply/revert tests (T5 — app/metadata_fixer/applier.py).
 - `test_apply_revert_file_sha1_round_trip()`
 - `test_write_tags_disabled_skips_tag_mirror()`
 - `test_apply_skips_failed_db_write()`
+- `RaisingFakeDB` — The real facade's answer to an id the library lacks: ``UnknownTrackIds``.
+- `  RaisingFakeDB.update_tracks_metadata()`
+- `test_apply_skips_a_track_the_library_no_longer_holds()`
 - `EntityDB` — FakeDB that can also resurrect a journalled entity row (artist-merge undo).
 - `  EntityDB.restore_entity()`
 - `test_skips_sha1_when_not_writing_tags()`
@@ -5332,6 +5360,49 @@ Contract tests for ``GET /api/system/health`` -- unauth'd liveness probe.
 - `TestHealthHasNoSideEffects`
 - `  TestHealthHasNoSideEffects.test_does_not_lazily_build_live_db()` — ``db.active_db`` constructs ``LiveRekordboxDB`` on first touch.
 
+### `tests/test_track_batch_tags.py`
+
+PATCH /api/tracks/batch writes the audio-file tags like the single-track edit.
+
+- `files()`
+- `settings()`
+- `lib()`
+- `test_batch_writes_title_artist_album_into_every_file()`
+- `test_batch_writes_the_same_tags_as_the_single_track_edit()`
+- `test_setting_off_leaves_every_file_alone()`
+- `test_setting_missing_means_on()`
+- `test_per_track_status_for_missing_path_and_missing_file()`
+- `test_a_crashing_tag_write_is_reported_for_that_track_only()`
+- `test_unreadable_settings_report_error_and_keep_the_library_write()`
+- `test_existing_pictures_survive_a_rating_write()`
+- `test_a_colour_only_edit_leaves_the_file_byte_identical()`
+- `test_a_streaming_track_is_skipped()`
+- `test_two_quick_edits_of_one_file_end_with_the_later_value()`
+- `test_a_refused_batch_touches_no_file()`
+- `test_an_empty_batch_touches_no_file()`
+
+### `tests/test_track_batch_writes.py`
+
+Track edits are all or nothing and name an unknown id (PC test 2026-11-22).
+
+- `master()`
+- `live()`
+- `facade()`
+- `test_live_batch_with_an_unknown_id_writes_nothing()`
+- `test_batch_route_unknown_id_is_404_naming_it()`
+- `test_batch_route_404_lists_at_most_ten_ids()`
+- `test_batch_route_refuses_a_bad_value_before_reading_any_row()`
+- `test_track_route_unknown_id_is_404()`
+- `test_track_route_unknown_id_is_404_in_xml_mode()`
+- `test_batch_route_writes_every_row()`
+- `test_batch_route_writes_a_repeated_id_once()`
+- `test_rbox_failure_midway_restores_the_rows_already_written()`
+- `test_rbox_failure_on_the_first_row_restores_it()`
+- `test_failed_restore_is_named_in_the_error()`
+- `test_live_backend_raises_track_write_failed()`
+- `test_track_route_rbox_failure_restores_the_row()`
+- `test_restore_drops_a_cache_field_the_track_did_not_have()`
+
 ### `tests/test_track_delete_routes.py`
 
 Deleting a track (PC test 2026-11-22).
@@ -5380,7 +5451,7 @@ Track-metadata writes refuse fields and values the backend cannot store (issue K
 - `test_batch_route_400_on_a_bad_value()`
 - `test_batch_route_success()`
 - `test_batch_route_xml_value_that_would_corrupt_the_file_is_400()`
-- `test_batch_route_unknown_track_is_500()`
+- `test_batch_route_unknown_track_is_404()`
 - `test_batch_route_failed_xml_save_is_500()`
 - `test_batch_route_xml_writes_bpm_and_key()`
 - `test_track_route_rejects_an_unknown_body_key()`
@@ -5733,6 +5804,20 @@ Tests for app/xml_generator.py — Rekordbox collection XML export.
 - `test_control_characters_do_not_break_the_file()`
 - `test_tempo_uses_rekordbox_battito_attribute()`
 - `test_export_round_trips_through_the_xml_library_loader()`
+- `test_without_playlists_root_stays_alone_with_count_zero()`
+- `test_playlist_node_keeps_order_and_repeats()`
+- `test_folders_nest_with_child_count()`
+- `test_is_streaming_path()`
+- `test_streaming_tracks_left_out_of_collection_and_playlist()`
+- `test_playlist_export_round_trips_through_the_xml_library_loader()`
+- `export_dir()`
+- `test_route_exports_a_library_playlist_in_order()`
+- `test_route_playlist_export_keeps_the_verified_track_fields()`
+- `test_route_exports_a_folder_as_nested_nodes()`
+- `test_route_playlist_name_overrides_the_library_name()`
+- `test_route_track_ids_with_a_name_form_one_playlist()`
+- `test_route_track_ids_without_a_name_keep_root_alone()`
+- `test_route_refuses_without_writing()`
 
 
 ## scripts/ — Dev/Build Utilities
