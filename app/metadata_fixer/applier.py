@@ -40,6 +40,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from app.metadata_fixer import schema
+from app.track_fields import UnknownTrackIds
 
 logger = logging.getLogger("METADATA_FIXER_APPLIER")
 
@@ -106,9 +107,16 @@ def _file_sha1(path: str | None) -> str | None:
 
 
 def _write_one(db: _DB, content_id: str, updates: dict[str, Any]) -> bool:
-    """Single locked ``master.db`` write. Returns the DB's success flag."""
+    """Single locked ``master.db`` write. Returns the DB's success flag.
+
+    An id the library no longer holds is False (skipped), as before the facade
+    raised ``UnknownTrackIds`` for it.
+    """
     with _db_lock():
-        return db.update_tracks_metadata([content_id], updates)
+        try:
+            return db.update_tracks_metadata([content_id], updates)
+        except UnknownTrackIds:
+            return False
 
 
 def _restore_entity(db: _DB, mutation: dict[str, Any]) -> bool:

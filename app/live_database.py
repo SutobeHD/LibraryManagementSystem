@@ -18,9 +18,11 @@ except ImportError:
     rbox = None
 
 from .anlz_safe import SafeAnlzParser
-from .track_fields import normalise_track_updates
+from .track_fields import TrackWriteFailed, UnknownTrackIds, normalise_track_updates
 
 logger = logging.getLogger(__name__)
+
+_MISSING = object()
 
 
 class LiveRekordboxDB:
@@ -1050,14 +1052,19 @@ class LiveRekordboxDB:
     def _write_import_analysis_columns(
         self, tid: str, track_data: dict[str, Any]
     ) -> dict[str, Any]:
-        """Write BPM (centi-BPM), length (whole seconds) and key into a new content row.
+        """Write BPM (centi-BPM), length (whole seconds), FileType and key into a new row.
 
         Returns the values that landed as cache fields (``BPM``, ``TotalTime``, ``Key``);
         a refused write is logged and leaves them out, so the cache never shows a BPM
         master.db does not hold. ``analysed`` / ``AnalysisDataPath`` stay untouched here:
         they belong to ANLZ files, which ``attach_import_anlz`` writes.
+
+        FileType comes from the file's extension (``library_format_swap.file_type_for``):
+        rbox ``create_content`` leaves 0 for an mp3, where Rekordbox writes 1. Never
+        from other library rows: some still carry an old wrong code (AIFF = 6).
         """
         from .database import db_lock
+        from .library_format_swap import file_type_for
 
         try:
             bpm = float(track_data.get("BPM") or 0)
@@ -1065,6 +1072,7 @@ class LiveRekordboxDB:
         except (TypeError, ValueError):
             bpm, length = 0.0, 0.0
         key_name = self._import_key_name(track_data)
+        file_type = file_type_for(str(track_data.get("path") or ""))
 
         out: dict[str, Any] = {}
         try:
@@ -1076,7 +1084,9 @@ class LiveRekordboxDB:
                     item.bpm = round(bpm * 100)
                 if length > 0:
                     item.length = max(1, round(length))
-                if bpm > 0 or length > 0:
+                if file_type:
+                    item.file_type = file_type
+                if bpm > 0 or length > 0 or file_type:
                     self.db.update_content(item)
                     if bpm > 0:
                         out["BPM"] = round(bpm * 100) / 100.0
@@ -1087,19 +1097,21 @@ class LiveRekordboxDB:
                     out["Key"] = key_name
         except Exception as e:  # rbox raises its own error types
             logger.error(
-                "op=import_analysis_columns tid=%s bpm=%s length=%s key=%s err=%s",
+                "op=import_analysis_columns tid=%s bpm=%s length=%s file_type=%s key=%s err=%s",
                 tid,
                 bpm,
                 length,
+                file_type,
                 key_name,
                 e,
             )
         else:
             logger.info(
-                "op=import_analysis_columns tid=%s bpm=%s length=%s key=%s",
+                "op=import_analysis_columns tid=%s bpm=%s length=%s file_type=%s key=%s",
                 tid,
                 out.get("BPM"),
                 out.get("TotalTime"),
+                file_type,
                 out.get("Key"),
             )
         return out
@@ -1212,7 +1224,7 @@ class LiveRekordboxDB:
             item = self.db.get_content_by_id(tid)
             if not item:
                 logger.error(f"Track {tid} not found in DB")
-                raise Exception(f"Track {tid} not found in Live DB")
+                raise UnknownTrackIds([tid])
 
             changed = False
             # 1. Direct fields
@@ -1273,6 +1285,106 @@ class LiveRekordboxDB:
         except Exception as e:
             logger.error(f"Failed to update track metadata {tid}: {e}")
             raise e
+
+    # The master.db column each user-editable field lands in. Artist / Genre / Album are
+    # the row's foreign key, which update_content_artist & co. repoint; a restore sets
+    # the old id back. An artist / genre / album row such a call created stays behind,
+    # unreferenced.
+    _RESTORE_COLUMNS: ClassVar[dict[str, str]] = {
+        "Title": "title",
+        "Comment": "commnt",
+        "Rating": "rating",
+        "ColorID": "color_id",
+        "Artist": "artist_id",
+        "Genre": "genre_id",
+        "Album": "album_id",
+    }
+
+    def update_tracks_metadata(self, track_ids: list[str], updates: dict[str, Any]) -> bool:
+        """Write ``updates`` to every row in ``track_ids``, all or nothing. True when done.
+
+        Refuses before the first write: ``TrackFieldError`` for a field or value
+        (``app.track_fields``), ``UnknownTrackIds`` naming every id master.db lacks.
+        rbox commits each call on its own, so a write that fails partway (rbox error)
+        writes the rows this call touched back from snapshots read before its first
+        write, then raises ``TrackWriteFailed``.
+        """
+        from .database import db_lock
+
+        updates = normalise_track_updates(updates, "live")
+        ids = list(dict.fromkeys(str(t) for t in track_ids))
+        columns = [self._RESTORE_COLUMNS[k] for k in updates]
+        with db_lock():
+            snapshots: dict[str, dict[str, Any]] = {}
+            cached_before: dict[str, dict[str, Any]] = {}
+            unknown: list[str] = []
+            for tid in ids:
+                item = self.db.get_content_by_id(tid)
+                if item is None:
+                    unknown.append(tid)
+                    continue
+                snapshots[tid] = {col: getattr(item, col, None) for col in columns}
+                cached = self.tracks.get(tid)
+                if cached is not None:
+                    cached_before[tid] = {k: cached.get(k, _MISSING) for k in updates}
+            if unknown:
+                logger.warning("op=update_tracks_metadata unknown ids=%s", unknown[:10])
+                raise UnknownTrackIds(unknown)
+            if not updates:
+                return True
+
+            touched: list[str] = []
+            for tid in ids:
+                touched.append(tid)
+                try:
+                    self.update_track_metadata(tid, updates)
+                except Exception as e:  # rbox raises its own error types
+                    restored, unrestored = self._restore_rows(touched, snapshots, cached_before)
+                    logger.error(
+                        "op=update_tracks_metadata failed tid=%s fields=%s restored=%d "
+                        "unrestored=%s err=%s",
+                        tid,
+                        ",".join(updates),
+                        len(restored),
+                        unrestored,
+                        e,
+                    )
+                    raise TrackWriteFailed(tid, e, restored, unrestored) from e
+        return True
+
+    def _restore_rows(
+        self,
+        tids: list[str],
+        snapshots: dict[str, dict[str, Any]],
+        cached_before: dict[str, dict[str, Any]],
+    ) -> tuple[list[str], list[str]]:
+        """Write each row's snapshot back, newest first. Returns ``(restored, unrestored)``.
+
+        The cache follows a row only once master.db holds the old values again.
+        """
+        restored: list[str] = []
+        unrestored: list[str] = []
+        for tid in reversed(tids):
+            try:
+                item = self.db.get_content_by_id(tid)
+                if item is None:
+                    raise LookupError(f"content {tid} vanished")
+                for col, value in snapshots[tid].items():
+                    setattr(item, col, value)
+                self.db.update_content(item)
+            except Exception as e:  # rbox raises its own error types
+                logger.error("op=update_tracks_metadata restore tid=%s err=%s", tid, e)
+                unrestored.append(tid)
+                continue
+            restored.append(tid)
+            cached = self.tracks.get(tid)
+            if cached is not None:
+                for key, value in cached_before.get(tid, {}).items():
+                    if value is _MISSING:
+                        cached.pop(key, None)
+                    else:
+                        cached[key] = value
+        return restored, unrestored
 
     # ── MyTag (Pioneer "My Tag") read/write ────────────────────────────────
     # rbox's wheel API for MyTag write hasn't been used elsewhere in this
