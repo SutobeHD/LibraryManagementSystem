@@ -14,6 +14,7 @@ import shutil
 import string
 import subprocess
 import sys
+import threading
 import time
 import xml.etree.ElementTree as ET
 from collections.abc import Generator
@@ -308,6 +309,7 @@ class UsbDetector:
     # settings view); a per-drive probe timeout skips one bad drive instead
     # of stalling the whole scan.
     _scan_cache = None  # (monotonic_ts, list[dict]) | None
+    _scan_lock = threading.Lock()
     _SCAN_TTL_SEC = 3.0
     _PROBE_TIMEOUT_SEC = 4.0
 
@@ -466,15 +468,19 @@ class UsbDetector:
         Caching collapses them to one real scan and stops a slow scan from
         being paid three times back-to-back. A fresh scan runs once the
         cache expires (``_SCAN_TTL_SEC``).
-        """
-        now = time.monotonic()
-        cached = cls._scan_cache
-        if cached and (now - cached[0]) < cls._SCAN_TTL_SEC:
-            return cached[1]
 
-        devices = cls._scan_uncached()
-        cls._scan_cache = (now, devices)
-        return devices
+        The lock makes parallel callers (the USB view requests devices and
+        profiles at once) wait for one scan instead of each running their own.
+        The timestamp is taken after the scan: stamped before it, a scan slower
+        than the TTL was stale on arrival and the next caller scanned again.
+        """
+        with cls._scan_lock:
+            cached = cls._scan_cache
+            if cached and (time.monotonic() - cached[0]) < cls._SCAN_TTL_SEC:
+                return cached[1]
+            devices = cls._scan_uncached()
+            cls._scan_cache = (time.monotonic(), devices)
+            return devices
 
     @classmethod
     def _scan_uncached(cls) -> list[dict]:
@@ -679,10 +685,16 @@ class UsbProfileManager:
 
     @classmethod
     def get_profiles(cls) -> list[dict]:
+        # One scan serves the prune and the connection flag.
+        try:
+            devices = UsbDetector.scan()
+        except Exception as exc:
+            logger.warning("[Profiles] scan failed: %s", exc)
+            devices = []
         # Auto-prune obvious dupes on every read so the UI never shows
         # the long zombie list users get after several stick reformats.
         try:
-            removed = cls.prune_duplicates()
+            removed = cls.prune_duplicates(devices)
             if removed:
                 logger.info("[Profiles] auto-pruned %d duplicate(s)", removed)
         except Exception as exc:
@@ -691,7 +703,7 @@ class UsbProfileManager:
         data = cls._load_all()
         profiles = list(data.get("profiles", {}).values())
         # Enrich with connection status
-        connected = {d["device_id"] for d in UsbDetector.scan()}
+        connected = {d["device_id"] for d in devices}
         for p in profiles:
             p["connected"] = p["device_id"] in connected
         return profiles
@@ -727,7 +739,7 @@ class UsbProfileManager:
         return False
 
     @classmethod
-    def prune_duplicates(cls) -> int:
+    def prune_duplicates(cls, scan_results: list[dict] | None = None) -> int:
         """Collapse duplicate profiles + migrate to current device IDs.
 
         Windows assigns a NEW volume serial every time a stick is
@@ -753,17 +765,20 @@ class UsbProfileManager:
              last_sync. Delete the rest, inheriting playlists from the
              newest deleted sibling if the keeper had none.
 
+        `scan_results` is a device list the caller already holds; None scans.
+
         Returns the number of profiles deleted.
         """
         data = cls._load_all()
         profiles = data.get("profiles", {})
 
         # Snapshot the live device list once
-        try:
-            scan_results = UsbDetector.scan()
-        except Exception as e:
-            logger.warning("[Profiles] scan failed during prune: %s", e)
-            scan_results = []
+        if scan_results is None:
+            try:
+                scan_results = UsbDetector.scan()
+            except Exception as e:
+                logger.warning("[Profiles] scan failed during prune: %s", e)
+                scan_results = []
         scanned_by_id = {d["device_id"]: d for d in scan_results}
         connected_ids = set(scanned_by_id.keys())
 
