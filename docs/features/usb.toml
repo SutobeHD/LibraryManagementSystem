@@ -16,8 +16,7 @@ desc = "Nur Wechsel-Sticks, Rekordbox-Stick erkennen, Speicherbalken, Kompatibil
 paths = ["frontend/src/components/usb/UsbDeviceList.jsx", "frontend/src/components/UsbView.jsx"]
 routes = ["/api/usb/devices"]
 related = ["linux-dj-workflow"]
-todo = ["USB-Ansicht öffnen: GET /api/usb/devices 4,6 s, /api/usb/profiles 7,5 s (gemessen 2026-11-08 auf dem Stand vor PR #70)", "GET /api/usb/devices braucht ohne Stick 4,2-4,9 s pro Aufruf", "Header '0 registered' trotz gespeichertem Profil"]
-notes = "Windows-only (PowerShell Get-Disk)."
+notes = "Windows-only. Scan-Tempo gefixt (fix/usb-extras, 2026-11-23): Bus-Typ per IOCTL_STORAGE_QUERY_PROPERTY statt 2x PowerShell, nur für feste Laufwerke mit PIONEER-Ordner (PowerShell nur noch Fallback); Scan-Cache wird nach dem Scan gestempelt, Lock teilt einen Scan zwischen parallelen Aufrufen, Profil-Lesen scannt einmal. Gemessen ohne Stick (ASGI, kalter Cache): /api/usb/devices 3,9-4,3 s -> 0,003-0,005 s, /api/usb/profiles 6,8-7,6 s -> 0,004-0,011 s, beide parallel 8,0 s -> 0,006 s. UsbView lädt Profile unabhängig vom Geräte-Scan (Header zeigt gespeicherte Profile sofort; im Browser nicht geprüft)."
 
 [[feature]]
 id = "usb-profiles"
@@ -30,8 +29,7 @@ desc = "Profil pro Stick (Label, Typ, Format), Playlist-Auswahl, Stick-Inhalt du
 paths = ["frontend/src/components/settings/SettingsUsb.jsx", "frontend/src/components/usb/UsbProfileEditor.jsx"]
 routes = ["/api/usb/profiles", "/api/usb/rename", "/api/usb/{device_id}/contents"]
 depends_on = ["usb-device-detect"]
-todo = ["Teil-POST (nur device_id + label) setzt drive/type/sync_mode auf Default zurück (main.py:5490, model_dump ohne exclude_unset)"]
-notes = "PC-Test 2026-11-22 (Stick-Ordner statt Stick, Kopie der Library): Profil für Ordner anlegen, auflisten, bleibt bestehen, 13 Felder round-trip, löschen, 401 ohne Token."
+notes = "PC-Test 2026-11-22 (Stick-Ordner statt Stick, Kopie der Library): Profil für Ordner anlegen, auflisten, bleibt bestehen, 13 Felder round-trip, löschen, 401 ohne Token. Teil-POST gefixt (fix/usb-extras): gesetzte Felder überschreiben das gespeicherte Profil, Defaults füllen nur Lücken; neues Profil bekommt alle Defaults."
 
 [[feature]]
 id = "usb-drive-tools"
@@ -43,8 +41,7 @@ desc = "Auswerfen, Library zurücksetzen, als Rekordbox-Stick initialisieren, FA
 paths = ["frontend/src/components/usb/UsbFormatWizard.jsx", "frontend/src/components/usb/UsbControls.jsx"]
 routes = ["/api/usb/eject", "/api/usb/reset", "/api/usb/initialize", "/api/usb/format"]
 depends_on = ["usb-device-detect"]
-todo = ["initialize schreibt DEVSETTING/MYSETTING/MYSETTING2/DJMMYSETTING nur mit Nullen (usb_manager.py:506-512); der Sync füllt sie nie, weil er vorhandene Dateien überspringt (usb_mysettings.py:542)"]
-notes = "PC-Test 2026-11-22: initialize/reset auf Ordner ok, format/preview C: -> 403."
+notes = "PC-Test 2026-11-22: initialize/reset auf Ordner ok, format/preview C: -> 403. Settings gefixt (fix/usb-extras): initialize schreibt dieselben gültigen Defaults wie der Sync (usb_mysettings.write_defaults); Sync ersetzt leere/Null-Dateien, nie echte Settings. DEVSETTING.DAT selbst gebaut (140 B, CRC-16/XMODEM, rbxport export.md §6) - byte-gleich mit der Datei, die rekordbox 7.1.4 schreibt; vorher 140 Null-Bytes."
 
 # ── Export-Formate ────────────────────────────────────────────────────────
 
@@ -72,8 +69,7 @@ test = "testen"
 desc = "PIONEER/rekordbox/exportLibrary.db über Template-DB - Rekordbox 6/7 erkennt den Stick."
 paths = ["app/usb_one_library.py", "app/templates/", "tests/test_onelibrary_wal_flush.py"]
 depends_on = ["usb-anlz-export", "usb-artwork"]
-todo = ["Ordner nur in Groß/Kleinschreibung verschieden (Stenoz/STENOZ): rekordbox.xml-Pass verschiebt Datei, 3 DB-Pfade passen danach nicht", "Template-Reste: 13 leere Artists, 10 unbenutzte Keys"]
-notes = "PC-Test 2026-11-22: Zeilen, numberOfContents, bpm, Länge, Titel/Artist/Key/Genre/Jahr, Playlist-Reihenfolge korrekt (38 und 328 Tracks). Template-Hack, weil rbox create_content in 0.1.7 kaputt ist. Slots wachsen über 16 hinaus (usb-onelibrary-track-limit). Playlist-Links seit fix/usb-onelibrary-track-limit lückenlos nummeriert - vorher leerte ein fehlender Track den Rest der Playlist. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): bpmx100=0/length=0 auf dem Stick (Folge von B4) in PR #82 gefixt - neu prüfen. BPM wird auf dem Stick gerundet statt abgeschnitten (fix/usb-resync, auch export.pdb). Exportfelder gefixt (fix/usb-export-data, 2026-11-23): Album, Dateityp, Samplerate, Bittiefe, Dateigröße aus der Datei, Bewertung 0..5 statt x51. PC-Test 41 echte Tracks: alle Felder = Datei/Library, export.pdb gleich."
+notes = "Groß/Klein-Ordner gefixt (fix/usb-extras): FolderNames gibt jedem Ordner unter Contents/ eine Schreibweise pro Stick (vorhandener Ordner, wenn ein Track ihn so will, sonst erste); OneLibrary- und rekordbox.xml-Pass teilen sie, DB-Pfade = Groß/Klein auf der Platte, Re-Sync verschiebt nichts. Template-Reste gefixt (fix/usb-extras): unbenutzte Template-Artists/Alben/Genre/Keys/Labels werden gelöscht, rbox 0.1.7 setzt verbliebene Content-FKs dabei auf NULL (Track ohne Key = id 0 in export.pdb); Datei öffnet wieder, Re-Sync ok. Leere image-Zeilen gelöschter Slots bleiben. PC-Test 2026-11-22: Zeilen, numberOfContents, bpm, Länge, Titel/Artist/Key/Genre/Jahr, Playlist-Reihenfolge korrekt (38 und 328 Tracks). Template-Hack, weil rbox create_content in 0.1.7 kaputt ist. Slots wachsen über 16 hinaus (usb-onelibrary-track-limit). Playlist-Links seit fix/usb-onelibrary-track-limit lückenlos nummeriert - vorher leerte ein fehlender Track den Rest der Playlist. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): bpmx100=0/length=0 auf dem Stick (Folge von B4) in PR #82 gefixt - neu prüfen. BPM wird auf dem Stick gerundet statt abgeschnitten (fix/usb-resync, auch export.pdb). Exportfelder gefixt (fix/usb-export-data, 2026-11-23): Album, Dateityp, Samplerate, Bittiefe, Dateigröße aus der Datei, Bewertung 0..5 statt x51. PC-Test 41 echte Tracks: alle Felder = Datei/Library, export.pdb gleich."
 
 [[feature]]
 id = "usb-onelibrary-track-limit"
@@ -155,8 +151,8 @@ status = "partial"
 test = "testen"
 desc = "Eingebettetes Cover oder cover.jpg nach PIONEER/Artwork (klein + mittel)."
 paths = ["app/usb_artwork.py", "tests/test_usb_artwork.py"]
-todo = ["_bucket_for: id 1 -> 00001 (Referenz-Stick), nicht 00000", "Cover kommen aus den eingebetteten Tags, nicht aus der Library (328 geschrieben vs 290 Library-Cover)", "Vorhandene Cover-Dateien werden nie überschrieben (nach Slot) - Re-Sync kann alte Cover zeigen", "Mittleres Bild: unser F:-Stick zeigt ~500x500, rbxport-Referenz 240x240 - an einem echten Rekordbox-Export klären (bisher 500 gelassen)"]
-notes = "PC-Test 2026-11-22: B8 gefixt - beide JPEGs je Track, dekodierbar, 80x80, DB verweist darauf. rbxport nutzt id//20+1; docs/reference/rbxport/export.md §5. Pillow==13.0.0 jetzt in requirements.txt + backend.spec (Build bricht ohne ab); vorher blieb PIONEER/Artwork leer (B8, fix/kernloop-0.1-bugs). Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): B8 (Pillow fehlte, 0 Cover) in PR #82 gefixt - neu prüfen. Cover-Ordner gefixt (fix/usb-export-data): 20 Bilder pro Ordner ab 00001, dazu b-Kopien wie Rekordbox; PC-Test: 40 Cover in 00001-00003, je a/a_m/b/b_m."
+todo = ["_bucket_for: id 1 -> 00001 (Referenz-Stick), nicht 00000", "Cover kommen aus den eingebetteten Tags, nicht aus der Library (328 geschrieben vs 290 Library-Cover)", "Mittleres Bild: unser F:-Stick zeigt ~500x500, rbxport-Referenz 240x240 - an einem echten Rekordbox-Export klären (bisher 500 gelassen)"]
+notes = "PC-Test 2026-11-22: B8 gefixt - beide JPEGs je Track, dekodierbar, 80x80, DB verweist darauf. rbxport nutzt id//20+1; docs/reference/rbxport/export.md §5. Pillow==13.0.0 jetzt in requirements.txt + backend.spec (Build bricht ohne ab); vorher blieb PIONEER/Artwork leer (B8, fix/kernloop-0.1-bugs). Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): B8 (Pillow fehlte, 0 Cover) in PR #82 gefixt - neu prüfen. Cover-Ordner gefixt (fix/usb-export-data): 20 Bilder pro Ordner ab 00001, dazu b-Kopien wie Rekordbox; PC-Test: 40 Cover in 00001-00003, je a/a_m/b/b_m. Re-Sync-Cover gefixt (fix/usb-extras): PIONEER/Artwork/.lms-artwork.json merkt pro Bild-id den Hash des Quellbilds - neu schreiben nur bei anderem Hash, Cover nicht mehr benutzter ids werden nach dem Sync gelöscht; Track ohne Cover erbt kein altes mehr."
 
 [[feature]]
 id = "usb-folder-relocation"
