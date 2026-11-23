@@ -141,7 +141,12 @@ from .soundcloud_api import (
     SoundCloudSyncEngine,
 )
 from .soundcloud_downloader import sc_downloader
-from .track_fields import TrackFieldError
+from .track_fields import (
+    TrackFieldError,
+    TrackWriteFailed,
+    UnknownTrackIds,
+    normalise_track_updates,
+)
 from .usb_manager import (
     UsbActions,
     UsbDetector,
@@ -3289,6 +3294,10 @@ def save_grid(r: GridReq):
 
 @app.post("/api/track/{tid}", dependencies=[Depends(require_session)])
 def update_track(tid: str, r: TrackUpdateReq):
+    """Edit one track. 404 for an unknown id, 400 for a value the backend refuses.
+
+    ``file_tags`` reports the best-effort write-back into the audio file.
+    """
     _reject_while_rekordbox_runs("editing tracks")
     updates = {k: v for k, v in r.model_dump().items() if v is not None}
     if not updates:
@@ -3296,48 +3305,60 @@ def update_track(tid: str, r: TrackUpdateReq):
     try:
         if not db.update_tracks_metadata([tid], updates):
             raise HTTPException(500, "Update returned False (unknown error)")
-
-        # Best-effort write-back to the source audio file's tags. Disabled by
-        # toggling settings.write_tags_to_files=False (default true).
-        tag_status = "skipped"
-        try:
-            cfg = SettingsManager.load()
-            if cfg.get("write_tags_to_files", True):
-                track = db.get_track_details(tid) or {}
-                src = track.get("path")
-                if src:
-                    artwork_bytes = None
-                    art_path = track.get("Artwork")
-                    if art_path:
-                        artwork_bytes = audio_tags.load_artwork(art_path)
-                    ok = audio_tags.write_tags(src, updates, artwork=artwork_bytes)
-                    tag_status = "written" if ok else "failed"
-        except Exception as exc:
-            logger.warning(f"Tag write-back skipped for {tid}: {exc}")
-            tag_status = "error"
-
-        return {"status": "success", "file_tags": tag_status}
     except HTTPException:
         raise
     except TrackFieldError as e:
         raise HTTPException(400, str(e)) from e
+    except UnknownTrackIds as e:
+        raise HTTPException(404, str(e)) from e
     except Exception as e:
         logger.error(f"Update failed for {tid}: {e}")
         raise HTTPException(500, f"Update failed: {e!s}")
 
+    # Best-effort write-back to the source audio file's tags. Disabled by
+    # toggling settings.write_tags_to_files=False (default true).
+    tag_status = "skipped"
+    try:
+        cfg = SettingsManager.load()
+        if cfg.get("write_tags_to_files", True):
+            track = db.get_track_details(tid) or {}
+            src = track.get("path")
+            if src:
+                artwork_bytes = None
+                art_path = track.get("Artwork")
+                if art_path:
+                    artwork_bytes = audio_tags.load_artwork(art_path)
+                ok = audio_tags.write_tags(src, updates, artwork=artwork_bytes)
+                tag_status = "written" if ok else "failed"
+    except Exception as exc:
+        logger.warning(f"Tag write-back skipped for {tid}: {exc}")
+        tag_status = "error"
+
+    return {"status": "success", "file_tags": tag_status}
+
 
 @app.patch("/api/tracks/batch", dependencies=[Depends(require_session)])
 def batch_up(r: BatchReq):
-    """Write the same fields to many tracks. 400 names a field or value the backend refuses.
+    """Write the same fields to many tracks, all or nothing.
 
-    A refused update leaves every track untouched. A failed write is a 500, not the old
-    200 `{"status": "error"}` that no caller read.
+    400 names a field or value the backend refuses, 404 every unknown track id; both
+    before the first write. A write that fails partway is a 500 once the tracks
+    already written are restored (live mode).
     """
     _reject_while_rekordbox_runs("editing tracks")
+    track_ids = list(dict.fromkeys(r.track_ids))
     try:
-        ok = db.update_tracks_metadata(r.track_ids, r.updates)
+        updates = normalise_track_updates(r.updates, db.mode)
+        ok = db.update_tracks_metadata(track_ids, updates)
     except TrackFieldError as e:
         raise HTTPException(400, str(e)) from e
+    except UnknownTrackIds as e:
+        raise HTTPException(404, str(e)) from e
+    except TrackWriteFailed as e:
+        raise HTTPException(500, str(e)) from e
+    except Exception as e:
+        logger.error(f"Batch update failed for {len(track_ids)} track(s): {e}")
+        raise HTTPException(500, f"Library update failed: {e!s}") from e
     if not ok:
         raise HTTPException(500, "Library update failed for one or more tracks.")
     return {"status": "success"}
