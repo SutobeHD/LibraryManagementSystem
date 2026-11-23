@@ -53,14 +53,15 @@ id = "usb-sync-engine"
 group = "Export-Formate"
 name = "USB-Sync & Diff"
 status = "shipped"
-test = "testen"
+test = "getestet"
+tested = "2026-11-23"
 desc = "Collection/Playlists auf den Stick, Diff-Vorschau, Lock-File, atomare Kopie, Legacy rekordbox.xml."
 paths = ["app/usb_manager.py", "frontend/src/components/usb/UsbSyncPanel.jsx", "tests/test_usb_*.py"]
 routes = ["/api/usb/sync", "/api/usb/sync/all", "/api/usb/diff", "/api/usb/history"]
 depends_on = ["usb-profiles", "usb-onelibrary-export"]
 related = ["performance-overhaul"]
-todo = ["App-Start ohne Stick: POST /api/usb/initialize für fehlendes E:\\ läuft wiederholt in 500 (WinError 3) - fehlendes Laufwerk sauber als 'nicht verbunden' melden", "FEHLER: Re-Sync aktualisiert exportLibrary.db/export.pdb nicht: _ensure_usb_structure lässt die fehlgeschlagene sqlite3-Verbindung offen, die DB lässt sich unter Windows nicht löschen, OneLibrary-Stufe bricht ab (usb_one_library.py:719), API meldet trotzdem success - Stick zeigt alte Playlists, rekordbox.xml neue", "Diff meldet immer die ganze Library (4862 Tracks / 333 Playlists), ignoriert die Auswahl und liest die Stick-DB mit plain sqlite3", "Meldung zählt übersprungene Dateien als kopiert"]
-notes = "PC-Test 2026-11-22: erster Sync 38 Tracks/680 MB in 10 s, alle sha256 gleich, FAT32-Pfadlimit behandelt; Re-Syncs kopieren 0 Audio. Blockierender POST mit Fake-Progress (offen). Scan/Diff-N+1 seit PR #70 (in #60) behoben. Altfund: exportLibrary.db wird mit plain sqlite3 gelesen, Stick-Seite der Diff leer, Datei bei jedem Sync-Start gelöscht. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): B7 (.lms_anlz im Musikordner, Rekordbox-Analyse ignoriert) in PR #82 gefixt - neu prüfen."
+todo = ["App-Start ohne Stick: POST /api/usb/initialize für fehlendes E:\\ läuft wiederholt in 500 (WinError 3) - fehlendes Laufwerk sauber als 'nicht verbunden' melden"]
+notes = "PC-Test 2026-11-22: erster Sync 38 Tracks/680 MB in 10 s, alle sha256 gleich, FAT32-Pfadlimit behandelt; Re-Syncs kopieren 0 Audio. Blockierender POST mit Fake-Progress (offen). Scan/Diff-N+1 seit PR #70 (in #60) behoben. Altfund: exportLibrary.db wird mit plain sqlite3 gelesen, Stick-Seite der Diff leer, Datei bei jedem Sync-Start gelöscht. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): B7 (.lms_anlz im Musikordner, Rekordbox-Analyse ignoriert) in PR #82 gefixt - neu prüfen. Re-Sync gefixt (fix/usb-resync, 2026-11-23): keine sqlite3-Probe der SQLCipher-DB mehr, gesperrte DB -> klarer Fehler, jede fehlgeschlagene Stufe -> Sync meldet 'Sync incomplete'. PC-Test mit Stick-Ordner: Sync A 38/38, Sync A+B 41/41 in exportLibrary.db und export.pdb, Diff danach 0. Diff liest den Stick per rbox und vergleicht die gewählten Playlists samt Ordnern."
 
 [[feature]]
 id = "usb-onelibrary-export"
@@ -72,7 +73,7 @@ desc = "PIONEER/rekordbox/exportLibrary.db über Template-DB - Rekordbox 6/7 erk
 paths = ["app/usb_one_library.py", "app/templates/", "tests/test_onelibrary_wal_flush.py"]
 depends_on = ["usb-anlz-export", "usb-artwork"]
 todo = ["Alben gehen verloren: create_album bekommt die Artist-ID als String, rbox lehnt ab (usb_one_library.py:1223)", "Jede Zeile behält Template-Werte: file_type 4 (M4A) auch für aiff/flac/wav/mp3, sampling_rate 48000, falsche file_size (auch in export.pdb)", "Ordner nur in Groß/Kleinschreibung verschieden (Stenoz/STENOZ): rekordbox.xml-Pass verschiebt Datei, 3 DB-Pfade passen danach nicht", "Template-Reste: 13 leere Artists, 10 unbenutzte Keys"]
-notes = "PC-Test 2026-11-22: Zeilen, numberOfContents, bpm, Länge, Titel/Artist/Key/Genre/Jahr, Playlist-Reihenfolge korrekt (38 und 328 Tracks). Template-Hack, weil rbox create_content in 0.1.7 kaputt ist. Slots wachsen über 16 hinaus (usb-onelibrary-track-limit). Playlist-Links seit fix/usb-onelibrary-track-limit lückenlos nummeriert - vorher leerte ein fehlender Track den Rest der Playlist. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): bpmx100=0/length=0 auf dem Stick (Folge von B4) in PR #82 gefixt - neu prüfen."
+notes = "PC-Test 2026-11-22: Zeilen, numberOfContents, bpm, Länge, Titel/Artist/Key/Genre/Jahr, Playlist-Reihenfolge korrekt (38 und 328 Tracks). Template-Hack, weil rbox create_content in 0.1.7 kaputt ist. Slots wachsen über 16 hinaus (usb-onelibrary-track-limit). Playlist-Links seit fix/usb-onelibrary-track-limit lückenlos nummeriert - vorher leerte ein fehlender Track den Rest der Playlist. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): bpmx100=0/length=0 auf dem Stick (Folge von B4) in PR #82 gefixt - neu prüfen. BPM wird auf dem Stick gerundet statt abgeschnitten (fix/usb-resync, auch export.pdb)."
 
 [[feature]]
 id = "usb-onelibrary-track-limit"

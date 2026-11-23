@@ -5533,7 +5533,9 @@ def usb_get_diff(device_id: str):
         raise HTTPException(400, "No library loaded")
     db_path = getattr(db.active_db, "db_path", None) or getattr(db.active_db, "xml_path", None)
     engine = UsbSyncEngine(str(db_path), profile["drive"], profile.get("filesystem", ""))
-    diff = engine.calculate_diff()
+    # The UI only runs playlist syncs (the profile's checked playlists), so the preview
+    # compares the stick against those, not against the whole library.
+    diff = engine.calculate_diff(profile.get("sync_playlists") or None)
     # Add space estimate: ~10MB avg per track to add
     avg_track_size = 10 * 1024 * 1024
     diff["space_estimate"] = diff["tracks"]["to_add"] * avg_track_size

@@ -11,6 +11,18 @@
     removes tracks, now with one confirmation instead of two.
 
 - USB export:
+  - Fixed: re-syncing a stick never updated `exportLibrary.db` / `export.pdb`
+    on Windows while the app reported success. A plain sqlite3 probe of the
+    SQLCipher file failed and kept it locked, so the writer could not replace
+    it. The probe is gone, a still-locked file now ends the sync with an error,
+    and any failed stage makes the whole sync report "Sync incomplete".
+  - Fixed: the sync preview compared the stick with the whole library and read
+    the stick with plain sqlite3 (always empty). It now reads it through rbox and
+    compares the profile's selected playlists (plus their folders).
+  - Fixed: BPM on the stick was cut instead of rounded (127.96 became 127.95)
+    in `exportLibrary.db` and `export.pdb`.
+  - Changed: the sync message counts files that were already on the stick
+    separately instead of as "copied".
   - Fixed: a stick sync wrote at most 16 tracks into `exportLibrary.db` and
     `export.pdb` (B9) — the cap was the row count of the bundled OneLibrary
     template. The writer now adds the missing content slots before it writes
