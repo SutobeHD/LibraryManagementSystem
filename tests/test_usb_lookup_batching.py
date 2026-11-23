@@ -105,8 +105,9 @@ def _library(audio_root: Path | None = None, n: int = N_TRACKS):
 
 @pytest.fixture
 def fake_rbox(monkeypatch):
-    """Install a fake `rbox` module whose `MasterDb(...)` returns `state["db"]`."""
-    state: dict = {"opens": 0, "db": None}
+    """Install a fake `rbox` module: `MasterDb(...)` returns `state["db"]`,
+    `OneLibrary(...)` (the stick's exportLibrary.db) returns `state["usb"]`."""
+    state: dict = {"opens": 0, "db": None, "usb": None}
 
     def _open(path):
         state["opens"] += 1
@@ -114,8 +115,14 @@ def fake_rbox(monkeypatch):
             raise RuntimeError("cannot open")
         return state["db"]
 
+    def _open_stick(path):
+        if state["usb"] is None:
+            raise RuntimeError("cannot open stick db")
+        return state["usb"]
+
     mod = types.ModuleType("rbox")
     mod.MasterDb = _open  # type: ignore[attr-defined]
+    mod.OneLibrary = _open_stick  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "rbox", mod)
     return state
 
@@ -510,28 +517,35 @@ class TestLegacyExportGolden:
 # ---------------------------------------------------------------------------
 
 
-def _write_plain_stick_db(path: Path, rows: list[tuple[str, str, str | None, int, int]]) -> None:
-    """Unencrypted stand-in for exportLibrary.db with the columns `_read_usb_tracks` reads."""
-    import sqlite3
+class FakeStickDb:
+    """The read surface of rbox `OneLibrary` that `_usb_library` uses."""
 
-    path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(path))
-    conn.execute(
-        "CREATE TABLE djmdContent (ID TEXT, Title TEXT, ArtistID TEXT, AlbumID TEXT, "
-        "GenreID TEXT, BPM INTEGER, Rating INTEGER, ColorID INTEGER, Key TEXT, "
-        "Duration INTEGER, FolderPath TEXT, FileNameL TEXT)"
-    )
-    conn.execute("CREATE TABLE djmdArtist (ID TEXT, Name TEXT)")
-    for tid, title, artist, duration, bpm in rows:
-        aid = f"a{tid}" if artist is not None else None
-        conn.execute(
-            "INSERT INTO djmdContent (ID, Title, ArtistID, BPM, Duration) VALUES (?, ?, ?, ?, ?)",
-            (tid, title, aid, bpm, duration),
-        )
-        if aid:
-            conn.execute("INSERT INTO djmdArtist VALUES (?, ?)", (aid, artist))
-    conn.commit()
-    conn.close()
+    def __init__(self, rows: list[tuple[str, str, str | None, int, int]], playlists=()):
+        self._artists = []
+        self._contents = []
+        for tid, title, artist, length, bpm in rows:
+            aid = f"a{tid}" if artist is not None else None
+            if aid:
+                self._artists.append(SimpleNamespace(id=aid, name=artist))
+            self._contents.append(
+                SimpleNamespace(id=tid, title=title, artist_id=aid, length=length, bpmx100=bpm)
+            )
+        self._playlists = [SimpleNamespace(id=f"s{i}", name=n) for i, n in enumerate(playlists)]
+
+    def get_artists(self):
+        return list(self._artists)
+
+    def get_contents(self):
+        return list(self._contents)
+
+    def get_playlists(self):
+        return list(self._playlists)
+
+
+def _stick(engine: UsbSyncEngine, fake_rbox: dict, rows, playlists=()) -> None:
+    engine.usb_db_path.parent.mkdir(parents=True, exist_ok=True)
+    engine.usb_db_path.write_bytes(b"SQLCipher stand-in")
+    fake_rbox["usb"] = FakeStickDb(rows, playlists)
 
 
 class TestCalculateDiffEndToEnd:
@@ -544,8 +558,9 @@ class TestCalculateDiffEndToEnd:
         ]
         fake_rbox["db"] = FakeMasterDb(contents, artists, [])
         engine = UsbSyncEngine(str(tmp_path / "master.db"), str(tmp_path / "usb"))
-        _write_plain_stick_db(
-            engine.usb_db_path,
+        _stick(
+            engine,
+            fake_rbox,
             [
                 ("10", "Drift", "Artist A", 300, 12800),  # identical → hash match
                 ("11", "bloom", "b", 999, 12000),  # same name, other length → update
