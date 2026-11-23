@@ -44,10 +44,12 @@ id = "toast-notifications"
 group = "Feedback"
 name = "Toasts"
 status = "shipped"
-test = "testen"
+test = "getestet"
+tested = "2026-11-22"
 desc = "react-hot-toast global + eigener ToastContext/useToast."
 paths = ["frontend/src/components/ToastContext.jsx"]
-notes = "Zwei Systeme parallel (31 Dateien hot-toast, 6 useToast)."
+todo = ["Fehler-Toast im PC-Test nicht beobachtet", "Texte gemischt Deutsch/Englisch"]
+notes = "PC-Test 2026-11-22 (Kopie der Library, main f3ce85d): Erfolgs-Toasts bei Playlist-, Ordner-, Track-Aktionen. Zwei Systeme parallel (31 Dateien hot-toast, 6 useToast)."
 
 [[feature]]
 id = "toast-notification-ux"
@@ -66,9 +68,12 @@ id = "confirm-prompt-modals"
 group = "Feedback"
 name = "Confirm/Prompt-Modals"
 status = "shipped"
-test = "testen"
+test = "getestet"
+tested = "2026-11-22"
 desc = "Promise-basierter Ersatz für window.confirm/prompt, Rename-Dialog."
 paths = ["frontend/src/components/ConfirmModal.jsx", "frontend/src/components/PromptModal.jsx", "frontend/src/components/RenameModal.jsx"]
+todo = ["Track löschen fragt zweimal (TrackTable + PlaylistBrowser stapeln zwei ConfirmModals)"]
+notes = "PC-Test 2026-11-22 (Kopie der Library, main f3ce85d): Prompt/Rename/Confirm-Modals für Playlist anlegen, umbenennen, löschen und Track löschen; nie ein Browser-Dialog."
 
 # ── Kontextmenüs ──────────────────────────────────────────────────────────
 

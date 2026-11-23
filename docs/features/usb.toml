@@ -16,7 +16,7 @@ desc = "Nur Wechsel-Sticks, Rekordbox-Stick erkennen, Speicherbalken, Kompatibil
 paths = ["frontend/src/components/usb/UsbDeviceList.jsx", "frontend/src/components/UsbView.jsx"]
 routes = ["/api/usb/devices"]
 related = ["linux-dj-workflow"]
-todo = ["USB-Ansicht öffnen: GET /api/usb/devices 4,6 s, /api/usb/profiles 7,5 s (gemessen 2026-11-08 auf dem Stand vor PR #70)"]
+todo = ["USB-Ansicht öffnen: GET /api/usb/devices 4,6 s, /api/usb/profiles 7,5 s (gemessen 2026-11-08 auf dem Stand vor PR #70)", "GET /api/usb/devices braucht ohne Stick 4,2-4,9 s pro Aufruf", "Header '0 registered' trotz gespeichertem Profil"]
 notes = "Windows-only (PowerShell Get-Disk)."
 
 [[feature]]
@@ -24,11 +24,14 @@ id = "usb-profiles"
 group = "Geräte & Profile"
 name = "USB-Profile & Inhalt"
 status = "shipped"
-test = "testen"
+test = "getestet"
+tested = "2026-11-22"
 desc = "Profil pro Stick (Label, Typ, Format), Playlist-Auswahl, Stick-Inhalt durchsuchen."
 paths = ["frontend/src/components/settings/SettingsUsb.jsx", "frontend/src/components/usb/UsbProfileEditor.jsx"]
 routes = ["/api/usb/profiles", "/api/usb/rename", "/api/usb/{device_id}/contents"]
 depends_on = ["usb-device-detect"]
+todo = ["Teil-POST (nur device_id + label) setzt drive/type/sync_mode auf Default zurück (main.py:5490, model_dump ohne exclude_unset)"]
+notes = "PC-Test 2026-11-22 (Stick-Ordner statt Stick, Kopie der Library): Profil für Ordner anlegen, auflisten, bleibt bestehen, 13 Felder round-trip, löschen, 401 ohne Token."
 
 [[feature]]
 id = "usb-drive-tools"
@@ -40,6 +43,8 @@ desc = "Auswerfen, Library zurücksetzen, als Rekordbox-Stick initialisieren, FA
 paths = ["frontend/src/components/usb/UsbFormatWizard.jsx", "frontend/src/components/usb/UsbControls.jsx"]
 routes = ["/api/usb/eject", "/api/usb/reset", "/api/usb/initialize", "/api/usb/format"]
 depends_on = ["usb-device-detect"]
+todo = ["initialize schreibt DEVSETTING/MYSETTING/MYSETTING2/DJMMYSETTING nur mit Nullen (usb_manager.py:506-512); der Sync füllt sie nie, weil er vorhandene Dateien überspringt (usb_mysettings.py:542)"]
+notes = "PC-Test 2026-11-22: initialize/reset auf Ordner ok, format/preview C: -> 403."
 
 # ── Export-Formate ────────────────────────────────────────────────────────
 
@@ -54,8 +59,8 @@ paths = ["app/usb_manager.py", "frontend/src/components/usb/UsbSyncPanel.jsx", "
 routes = ["/api/usb/sync", "/api/usb/sync/all", "/api/usb/diff", "/api/usb/history"]
 depends_on = ["usb-profiles", "usb-onelibrary-export"]
 related = ["performance-overhaul"]
-todo = ["App-Start ohne Stick: POST /api/usb/initialize für fehlendes E:\\ läuft wiederholt in 500 (WinError 3) - fehlendes Laufwerk sauber als 'nicht verbunden' melden"]
-notes = "Blockierender POST mit Fake-Progress (offen). Scan/Diff-N+1 seit PR #70 (in #60) behoben. Altfund: exportLibrary.db wird mit plain sqlite3 gelesen, Stick-Seite der Diff leer, Datei bei jedem Sync-Start gelöscht. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): B7 (.lms_anlz im Musikordner, Rekordbox-Analyse ignoriert) in PR #82 gefixt - neu prüfen."
+todo = ["App-Start ohne Stick: POST /api/usb/initialize für fehlendes E:\\ läuft wiederholt in 500 (WinError 3) - fehlendes Laufwerk sauber als 'nicht verbunden' melden", "FEHLER: Re-Sync aktualisiert exportLibrary.db/export.pdb nicht: _ensure_usb_structure lässt die fehlgeschlagene sqlite3-Verbindung offen, die DB lässt sich unter Windows nicht löschen, OneLibrary-Stufe bricht ab (usb_one_library.py:719), API meldet trotzdem success - Stick zeigt alte Playlists, rekordbox.xml neue", "Diff meldet immer die ganze Library (4862 Tracks / 333 Playlists), ignoriert die Auswahl und liest die Stick-DB mit plain sqlite3", "Meldung zählt übersprungene Dateien als kopiert"]
+notes = "PC-Test 2026-11-22: erster Sync 38 Tracks/680 MB in 10 s, alle sha256 gleich, FAT32-Pfadlimit behandelt; Re-Syncs kopieren 0 Audio. Blockierender POST mit Fake-Progress (offen). Scan/Diff-N+1 seit PR #70 (in #60) behoben. Altfund: exportLibrary.db wird mit plain sqlite3 gelesen, Stick-Seite der Diff leer, Datei bei jedem Sync-Start gelöscht. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): B7 (.lms_anlz im Musikordner, Rekordbox-Analyse ignoriert) in PR #82 gefixt - neu prüfen."
 
 [[feature]]
 id = "usb-onelibrary-export"
@@ -66,7 +71,8 @@ test = "testen"
 desc = "PIONEER/rekordbox/exportLibrary.db über Template-DB - Rekordbox 6/7 erkennt den Stick."
 paths = ["app/usb_one_library.py", "app/templates/", "tests/test_onelibrary_wal_flush.py"]
 depends_on = ["usb-anlz-export", "usb-artwork"]
-notes = "Template-Hack, weil rbox create_content in 0.1.7 kaputt ist. Slots wachsen über 16 hinaus (usb-onelibrary-track-limit). Playlist-Links seit fix/usb-onelibrary-track-limit lückenlos nummeriert - vorher leerte ein fehlender Track den Rest der Playlist. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): bpmx100=0/length=0 auf dem Stick (Folge von B4) in PR #82 gefixt - neu prüfen."
+todo = ["Alben gehen verloren: create_album bekommt die Artist-ID als String, rbox lehnt ab (usb_one_library.py:1223)", "Jede Zeile behält Template-Werte: file_type 4 (M4A) auch für aiff/flac/wav/mp3, sampling_rate 48000, falsche file_size (auch in export.pdb)", "Ordner nur in Groß/Kleinschreibung verschieden (Stenoz/STENOZ): rekordbox.xml-Pass verschiebt Datei, 3 DB-Pfade passen danach nicht", "Template-Reste: 13 leere Artists, 10 unbenutzte Keys"]
+notes = "PC-Test 2026-11-22: Zeilen, numberOfContents, bpm, Länge, Titel/Artist/Key/Genre/Jahr, Playlist-Reihenfolge korrekt (38 und 328 Tracks). Template-Hack, weil rbox create_content in 0.1.7 kaputt ist. Slots wachsen über 16 hinaus (usb-onelibrary-track-limit). Playlist-Links seit fix/usb-onelibrary-track-limit lückenlos nummeriert - vorher leerte ein fehlender Track den Rest der Playlist. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): bpmx100=0/length=0 auf dem Stick (Folge von B4) in PR #82 gefixt - neu prüfen."
 
 [[feature]]
 id = "usb-onelibrary-track-limit"
@@ -74,12 +80,13 @@ group = "Export-Formate"
 parent = "usb-onelibrary-export"
 name = "16-Track-Grenze aufheben"
 status = "shipped"
-test = "testen"
+test = "getestet"
+tested = "2026-11-22"
 research = "usb-onelibrary-track-limit"
 desc = "Stick-Export schreibt alle gewählten Tracks in exportLibrary.db und export.pdb (vorher max. 16 Template-Slots, B9)."
 paths = ["tests/test_onelibrary_track_limit.py"]
 related = ["pyrekordbox-upgrade", "rbox-upgrade", "rekordbox-free-workflow-toggles"]
-notes = "B9 belegt 2026-11-14: 20-Track-Playlist -> exportLibrary.db und export.pdb je 16 Zeilen, rekordbox.xml 20; gefixt in PR #88 (gemergt 2026-11-22), Prüfung am CDJ: cdj-hardware-validation. Template-Slots wachsen zur Laufzeit (rbox 0.1.7: create_content-Halbzeile + update_content-Reparatur, _grow_slots). Scheitert das, alte 16er-Kappung mit Warnung. Neue Slots erben Template-Spalten (Datum, Samplerate, master ids) wie die 16 alten - master_content_id wiederholt sich alle 16 Zeilen. ~500-Track-PDB-Limit unbelegt (Docstring-Annahme, kein Writer-Limit). Langfristig DB aus Schema bauen wie rbxport: docs/reference/rbxport/export.md §3."
+notes = "PC-Test 2026-11-22 (Stick-Ordner statt Stick, Kopie der Library): 38/38/38 und 328/328/328 Zeilen in exportLibrary.db, export.pdb, rekordbox.xml; 328 Tracks (8,1 GB) in 34 s, keine Kappungs-Warnung (B9). B9 belegt 2026-11-14: 20-Track-Playlist -> exportLibrary.db und export.pdb je 16 Zeilen, rekordbox.xml 20; gefixt in PR #88 (gemergt 2026-11-22), Prüfung am CDJ: cdj-hardware-validation. Template-Slots wachsen zur Laufzeit (rbox 0.1.7: create_content-Halbzeile + update_content-Reparatur, _grow_slots). Scheitert das, alte 16er-Kappung mit Warnung. Neue Slots erben Template-Spalten (Datum, Samplerate, master ids) wie die 16 alten - master_content_id wiederholt sich alle 16 Zeilen. ~500-Track-PDB-Limit unbelegt (Docstring-Annahme, kein Writer-Limit). Langfristig DB aus Schema bauen wie rbxport: docs/reference/rbxport/export.md §3."
 
 [[feature]]
 id = "cdj-hardware-validation"
@@ -102,17 +109,19 @@ test = "testen"
 desc = "export.pdb + exportExt.pdb nach Crate-Digger-Spec, byte-verifiziert gegen echten Stick."
 paths = ["app/usb_pdb.py", "tests/test_pdb_structure.py"]
 depends_on = ["usb-onelibrary-export"]
-notes = "Default an (usb_write_legacy_pdb=True in usb_manager), kein UI-Toggle. ~500-Track-Grenze unbelegt (Docstring-Annahme). Datenseiten max. 255 Zeilen (MAX_ROWS_PER_PAGE), damit nie der unverifizierte >255-Zeilen-Header entsteht. rbxport-Abweichungen (UTF-16 ohne Terminator + 4-Byte-Align, >255-Zeilen-Header, Tabellen 16-19): docs/reference/rbxport/export.md §10-11. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): ok."
+todo = ["Trägt die Template-Daten aus exportLibrary.db (file_type, sampling_rate, file_size)", "Doku-Drift: CLAUDE.md/coding-rules sagen 0x34 auf jeder Datenseite und empty_candidate = next_unused; Code und test_pdb_structure nutzen Regeln pro Tabelle (tracks 0x34, sonst 0x24)"]
+notes = "PC-Test 2026-11-22: Struktur korrekt (57/96 Seiten, Ketten, Flags pro Tabelle, Unicode inkl. CJK/Griechisch, lückenlose Playlists, exportExt.pdb 9 Tabellen). Default an (usb_write_legacy_pdb=True in usb_manager), kein UI-Toggle. ~500-Track-Grenze unbelegt (Docstring-Annahme). Datenseiten max. 255 Zeilen (MAX_ROWS_PER_PAGE), damit nie der unverifizierte >255-Zeilen-Header entsteht. rbxport-Abweichungen (UTF-16 ohne Terminator + 4-Byte-Align, >255-Zeilen-Header, Tabellen 16-19): docs/reference/rbxport/export.md §10-11. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): ok."
 
 [[feature]]
 id = "usb-anlz-export"
 group = "Export-Formate"
 name = "ANLZ auf den Stick"
 status = "shipped"
-test = "testen"
+test = "getestet"
+tested = "2026-11-22"
 desc = "USBANLZ/<bucket>/ANLZ0000.DAT/EXT/2EX pro Track, kopieren oder neu erzeugen."
 depends_on = ["anlz-writer"]
-notes = "Lebt in usb_one_library.py + anlz_sidecar.py. Quellen: 1) Rekordbox-ANLZ aus AnalysisDataPath (Live), 2) LMS-ANLZ-Cache im User-Cache-Ordner (alte .lms_anlz neben der Audiodatei nur lesend), 3) frische Analyse in den Cache - nie in den Musikordner (B7, fix/kernloop-0.1-bugs). rbxport: CDJ-3000 leitet USBANLZ-Ordner aus Hash des USB-Pfads ab (wir: aus content id) - docs/reference/rbxport/export.md §4. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): B7 (Rekordbox-ANLZ nie als Quelle) in PR #82 gefixt - neu prüfen."
+notes = "PC-Test 2026-11-22 (Stick-Ordner statt Stick, Kopie der Library): 366 Tracks: DAT/EXT/2EX, PPTH = Stick-Pfad, Beatgrids und Cue-Anzahl gleich den Rekordbox-ANLZ, übrige Tags byte-gleich. Lebt in usb_one_library.py + anlz_sidecar.py. Quellen: 1) Rekordbox-ANLZ aus AnalysisDataPath (Live), 2) LMS-ANLZ-Cache im User-Cache-Ordner (alte .lms_anlz neben der Audiodatei nur lesend), 3) frische Analyse in den Cache - nie in den Musikordner (B7, fix/kernloop-0.1-bugs). rbxport: CDJ-3000 leitet USBANLZ-Ordner aus Hash des USB-Pfads ab (wir: aus content id) - docs/reference/rbxport/export.md §4. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): B7 (Rekordbox-ANLZ nie als Quelle) in PR #82 gefixt - neu prüfen."
 
 [[feature]]
 id = "usb-anlz-export-fixes"
@@ -144,8 +153,8 @@ status = "partial"
 test = "testen"
 desc = "Eingebettetes Cover oder cover.jpg nach PIONEER/Artwork (klein + mittel)."
 paths = ["app/usb_artwork.py", "tests/test_usb_artwork.py"]
-todo = ["_bucket_for: id 1 -> 00001 (Referenz-Stick), nicht 00000"]
-notes = "rbxport nutzt id//20+1; docs/reference/rbxport/export.md §5. Pillow==13.0.0 jetzt in requirements.txt + backend.spec (Build bricht ohne ab); vorher blieb PIONEER/Artwork leer (B8, fix/kernloop-0.1-bugs). Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): B8 (Pillow fehlte, 0 Cover) in PR #82 gefixt - neu prüfen."
+todo = ["_bucket_for: id 1 -> 00001 (Referenz-Stick), nicht 00000", "Alle Bild-IDs landen im Ordner 00000 (echter Stick: 00001 ab ID 1)", "Mittleres Bild bis 500x500 statt 240x240 (usb_artwork.py:33)", "Cover kommen aus den eingebetteten Tags, nicht aus der Library (328 geschrieben vs 290 Library-Cover)", "Vorhandene Cover-Dateien werden nie überschrieben (nach Slot) - Re-Sync kann alte Cover zeigen"]
+notes = "PC-Test 2026-11-22: B8 gefixt - beide JPEGs je Track, dekodierbar, 80x80, DB verweist darauf. rbxport nutzt id//20+1; docs/reference/rbxport/export.md §5. Pillow==13.0.0 jetzt in requirements.txt + backend.spec (Build bricht ohne ab); vorher blieb PIONEER/Artwork leer (B8, fix/kernloop-0.1-bugs). Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): B8 (Pillow fehlte, 0 Cover) in PR #82 gefixt - neu prüfen."
 
 [[feature]]
 id = "usb-folder-relocation"
