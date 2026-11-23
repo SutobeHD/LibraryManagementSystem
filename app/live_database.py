@@ -22,6 +22,8 @@ from .track_fields import TrackWriteFailed, UnknownTrackIds, normalise_track_upd
 
 logger = logging.getLogger(__name__)
 
+_MISSING = object()
+
 
 class LiveRekordboxDB:
     def __init__(self, db_path: str):
@@ -1324,7 +1326,7 @@ class LiveRekordboxDB:
                 snapshots[tid] = {col: getattr(item, col, None) for col in columns}
                 cached = self.tracks.get(tid)
                 if cached is not None:
-                    cached_before[tid] = {k: cached[k] for k in updates if k in cached}
+                    cached_before[tid] = {k: cached.get(k, _MISSING) for k in updates}
             if unknown:
                 logger.warning("op=update_tracks_metadata unknown ids=%s", unknown[:10])
                 raise UnknownTrackIds(unknown)
@@ -1377,7 +1379,11 @@ class LiveRekordboxDB:
             restored.append(tid)
             cached = self.tracks.get(tid)
             if cached is not None:
-                cached.update(cached_before.get(tid, {}))
+                for key, value in cached_before.get(tid, {}).items():
+                    if value is _MISSING:
+                        cached.pop(key, None)
+                    else:
+                        cached[key] = value
         return restored, unrestored
 
     # ── MyTag (Pioneer "My Tag") read/write ────────────────────────────────

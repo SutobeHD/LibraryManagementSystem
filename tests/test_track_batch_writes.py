@@ -307,3 +307,12 @@ def test_track_route_rbox_failure_restores_the_row(facade, live, master, auth_to
     assert r.status_code == 500, r.text
     assert master.rows["1"] == _row("1")
     assert live.tracks["1"]["Comment"] == "c1"
+
+
+def test_restore_drops_a_cache_field_the_track_did_not_have(facade, live, master) -> None:
+    del live.tracks["1"]["Album"]
+    master.hook = _fail_on("update_content_album", "2")
+    with pytest.raises(TrackWriteFailed):
+        facade.update_tracks_metadata(["1", "2"], {"Album": "New"})
+    assert "Album" not in live.tracks["1"]
+    assert master.rows["1"]["album_id"] is None
