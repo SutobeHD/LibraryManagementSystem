@@ -2071,7 +2071,7 @@ theme — UI skin selection (per device, localStorage).
 Token search for the Collection / playlist views.
 
 - `SEARCH_SYNTAX_HINT()` — Tooltip for the search box.
-- `tokenizeQuery()` — Split a query into tokens.
+- `tokenizeQuery()` — Split a lower-cased query into `{ field, value, quoted }` tokens on whitespace.
 - `compileToken()` — One token -> predicate `(track, hay) => boolean`, or null for a token that filters nothing yet (emp…
 - `compileQuery()` — Whole query -> one predicate `(track, hay) => boolean`; all tokens must match.
 - `filterTracks()` — Tracks of `list` matching `query`; the list itself when the query is empty.

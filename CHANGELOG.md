@@ -15,9 +15,10 @@
   - Fixed: the Collection search found nothing for `rating:>=4` or
     `genre:"deep house"`. Ratings, BPM and year take `>`, `>=`, `<`, `<=`
     and `=`, BPM ranges like `bpm:138-142` still work, quoted values may
-    contain spaces, `key:8A` and `key:Am` find the same tracks, and
-    `artist:` / `title:` / `album:` filter their field. A token the search
-    cannot read is searched as plain text instead of hiding every track.
+    contain spaces, `key:8A` and `key:Am` find the same tracks (`key:A`
+    finds A and Am), and `artist:` / `title:` / `album:` filter their field.
+    A token the search cannot read is searched as plain text instead of
+    hiding every track; `12" mix` and `4:44` still find those titles.
   - Fixed: "Delete from Collection" in the live Rekordbox library only hid the
     track until the next restart (and answered 500) while the dialog promised a
     permanent delete. rbox 0.1.7 cannot delete a track row, so the live mode no

@@ -2,17 +2,19 @@
 // keystroke into predicates; each track is then checked against them, with one
 // lower-cased free-text haystack per track built once per list.
 //
-//   bpm:>140  bpm:<=128  bpm:138-142  bpm:128     (0 = not analysed, never matches)
+//   bpm:>140  bpm:<=128  bpm:138-142  bpm:128     (0 = not analysed: only bpm:0 finds it)
 //   rating:>=4  rating:<3  rating:5               (0 = unrated, a real value)
-//   year:2024  year:>=2020                        (0 = unknown, never matches)
-//   key:Am  key:8A                                (same Camelot slot; else substring)
+//   year:2024  year:>=2020                        (0 = unknown: only year:0 finds it)
+//   key:8A  key:Am  key:A                         (Camelot slot; a bare note = both modes)
 //   genre:techno  genre:"deep house"  label:…  artist:…  title:…  album:…
 //   "deep house"                                  (quoted phrase, free text)
 //   anything else                                 (free text: Title/Artist/Album/Comment/Genre/Label)
 //
-// A token that cannot work as a filter (unknown field, value that is no number)
-// falls back to free text (the token as written, or its value) instead of
-// silently matching nothing; a field still being typed ("bpm:", "rating:>=",
+// Only a known field name before the colon starts a field token: `4:44` and
+// `re:zero` stay free text as typed. A `"` opens a quote directly after `field:`
+// or at the start of a free-text token that has a closing `"`; any other `"` is
+// a literal character (`12" mix`). A field value that is no number falls back
+// to free text as typed; a field still being typed ("bpm:", "rating:>=",
 // "bpm:138-") filters nothing.
 
 import { camelotOf } from './trackSort.js';
@@ -53,42 +55,54 @@ const NUMBER_FIELDS = new Map([
     ['year', { of: (t) => parseInt(t.ReleaseYear, 10) || 0, zeroIsMissing: true }],
 ]);
 
+const KNOWN_FIELDS = new Set([...NUMBER_FIELDS.keys(), 'key', ...TEXT_FIELD_PROPS.keys()]);
+
 const NUMBER = /^\d+(?:\.\d*)?$/;
 const RANGE = /^(\d+(?:\.\d*)?)-(\d+(?:\.\d*)?)?$/;
 const OPERATOR = /^(>=|<=|>|<|=)?(.*)$/;
+const FIELD_PREFIX = /^([a-z]+):/;
+const NOTE_ONLY = /^[a-g](?:#|b|♯|♭)?$/;
+const SPACE = /\s/;
 
 /**
- * Split a query into tokens. Whitespace separates tokens except inside double
- * quotes; an unclosed quote runs to the end (the user is still typing). A colon
- * before any quote splits field and value: `genre:"deep house"` ->
- * { field: 'genre', value: 'deep house' }. Everything is lower-cased.
+ * Split a lower-cased query into `{ field, value, quoted }` tokens on whitespace.
+ * `field` is set only for a known field name before the colon. A `"` directly
+ * after `field:` quotes the value (unclosed runs to the end, still typing:
+ * `genre:"deep ho`); at the start of a free-text token it quotes a phrase only
+ * when a closing `"` follows. Every other `"` is a literal character.
  */
 export function tokenizeQuery(query) {
     const q = String(query || '').toLowerCase();
     const tokens = [];
     let i = 0;
     while (i < q.length) {
-        while (i < q.length && /\s/.test(q[i])) i += 1;
+        while (i < q.length && SPACE.test(q[i])) i += 1;
         if (i >= q.length) break;
         let field = null;
         let text = '';
         let quoted = false;
-        while (i < q.length && !/\s/.test(q[i])) {
-            const ch = q[i];
-            if (ch === '"') {
+        const prefix = FIELD_PREFIX.exec(q.slice(i, i + 16));
+        if (prefix && KNOWN_FIELDS.has(prefix[1])) {
+            field = prefix[1];
+            i += prefix[0].length;
+            if (q[i] === '"') {
                 const close = q.indexOf('"', i + 1);
                 const end = close === -1 ? q.length : close;
-                text += q.slice(i + 1, end);
+                text = q.slice(i + 1, end);
                 quoted = true;
                 i = close === -1 ? q.length : close + 1;
-            } else if (ch === ':' && field === null && !quoted && text) {
-                field = text;
-                text = '';
-                i += 1;
-            } else {
-                text += ch;
-                i += 1;
             }
+        } else if (q[i] === '"') {
+            const close = q.indexOf('"', i + 1);
+            if (close !== -1) {
+                text = q.slice(i + 1, close);
+                quoted = true;
+                i = close + 1;
+            }
+        }
+        while (i < q.length && !SPACE.test(q[i])) {
+            text += q[i];
+            i += 1;
         }
         tokens.push({ field, value: text, quoted });
     }
@@ -97,15 +111,10 @@ export function tokenizeQuery(query) {
 
 const freeText = (needle) => (needle ? (_t, hay) => hay.includes(needle) : null);
 
-// A field token that cannot filter: match the token as written ("re:mix" in a
-// title) or just its value (`mood:dark` finds "dark").
-const fallback = ({ field, value }) => {
-    const whole = `${field}:${value}`;
-    return (_t, hay) => hay.includes(whole) || hay.includes(value);
-};
-
 // Predicate for a numeric field; null while the value is still being typed
 // ("rating:>=", "bpm:138-"), undefined when the value is no number at all.
+// Zero-is-missing fields keep 0 out of ranges and comparisons, while an exact
+// `bpm:0` / `year:0` lists exactly those tracks.
 function numberPredicate(spec, value) {
     const { of, zeroIsMissing } = spec;
     const present = zeroIsMissing ? (n) => n !== 0 : () => true;
@@ -125,12 +134,15 @@ function numberPredicate(spec, value) {
     if (!rest) return null;
     if (!NUMBER.test(rest)) return undefined;
     const target = parseFloat(rest);
+    if (op === '=') {
+        if (spec.round) return (t) => Math.round(of(t)) === Math.round(target);
+        return (t) => of(t) === target;
+    }
     const cmp = {
         '>': (n) => n > target,
         '>=': (n) => n >= target,
         '<': (n) => n < target,
         '<=': (n) => n <= target,
-        '=': spec.round ? (n) => Math.round(n) === Math.round(target) : (n) => n === target,
     }[op];
     return (t) => {
         const n = of(t);
@@ -138,9 +150,19 @@ function numberPredicate(spec, value) {
     };
 }
 
+// Camelot code ("8A") or a key with its mode ("Am") -> that slot; a bare note
+// ("a", "f#", "bb") -> major and minor; anything else matches as a substring.
 function keyPredicate(value) {
-    const slot = camelotOf(value);
-    if (slot) return (t) => camelotOf(t.Key) === slot;
+    const slots = NOTE_ONLY.test(value)
+        ? [camelotOf(value), camelotOf(`${value}m`)].filter(Boolean)
+        : [camelotOf(value)].filter(Boolean);
+    if (slots.length === 1) return (t) => camelotOf(t.Key) === slots[0];
+    if (slots.length === 2) {
+        return (t) => {
+            const slot = camelotOf(t.Key);
+            return slot === slots[0] || slot === slots[1];
+        };
+    }
     return (t) =>
         String(t.Key || '')
             .toLowerCase()
@@ -158,7 +180,7 @@ export function compileToken(token) {
     const spec = NUMBER_FIELDS.get(field);
     if (spec) {
         const pred = numberPredicate(spec, value);
-        return pred === undefined ? fallback(token) : pred;
+        return pred === undefined ? freeText(`${field}:${value}`) : pred;
     }
     if (field === 'key') return keyPredicate(value);
     const prop = TEXT_FIELD_PROPS.get(field);
@@ -167,7 +189,7 @@ export function compileToken(token) {
             String(t[prop] || '')
                 .toLowerCase()
                 .includes(value);
-    return fallback(token);
+    return freeText(`${field}:${value}`);
 }
 
 // Whole query -> one predicate `(track, hay) => boolean`; all tokens must match.

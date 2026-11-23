@@ -115,12 +115,75 @@ test('field and free-text tokens combine with AND', () => {
     assert.deepEqual(ids('title:"acid rain"'), [3]);
 });
 
-test('unknown fields and malformed numbers fall back to free text', () => {
-    assert.deepEqual(ids('mood:techno'), [3, 4]);
+test('unknown fields and malformed numbers are free text as typed', () => {
+    assert.deepEqual(ids('mood:techno'), []);
     assert.deepEqual(ids('re:mix'), [2]);
     assert.deepEqual(ids('rating:high'), []);
     assert.deepEqual(ids('bpm:fast'), []);
     assert.equal(typeof compileToken({ field: 'rating', value: 'abc' }), 'function');
+});
+
+const EXTRA = [
+    { ID: 'blue', Title: 'Blue (12" Mix)', Artist: 'Lane', Key: 'A' },
+    { ID: 'seven', Title: 'Ride (7" Edit)', Artist: 'Lane', Key: 'Am' },
+    { ID: '444', Title: '4:44', Artist: 'Jay', Key: 'Bm' },
+    { ID: 'n44', Title: 'Number 44', Artist: 'Kay', Key: 'B' },
+    { ID: 'rez', Title: 'Re:Zero', Artist: 'Kay', Key: 'Bb' },
+    { ID: 'zp', Title: 'Zero Point', Artist: 'Kay', Key: '8A' },
+];
+const extraIds = (q) => filterTracks([...EXTRA], q).map((t) => t.ID);
+
+test('an inch mark is a literal quote character, not an open phrase', () => {
+    assert.deepEqual(tokenizeQuery('12" mix'), [
+        { field: null, value: '12"', quoted: false },
+        { field: null, value: 'mix', quoted: false },
+    ]);
+    assert.deepEqual(extraIds('12" mix'), ['blue']);
+    assert.deepEqual(extraIds('7"'), ['seven']);
+    assert.deepEqual(extraIds('title:7"'), ['seven']);
+    // An opening quote without a closing one stays literal in free text...
+    assert.deepEqual(tokenizeQuery('"deep ho'), [
+        { field: null, value: '"deep', quoted: false },
+        { field: null, value: 'ho', quoted: false },
+    ]);
+    // ...but right after `field:` it quotes the value being typed.
+    assert.deepEqual(tokenizeQuery('genre:"deep ho'), [
+        { field: 'genre', value: 'deep ho', quoted: true },
+    ]);
+    // A balanced pair at the start of a token is a phrase: "12", then mix.
+    assert.deepEqual(extraIds('"12" mix'), ['blue']);
+});
+
+test('only known field names start a field token', () => {
+    assert.deepEqual(tokenizeQuery('4:44 re:zero'), [
+        { field: null, value: '4:44', quoted: false },
+        { field: null, value: 're:zero', quoted: false },
+    ]);
+    assert.deepEqual(extraIds('4:44'), ['444']);
+    assert.deepEqual(extraIds('re:zero'), ['rez']);
+    assert.deepEqual(tokenizeQuery('Title:"Re:Zero"'), [
+        { field: 'title', value: 're:zero', quoted: true },
+    ]);
+});
+
+test('bpm:0 and year:0 list the zeros; comparisons still skip them', () => {
+    assert.deepEqual(ids('bpm:0'), [4]);
+    assert.deepEqual(ids('bpm:=0'), [4]);
+    assert.deepEqual(ids('bpm:<200'), [1, 2, 3]);
+    assert.deepEqual(ids('bpm:0-130'), [1]);
+    assert.deepEqual(ids('year:0'), [3]);
+    assert.deepEqual(ids('year:=0'), [3]);
+    assert.deepEqual(ids('year:<2030'), [1, 2, 4]);
+});
+
+test('a bare note matches both modes; a mode or Camelot code one slot', () => {
+    assert.deepEqual(extraIds('key:a'), ['blue', 'seven', 'zp']);
+    assert.deepEqual(extraIds('key:am'), ['seven', 'zp']);
+    assert.deepEqual(extraIds('key:8a'), ['seven', 'zp']);
+    assert.deepEqual(extraIds('key:11b'), ['blue']);
+    assert.deepEqual(extraIds('key:b'), ['444', 'n44']);
+    assert.deepEqual(extraIds('key:bb'), ['rez']);
+    assert.deepEqual(extraIds('key:bm'), ['444']);
 });
 
 test('half-typed tokens filter nothing instead of hiding every track', () => {
