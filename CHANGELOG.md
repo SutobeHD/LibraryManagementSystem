@@ -11,6 +11,14 @@
     removes tracks, now with one confirmation instead of two.
 
 - USB export:
+  - Fixed: every exported track lost its album and kept the OneLibrary
+    template's file type (M4A), sample rate (48 kHz), bit depth and file size,
+    in `exportLibrary.db` and `export.pdb`. They now come from the file itself.
+  - Fixed: ratings are stored as 0-5 stars instead of x51 (CDJ-3000X / XDJ-AZ
+    showed no stars).
+  - Fixed: artwork landed in folder `00000`; folders now hold 20 images each and
+    start at `00001`, and every image is also written as the `b` copy Rekordbox
+    writes.
   - Fixed: re-syncing a stick never updated `exportLibrary.db` / `export.pdb`
     on Windows while the app reported success. A plain sqlite3 probe of the
     SQLCipher file failed and kept it locked, so the writer could not replace

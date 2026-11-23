@@ -1,13 +1,15 @@
 """USB artwork extraction + bucketed write to PIONEER/Artwork/.
 
-Pioneer's Rekordbox stores cover art as two JPEG variants per track:
+Pioneer's Rekordbox stores cover art as two JPEG variants per track, each twice:
   PIONEER/Artwork/<bucket>/a<N>.jpg     ~3 KB  — small thumbnail   (CDJ list view)
   PIONEER/Artwork/<bucket>/a<N>_m.jpg   ~20 KB — medium / now-playing  (CDJ now-playing)
+  PIONEER/Artwork/<bucket>/b<N>.jpg, b<N>_m.jpg — the same bytes again
 
 Where:
-  <bucket> = zero-padded artwork-id-page index (`f"{image_id // 1000:05d}"`)
-             — keeps each directory sane for FAT32 and matches Rekordbox's
-             own bucketing on real export sticks.
+  <bucket> = `f"{image_id // 20 + 1:05d}"`: 20 images per folder, first folder
+             00001 (our F: reference stick has /PIONEER/Artwork/00001/a1.jpg;
+             20 per folder and the b copies are from rbxport's captures of real
+             Rekordbox exports, docs/reference/rbxport/export.md §5).
   <N>      = the OneLibrary `image.id` integer (matches the FK on content)
 
 Extraction order:
@@ -36,8 +38,8 @@ JPEG_QUALITY_MEDIUM = 85
 
 
 def _bucket_for(image_id: int) -> str:
-    """Match Rekordbox's bucket layout: 1 bucket per 1000 image ids."""
-    return f"{int(image_id) // 1000:05d}"
+    """Rekordbox's artwork folder for an image id: 20 ids per folder, starting at 00001."""
+    return f"{int(image_id) // 20 + 1:05d}"
 
 
 def _extract_embedded(audio_path: Path) -> bytes | None:
@@ -177,8 +179,9 @@ def write_artwork_pair(
     target_dir.mkdir(parents=True, exist_ok=True)
     small_path = target_dir / f"a{image_id}.jpg"
     medium_path = target_dir / f"a{image_id}_m.jpg"
+    copies = [target_dir / f"b{image_id}.jpg", target_dir / f"b{image_id}_m.jpg"]
 
-    if small_path.exists() and medium_path.exists():
+    if all(p.exists() for p in (small_path, medium_path, *copies)):
         return small_path, medium_path
 
     raw = get_artwork_bytes(audio_path)
@@ -193,8 +196,10 @@ def write_artwork_pair(
 
     if small_bytes:
         small_path.write_bytes(small_bytes)
+        copies[0].write_bytes(small_bytes)
     if medium_bytes:
         medium_path.write_bytes(medium_bytes)
+        copies[1].write_bytes(medium_bytes)
 
     logger.debug("[artwork] wrote %s + _m.jpg", small_path.name)
     return small_path, medium_path

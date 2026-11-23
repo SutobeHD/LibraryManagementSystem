@@ -74,12 +74,22 @@ def test_write_artwork_pair_writes_both_cdj_variants(tmp_path: Path) -> None:
 
     assert result is not None
     small, medium = result
-    # Bucket naming is an open registry todo (usb-artwork); only the pair is checked here.
-    bucket = pioneer / "Artwork" / usb_artwork._bucket_for(1)
+    bucket = pioneer / "Artwork" / "00001"  # F: reference: /PIONEER/Artwork/00001/a1.jpg
     assert (small, medium) == (bucket / "a1.jpg", bucket / "a1_m.jpg")
     assert _decode(small.read_bytes()).size == usb_artwork.SMALL_SIZE
     assert _decode(medium.read_bytes()).size == usb_artwork.MEDIUM_SIZE
+    # Rekordbox writes each variant twice, as a* and b*, with the same bytes.
+    assert (bucket / "b1.jpg").read_bytes() == small.read_bytes()
+    assert (bucket / "b1_m.jpg").read_bytes() == medium.read_bytes()
     assert sorted(p.name for p in album.iterdir()) == ["cover.jpg", "track.mp3"]
+
+
+@pytest.mark.parametrize(
+    ("image_id", "folder"), [(1, "00001"), (19, "00001"), (20, "00002"), (61, "00004")]
+)
+def test_artwork_folders_hold_twenty_images_from_00001(image_id: int, folder: str) -> None:
+    assert usb_artwork._bucket_for(image_id) == folder
+    assert usb_artwork.usb_relative_path(image_id) == f"/PIONEER/Artwork/{folder}/a{image_id}.jpg"
 
 
 def test_pillow_is_pinned_and_bundled() -> None:

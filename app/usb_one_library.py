@@ -70,6 +70,34 @@ def _remove_stick_file(path: Path) -> bool:
     return False
 
 
+def _audio_format(path: Path) -> tuple[int, int, int, int]:
+    """(Pioneer file type, sample rate, bit depth, file size) of an audio file.
+
+    Sample rate and bit depth come from the file header (mutagen); 0 when it cannot
+    be read. Lossy formats have no bit depth of their own and get 16, the value
+    Rekordbox uses for them.
+    """
+    from .library_format_swap import FILE_TYPE_M4A, FILE_TYPE_MP3, file_type_for
+
+    file_type = file_type_for(path)
+    try:
+        file_size = path.stat().st_size
+    except OSError:
+        file_size = 0
+    sample_rate = bit_depth = 0
+    try:
+        import mutagen
+
+        info = getattr(mutagen.File(str(path)), "info", None)
+        sample_rate = int(getattr(info, "sample_rate", 0) or 0)
+        bit_depth = int(getattr(info, "bits_per_sample", 0) or 0)
+    except Exception as exc:  # mutagen raises its own error types per container
+        logger.debug("[OneLibrary] audio header unreadable for %s: %s", path, exc)
+    if not bit_depth and file_type in (FILE_TYPE_MP3, FILE_TYPE_M4A):
+        bit_depth = 16
+    return file_type, sample_rate, bit_depth, file_size
+
+
 def _needs_copy(src: Path, dst: Path) -> bool:
     """True when ``dst`` is missing or does not match ``src``'s size.
 
@@ -890,8 +918,10 @@ class OneLibraryUsbWriter:
                     usb_rel_path = "/" + str(dest_path.relative_to(self.usb_root)).replace(
                         "\\", "/"
                     )
+                    audio_on_stick: Path | None = dest_path
                 else:
                     usb_rel_path = ""
+                    audio_on_stick = None
 
                 # Mutate the placeholder slot with user track data
                 slot.title = t.get("title") or ""
@@ -903,10 +933,24 @@ class OneLibraryUsbWriter:
                 # round, not int: 127.96 * 100 is 12795.999..., which int() cuts to 127.95.
                 slot.bpmx100 = round((t.get("bpm") or 0) * 100)
                 slot.length = int((t.get("duration_ms") or 0) / 1000)
-                slot.rating = int(t.get("rating") or 0) * 51  # 0-5 → 0-255
+                # Stars 0..5 as-is: x51 (255 for five stars) shows no stars on
+                # CDJ-3000X / XDJ-AZ (rbxport, observed on hardware).
+                slot.rating = max(0, min(5, int(t.get("rating") or 0)))
                 slot.release_year = int(t.get("release_year") or 0)
                 slot.bitrate = int(t.get("bitrate") or 0)
                 slot.isrc = ""
+                # Without these the slot keeps the template's values (an M4A of
+                # 8.8 MB at 48 kHz) for every track, in exportLibrary.db and export.pdb.
+                fmt_path = audio_on_stick or src_path
+                if fmt_path is not None:
+                    file_type, sample_rate, bit_depth, file_size = _audio_format(fmt_path)
+                    slot.file_type = file_type
+                    if sample_rate:
+                        slot.sampling_rate = sample_rate
+                    if bit_depth:
+                        slot.bit_depth = bit_depth
+                    if file_size:
+                        slot.file_size = file_size
                 if artist_id is not None:
                     slot.artist_id = int(artist_id)
                 if album_id is not None:
@@ -1249,7 +1293,9 @@ class OneLibraryUsbWriter:
         except Exception:
             pass
         try:
-            obj = db.create_album(name, artist_id, None)
+            # rbox wants the artist id as an int; a str made every create fail,
+            # so every exported track lost its album.
+            obj = db.create_album(name, int(artist_id) if artist_id else None, None)
             cache[key] = str(obj.id)
             return cache[key]
         except Exception as e:

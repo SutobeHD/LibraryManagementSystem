@@ -665,6 +665,7 @@ Per-file import-progress tracker — gives the frontend a live transparent
 
 Library-wide audio format conversion engine.
 
+- `file_type_for()` — The Pioneer FileType code for an audio file's extension; 0 when unknown.
 - `TrackPlan`
 - `DryRunResult`
 - `ExecuteResult`
@@ -5357,6 +5358,7 @@ Cover art for the USB stick, with the real Pillow (B8, 0.1 core-loop test).
 - `test_transparent_pixels_become_white_not_black()`
 - `test_garbage_bytes_are_refused_without_raising()`
 - `test_write_artwork_pair_writes_both_cdj_variants()`
+- `test_artwork_folders_hold_twenty_images_from_00001()`
 - `test_pillow_is_pinned_and_bundled()`
 
 ### `tests/test_usb_copy_atomic.py`
@@ -5376,6 +5378,16 @@ USB audio copies must not leave a truncated file that never self-heals.
 - `  TestNeedsCopy.test_unreadable_source_errs_toward_copying()`
 - `TestEndToEndHealing`
 - `  TestEndToEndHealing.test_a_truncated_track_is_repaired_on_the_next_sync()`
+
+### `tests/test_usb_export_fields.py`
+
+Per-track fields of a stick export (PC test 2026-11-22).
+
+- `no_analysis()`
+- `test_rows_carry_the_files_own_format_size_and_album()`
+- `test_export_pdb_rows_carry_the_same_fields()`
+- `test_file_type_codes()`
+- `test_audio_format_of_an_unreadable_file()`
 
 ### `tests/test_usb_lookup_batching.py`
 
