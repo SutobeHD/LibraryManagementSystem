@@ -26,6 +26,7 @@ name = "Nach Merkmalen sortieren"
 status = "unmerged"
 test = "testen"
 branch = "fix/track-table"
+pr = 100
 parent = "track-table"
 desc = "Track-Liste nach mehr Merkmalen sortieren: Genre, Label, Jahr, My Tags, Format, Hinzugefügt, Farbe; Key nach Camelot-Rad; fehlende Werte immer unten."
 paths = ["frontend/src/utils/trackSort.js", "frontend/src/utils/trackSort.test.js"]
