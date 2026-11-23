@@ -129,6 +129,9 @@ except Exception as e:
 # Relocation pass — a renamed artist must MOVE audio, not re-copy it
 # ---------------------------------------------------------------------------
 
+#: Reference tables the template pre-fills; unused template rows are dropped per sync.
+_REF_TABLES = ("album", "artist", "genre", "key", "label")
+
 #: Intermediate name used by the two-step rename. Never left behind on success.
 _RELOC_TMP_SUFFIX = ".lms-reloc-tmp"
 
@@ -905,18 +908,26 @@ class OneLibraryUsbWriter:
         key_cache: dict[str, str] = {}
         label_cache: dict[str, str] = {}
 
-        # Pre-warm caches with what's already in the template
+        # Pre-warm caches with what's already in the template, and remember those
+        # rows: whichever no track ends up using is dropped after Stage 3.
+        template_refs: dict[str, set[int]] = {t: set() for t in _REF_TABLES}
+        used_refs: dict[str, set[int]] = {t: set() for t in _REF_TABLES}
         try:
             for a in db.get_artists():
                 artist_cache.setdefault((a.name or ""), str(a.id))
+                template_refs["artist"].add(int(a.id))
             for a in db.get_albums():
                 album_cache.setdefault((a.name or ""), str(a.id))
+                template_refs["album"].add(int(a.id))
             for g in db.get_genres():
                 genre_cache.setdefault((g.name or ""), str(g.id))
+                template_refs["genre"].add(int(g.id))
             for k in db.get_keys():
                 key_cache.setdefault((k.name or ""), str(k.id))
+                template_refs["key"].add(int(k.id))
             for lab in db.get_labels():
                 label_cache.setdefault((lab.name or ""), str(lab.id))
+                template_refs["label"].add(int(lab.id))
         except Exception as exc:
             logger.debug("[OneLibrary] cache pre-warm skipped: %s", exc)
 
@@ -999,6 +1010,15 @@ class OneLibraryUsbWriter:
                 genre_id = self._get_or_create_genre(db, genre_cache, t.get("genre") or "")
                 key_id = self._get_or_create_key(db, key_cache, t.get("key") or "")
                 label_id = self._get_or_create_label(db, label_cache, t.get("label") or "")
+                for table, ref in (
+                    ("artist", artist_id),
+                    ("album", album_id),
+                    ("genre", genre_id),
+                    ("key", key_id),
+                    ("label", label_id),
+                ):
+                    if ref is not None:
+                        used_refs[table].add(int(ref))
 
                 # Audio file copy → USB (Pioneer-canonical /Contents/<Artist>/<Title>/)
                 src_path = Path(t["path"]) if t.get("path") else None
@@ -1107,6 +1127,8 @@ class OneLibraryUsbWriter:
 
         # The template's property row says 16 whatever the stick holds.
         self._set_number_of_contents(db, used_slots)
+
+        self._drop_template_refs(db, template_refs, used_refs)
 
         # Stage 4 — playlist tree (create_playlist works, no template needed)
         yield {"stage": "playlists", "message": "Writing playlist tree…", "progress": 80}
@@ -1292,6 +1314,37 @@ class OneLibraryUsbWriter:
                     "[OneLibrary] Could not remove broken content row %d: %s", new_id, del_exc
                 )
             return None
+
+    @staticmethod
+    def _drop_template_refs(
+        db, template_refs: dict[str, set[int]], used_refs: dict[str, set[int]]
+    ) -> int:
+        """Delete the template's artist/album/genre/key/label rows no track uses.
+
+        The template ships 14 empty-name artists, 16 albums, a genre and 10 keys,
+        and every slot points at some of them. A track without a key (artist,
+        genre, …) kept the template's empty row, the rest stayed unreferenced.
+        rbox 0.1.7 `delete_<table>` also clears the content FKs still pointing at
+        the row (verified: the row reads back None, the file reopens), so such a
+        track ends up with no key instead of an empty one — id 0 in export.pdb.
+        Returns the number of rows deleted.
+        """
+        deleted = 0
+        for table in _REF_TABLES:
+            delete = getattr(db, f"delete_{table}", None)
+            if delete is None:
+                continue
+            for row_id in sorted(template_refs[table] - used_refs[table]):
+                try:
+                    delete(row_id)
+                    deleted += 1
+                except Exception as exc:  # rbox OneLibraryError; keep the row, go on
+                    logger.warning(
+                        "[OneLibrary] template %s %d not deleted: %s", table, row_id, exc
+                    )
+        if deleted:
+            logger.info("[OneLibrary] dropped %d unused template reference row(s)", deleted)
+        return deleted
 
     @staticmethod
     def _set_number_of_contents(db, count: int) -> None:
