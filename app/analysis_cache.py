@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 
 # Bump when output schema changes — invalidates all stale cache entries.
-ANALYSIS_VERSION = 6  # 6: Rekordbox-faithful waveform values (peak^2 heights, pooled previews)
+ANALYSIS_VERSION = 7  # 7: MP3 beat grid shifted by the per-file header lead-in (was 22.5 ms)
 
 USE_CONTENT_HASH = False  # opt-in: also compare a quick xxhash/md5 sample
 

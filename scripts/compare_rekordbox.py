@@ -35,6 +35,7 @@ import argparse
 import json
 import os
 import random
+import statistics
 import sys
 from pathlib import Path
 from typing import Any
@@ -141,6 +142,8 @@ def beatgrid_metrics(rb_beats_ms: list[float], our_beats_ms: list[float]) -> dic
       first_offset_ms  — |first RB beat - first our beat|
       mean_abs_err_ms  — mean nearest-neighbour distance over the overlap
       max_abs_err_ms   — worst nearest-neighbour distance
+      median_signed_ms — median of (our beat - RB beat): > 0 means our grid sits
+                         late, < 0 early; None when nothing overlaps
       matched          — beats compared
     """
     if not rb_beats_ms or not our_beats_ms:
@@ -148,6 +151,7 @@ def beatgrid_metrics(rb_beats_ms: list[float], our_beats_ms: list[float]) -> dic
             "first_offset_ms": -1.0,
             "mean_abs_err_ms": -1.0,
             "max_abs_err_ms": -1.0,
+            "median_signed_ms": None,
             "matched": 0,
         }
     rb = sorted(rb_beats_ms)
@@ -156,25 +160,28 @@ def beatgrid_metrics(rb_beats_ms: list[float], our_beats_ms: list[float]) -> dic
     # nearest-neighbour error: for each RB beat within our grid's span,
     # find the closest of our beats.
     lo, hi = ours[0], ours[-1]
-    errs: list[float] = []
+    signed: list[float] = []
     j = 0
     for t in rb:
         if t < lo or t > hi:
             continue
         while j + 1 < len(ours) and abs(ours[j + 1] - t) <= abs(ours[j] - t):
             j += 1
-        errs.append(abs(ours[j] - t))
-    if not errs:
+        signed.append(ours[j] - t)
+    if not signed:
         return {
             "first_offset_ms": round(first_offset, 1),
             "mean_abs_err_ms": -1.0,
             "max_abs_err_ms": -1.0,
+            "median_signed_ms": None,
             "matched": 0,
         }
+    errs = [abs(e) for e in signed]
     return {
         "first_offset_ms": round(first_offset, 1),
         "mean_abs_err_ms": round(sum(errs) / len(errs), 1),
         "max_abs_err_ms": round(max(errs), 1),
+        "median_signed_ms": round(statistics.median(signed), 1),
         "matched": len(errs),
     }
 
