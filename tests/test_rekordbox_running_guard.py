@@ -53,6 +53,11 @@ GUARDED: list[tuple[str, str, dict[str, Any] | None]] = [
     ("POST", "/api/soundcloud/sync", {"playlist_ids": [1]}),
     ("POST", "/api/soundcloud/sync-all", None),
     ("POST", "/api/soundcloud/merge", {"playlist_ids": [1], "merged_name": "M"}),
+    (
+        "POST",
+        "/api/usb/playcount/resolve",
+        {"resolutions": [], "usb_root": "C:/nowhere", "usb_xml_path": "C:/nowhere/rb.xml"},
+    ),
 ]
 _IDS = [f"{m} {u}" for m, u, _ in GUARDED]
 
@@ -204,6 +209,58 @@ def test_scan_failure_fails_open(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setitem(sys.modules, "rbox", types.SimpleNamespace(is_rekordbox_running=_boom))
     assert main._is_rekordbox_running() is False
+
+
+# --- /api/usb/playcount/resolve -------------------------------------------------------
+
+
+@pytest.fixture
+def resolved(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """``resolve_playcounts`` stub: records the master.db path the route hands it."""
+    db_paths: list[str] = []
+
+    def _resolve(resolutions: list[dict], pc_db_path: str, usb_xml_path: str) -> dict:
+        db_paths.append(pc_db_path)
+        return {"committed": len(resolutions), "errors": []}
+
+    monkeypatch.setattr(main, "resolve_playcounts", _resolve)
+    monkeypatch.setattr(main, "load_usb_sync_meta", lambda _root: {})
+    monkeypatch.setattr(main, "save_usb_sync_meta", lambda _root, _meta: None)
+    return db_paths
+
+
+_RESOLVE_BODY = {
+    "resolutions": [{"track_id": "1", "strategy": "take_max", "pc_count": 2, "usb_count": 5}],
+    "usb_root": "C:/nowhere",
+    "usb_xml_path": "C:/nowhere/rb.xml",
+}
+
+
+def test_playcount_resolve_writes_the_live_master_db(
+    monkeypatch: pytest.MonkeyPatch, auth_token: dict[str, str], resolved: list[str]
+) -> None:
+    fake = _RecordingDB("live")
+    fake.live_db_path = "D:/libs/rekordbox6/master.db"  # not %APPDATA%/Pioneer/rekordbox
+    monkeypatch.setattr(main, "db", fake)
+    monkeypatch.setattr(main, "_is_rekordbox_running", lambda: False)
+
+    r = _send("POST", "/api/usb/playcount/resolve", _RESOLVE_BODY, auth_token)
+
+    assert r.status_code == 200, r.text
+    assert r.json()["data"]["committed"] == 1
+    assert resolved == [str(Path("D:/libs/rekordbox6/master.db"))]
+
+
+def test_playcount_resolve_outside_live_mode_is_409(
+    monkeypatch: pytest.MonkeyPatch, auth_token: dict[str, str], resolved: list[str]
+) -> None:
+    monkeypatch.setattr(main, "db", _RecordingDB("xml"))
+
+    r = _send("POST", "/api/usb/playcount/resolve", _RESOLVE_BODY, auth_token)
+
+    assert r.status_code == 409, r.text
+    assert "live Rekordbox library" in r.json()["detail"]
+    assert resolved == []
 
 
 # --- /api/playlists/create ---------------------------------------------------------

@@ -7317,25 +7317,21 @@ async def usb_playcount_resolve(body: PlayCountResolveRequest):
     """
     Commit resolved play counts to the PC database and the USB XML.
 
-    Writes to PC via rbox (best-effort) and patches the USB XML atomically.
-    Updates the sync metadata timestamp on success.
+    Writes to the live library's master.db via rbox (best-effort, under ``db_lock``) and
+    patches the USB XML atomically. Updates the sync metadata timestamp on success.
+    409 while Rekordbox runs or outside live mode (no master.db to write).
 
     Request body: {resolutions: [...], usb_root, usb_xml_path}
     Returns: {status, data: {committed, errors}}
     """
+    _reject_while_rekordbox_runs("syncing play counts")
+    pc_db_path = _require_live_master_db("Play-count sync")
     logger.info(
         "[USB-PC] playcount resolve: %d resolutions, usb_root=%s",
         len(body.resolutions),
         body.usb_root,
     )
     try:
-        import os as _os
-
-        from .config import DB_FILENAME
-
-        rb_root = str(Path(_os.environ.get("APPDATA", "")) / "Pioneer" / "rekordbox")
-        pc_db_path = str(Path(rb_root) / DB_FILENAME) if hasattr(Path(rb_root), "__str__") else ""
-
         resolutions_dicts = [r.model_dump() for r in body.resolutions]
         result = await asyncio.get_event_loop().run_in_executor(
             None,

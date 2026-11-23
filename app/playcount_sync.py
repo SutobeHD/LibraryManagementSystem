@@ -352,6 +352,8 @@ def resolve_playcounts(
         )
 
     # ── 1. Update PC database via rbox ─────────────────────────────────────
+    from .database import db_lock
+
     try:
         import rbox  # type: ignore  # soft-dependency: rbox wheel
 
@@ -359,27 +361,30 @@ def resolve_playcounts(
         if not db_path.exists():
             raise FileNotFoundError(f"master.db not found: {db_path}")
 
-        master_db = rbox.MasterDb(str(db_path))
-        for tid, (count, lp) in finals.items():
-            try:
-                # rbox integer track ids
-                int_tid = int(tid)
-                # rbox 0.1.x API: set_play_count(track_id, count)
-                # last_played update may not be available in all versions —
-                # we attempt it and fall back gracefully.
-                master_db.set_play_count(int_tid, count)
+        # Every master.db writer serialises on db_lock (coding-rules "Backend concurrency").
+        with db_lock():
+            master_db = rbox.MasterDb(str(db_path))
+            for tid, (count, lp) in finals.items():
                 try:
-                    master_db.set_last_played(int_tid, int(lp))
-                except AttributeError:
-                    logger.warning(
-                        "resolve_playcounts: rbox.set_last_played not available for track=%s", tid
-                    )
-                committed += 1
-                logger.info("resolve_playcounts: PC updated track=%s count=%d", tid, count)
-            except Exception as exc:
-                msg = f"PC DB update failed for track {tid}: {exc}"
-                logger.error("resolve_playcounts: %s", msg)
-                errors.append(msg)
+                    # rbox integer track ids
+                    int_tid = int(tid)
+                    # rbox 0.1.x API: set_play_count(track_id, count)
+                    # last_played update may not be available in all versions —
+                    # we attempt it and fall back gracefully.
+                    master_db.set_play_count(int_tid, count)
+                    try:
+                        master_db.set_last_played(int_tid, int(lp))
+                    except AttributeError:
+                        logger.warning(
+                            "resolve_playcounts: rbox.set_last_played not available for track=%s",
+                            tid,
+                        )
+                    committed += 1
+                    logger.info("resolve_playcounts: PC updated track=%s count=%d", tid, count)
+                except Exception as exc:
+                    msg = f"PC DB update failed for track {tid}: {exc}"
+                    logger.error("resolve_playcounts: %s", msg)
+                    errors.append(msg)
 
     except ImportError:
         logger.warning("resolve_playcounts: rbox not installed — PC DB will not be updated")
