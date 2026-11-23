@@ -84,6 +84,57 @@ test('text sort ignores case and keeps spelling variants together', () => {
     assert.deepEqual(ids(sortTracks(tracks, { key: 'Genre', direction: 'asc' })), [2, 5, 4, 1, 3]);
 });
 
+test('text sort is locale-aware: umlauts and accents sit with their base letter', () => {
+    const titles = ['Zebra', 'Ödland', 'über', 'alpha', 'Élan', 'Äther', 'beta', 'Ultra', 'Nacht'];
+    const tracks = titles.map((Title, ID) => ({ ID, Title }));
+    const order = sortTracks(tracks, { key: 'Title', direction: 'asc' }).map((t) => t.Title);
+    assert.deepEqual(order, [
+        'alpha',
+        'Äther',
+        'beta',
+        'Élan',
+        'Nacht',
+        'Ödland',
+        'über',
+        'Ultra',
+        'Zebra',
+    ]);
+});
+
+test('text sort compares digit runs as numbers', () => {
+    const tracks = [
+        { ID: 1, Title: 'Track 10' },
+        { ID: 2, Title: 'Track 2' },
+        { ID: 3, Title: 'Track 1' },
+    ];
+    assert.deepEqual(ids(sortTracks(tracks, { key: 'Title', direction: 'asc' })), [3, 2, 1]);
+});
+
+test('equal text keys keep their incoming order in both directions', () => {
+    const tracks = [
+        { ID: 1, Artist: 'Café' },
+        { ID: 2, Artist: 'Zed' },
+        { ID: 3, Artist: 'cafe' },
+        { ID: 4, Artist: 'CAFÉ' },
+    ];
+    assert.deepEqual(ids(sortTracks(tracks, { key: 'Artist', direction: 'asc' })), [1, 3, 4, 2]);
+    assert.deepEqual(ids(sortTracks(tracks, { key: 'Artist', direction: 'desc' })), [2, 1, 3, 4]);
+});
+
+test('5000 rows sort without reading a column per comparison', () => {
+    let reads = 0;
+    const tracks = Array.from({ length: 5000 }, (_, ID) => ({
+        ID,
+        get Title() {
+            reads += 1;
+            return `Title ${(ID * 7919) % 5003}`;
+        },
+    }));
+    const sorted = sortTracks(tracks, { key: 'Title', direction: 'asc' });
+    assert.equal(sorted.length, 5000);
+    assert.equal(reads, 5000);
+});
+
 test('Date Added sorts on StockDate, the field the library actually sends', () => {
     const tracks = [
         { ID: 1, StockDate: '2026-01-12' },
@@ -103,6 +154,7 @@ test('dateAdded accepts only real dates', () => {
     assert.equal(dateAdded({ StockDate: '2026-01-12T10:00:00' }), '2026-01-12');
     assert.equal(dateAdded({ StockDate: 'None' }), null);
     assert.equal(dateAdded({ DateAdded: '2024-05-01' }), '2024-05-01');
+    assert.equal(dateAdded({ StockDate: '', DateAdded: '2024-05-01' }), '2024-05-01');
     assert.equal(dateAdded({}), null);
 });
 

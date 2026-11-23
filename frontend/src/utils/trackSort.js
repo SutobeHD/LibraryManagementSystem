@@ -40,6 +40,10 @@ const MUSICAL_TO_CAMELOT = {
     E: '12B',
 };
 
+// One instance for every text column: locale order puts "Äther" among the A's and
+// "Élan" among the E's (code-point order put both after Z), "Track 2" before
+// "Track 10". Base sensitivity ignores case and accents; equal keys keep their
+// incoming order because Array.prototype.sort is stable.
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
 
 const text = (value) => {
@@ -102,14 +106,26 @@ export function formatOf(track) {
     return dot > 0 && dot < name.length - 1 ? name.slice(dot + 1).toUpperCase() : null;
 }
 
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}/;
+
+const isoDate = (value) => {
+    const raw = text(value);
+    return raw && ISO_DATE.test(raw) ? raw.slice(0, 10) : null;
+};
+
 /**
  * "YYYY-MM-DD" a track was added, else null. The live library sends StockDate;
- * a track without one arrives as the string "None", which must not count as a date.
+ * older payloads carry the text "None" there, which must not count as a date.
  */
 export function dateAdded(track) {
-    const raw = text(track?.StockDate ?? track?.DateAdded);
-    return raw && /^\d{4}-\d{2}-\d{2}/.test(raw) ? raw.slice(0, 10) : null;
+    return isoDate(track?.StockDate) ?? isoDate(track?.DateAdded);
 }
+
+// 20260112 for "2026-01-12": a number compares far cheaper than the date text.
+const dateSortValue = (track) => {
+    const iso = dateAdded(track);
+    return iso ? Number(iso.slice(0, 4) + iso.slice(5, 7) + iso.slice(8, 10)) : null;
+};
 
 export const SORT_VALUES = {
     Title: (t) => text(t.Title),
@@ -129,7 +145,7 @@ export const SORT_VALUES = {
     PlayCount: (t) => count(t.PlayCount),
     TotalTime: (t) => positive(t.TotalTime),
     ReleaseYear: (t) => positive(t.ReleaseYear),
-    DateAdded: (t) => dateAdded(t),
+    DateAdded: dateSortValue,
 };
 
 function compareValues(a, b, dir) {
