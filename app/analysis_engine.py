@@ -1415,18 +1415,35 @@ _PWV2_ENTRIES = 100
 _PWV4_ENTRIES = 1200
 _PWV6_ENTRIES = 1200
 
-# Fitted to Rekordbox's own values (tmp/wf harness, 2026-11).
-_WHITE_GAIN = 7.0  # whiteness = gain * (1 - low share) + offset, 0..7
-_WHITE_OFFSET = 0.0
-_PWAV_GAIN = 27.0  # PWAV height = gain * bucket RMS / track max + offset
-_PWAV_OFFSET = -3.0
-_PWV2_DB_RANGE = 24.0  # PWV2: dB below the loudest bucket that maps to the floor
-_PWV2_GAIN = 14.0
-_PWV2_OFFSET = 1.0
-_PWV4_BAND_WEIGHTS = (1.0, 0.8, 0.65)  # low, mid, high (rbxport least-error weights)
-_PWV5_BAND_WEIGHTS = (2.0, 2.0, 3.0)  # high counts 1.5x before the strongest-channel normalise
-_PWV7_P99_TARGET = (98.0, 87.0, 80.0)  # low, mid, high 99th-percentile level
-_PWV6_P99_TARGET = (55.0, 45.0, 55.0)
+# Least-squares fits to Rekordbox's own values on 11 calibration tracks
+# (tmp/wf harness, 2026-11); a separate 5-track holdout checks them.
+_WHITE_GAIN = 8.71  # PWV3 whiteness = gain * (1 - low share) + offset, 0..7
+_WHITE_OFFSET = -1.75
+_PWAV_WHITE_GAIN = 5.2  # PWAV whiteness, same input pooled per bucket
+_PWAV_WHITE_OFFSET = -0.45
+_PWAV_GAIN = 39.95  # PWAV height = gain * bucket RMS / sqrt(loudest bucket RMS) + offset
+_PWAV_OFFSET = -1.08
+_PWV2_DB_RANGE = 30.0  # PWV2: bass-band bucket RMS, dB below its 99th percentile -> floor
+_PWV2_GAIN = 12.12
+_PWV2_OFFSET = 2.0
+_PWV4_BAND_GAIN = (118.3, 70.5, 59.9)  # low, mid, high: fixed gain on the bucket peak
+# PWV7 bands are a peak envelope: instant attack, per-column release factor.
+_PWV7_RELEASE = (0.96, 0.92, 0.88)  # low, mid, high
+# Per-track band scaling: Rekordbox scales its 3-band tags per track (the u16
+# words in its PWVC tag follow that gain). value = gain * band / stat**alpha,
+# stat = band mean ("mean"), a percentile (float) or None (fixed gain); alpha
+# from a log-log regression of Rekordbox's per-track gain on the stat.
+_BandScale = tuple[float, str | float | None, float]
+_PWV7_BAND_SCALE: tuple[_BandScale, ...] = (
+    (79.35, "mean", 0.5),
+    (108.3, 99.9, 1.0),
+    (79.29, None, 0.0),
+)
+_PWV6_BAND_SCALE: tuple[_BandScale, ...] = (
+    (50.97, "mean", 0.5),
+    (39.79, 99.0, 1.0),
+    (47.92, 99.0, 1.0),
+)
 
 # MP3 samples Rekordbox's decode has in front of ours (libsndfile/mpg123 trims
 # gapless MP3s). Measured on 10 MP3s, sample-exact against Rekordbox PWV3:
@@ -1552,6 +1569,33 @@ def _scale_to(arr: np.ndarray, target: float, ref: float) -> np.ndarray:
     return arr * (target / ref) if ref > 1e-12 else np.zeros_like(arr)
 
 
+def _band_scale(x: np.ndarray, scale: _BandScale) -> np.ndarray:
+    """Apply a per-track band gain (see _PWV7_BAND_SCALE) and clip to 7 bit."""
+    gain, ref, alpha = scale
+    if ref is None:
+        out = x * gain
+    else:
+        stat = float(x.mean()) if ref == "mean" else float(np.percentile(x, float(ref)))
+        out = x * (gain / stat**alpha) if stat > 1e-12 else np.zeros_like(x)
+    return np.clip(np.round(out), 0, 127)
+
+
+def _release_envelope(x: np.ndarray, release: float) -> np.ndarray:
+    """Peak envelope: instant attack, decays by `release` per column.
+
+    env[i] = max over j <= i of x[j] * release**(i - j), computed in the log
+    domain as a running maximum (no per-column Python loop).
+    """
+    if len(x) == 0:
+        return np.zeros(0)
+    idx = np.arange(len(x), dtype=np.float64)
+    step = np.log(release)
+    held = np.maximum.accumulate(np.log(np.maximum(x, 1e-12)) - idx * step)
+    env = np.exp(idx * step + held)
+    env[env < 1e-9] = 0.0
+    return env
+
+
 def generate_waveform_data(
     y: np.ndarray,
     sr: int,
@@ -1591,17 +1635,20 @@ def generate_waveform_data(
 
     peak = _column_peak(y, hop, n_cols)
     energy = _column_energy(y, hop, n_cols)
-    band_peak = []
-    band_energy = []
-    for sos in (sos_low, sos_mid, sos_high):
+    low = signal.sosfilt(sos_low, y)
+    low_energy = _column_energy(low, hop, n_cols)
+    band_peak = [_column_peak(low, hop, n_cols)]
+    del low
+    for sos in (sos_mid, sos_high):
         b = signal.sosfilt(sos, y)
         band_peak.append(_column_peak(b, hop, n_cols))
-        band_energy.append(_column_energy(b, hop, n_cols))
         del b
     lo_pk, mi_pk, hi_pk = band_peak
     band_sum = lo_pk + mi_pk + hi_pk
+    col_samples = np.full(n_cols, float(hop))
 
     # -- Whiteness (PWAV/PWV3 bits 7-5): non-bass share of the column ------
+    # Silent columns count as fully white, as in Rekordbox's files.
     white_frac = np.ones(n_cols)
     loud = band_sum > 1e-9
     white_frac[loud] = 1.0 - lo_pk[loud] / band_sum[loud]
@@ -1611,34 +1658,40 @@ def generate_waveform_data(
     detail_height = _peak_height(peak, 31)
     pwv3 = (detail_white.astype(np.uint8) << 5) | detail_height.astype(np.uint8)
 
-    # -- PWAV: Monochrome Preview (400 columns) ---------------------------
-    # Rekordbox follows the bucket's RMS level (r 0.95), scaled per track.
-    samples = _pool_columns(np.full(n_cols, float(hop)), _PWAV_ENTRIES, "sum")
-    pwav_rms = np.sqrt(_pool_columns(energy, _PWAV_ENTRIES, "sum") / samples)
-    pwav_level = _scale_to(pwav_rms, 1.0, float(pwav_rms.max()))
+    # Rekordbox follows the bucket RMS, partly normalised to the loudest bucket.
+    # Rekordbox follows the bucket's RMS level, scaled to the track's loudest.
+    pwav_rms = np.sqrt(
+        _pool_columns(energy, _PWAV_ENTRIES, "sum")
+        / _pool_columns(col_samples, _PWAV_ENTRIES, "sum")
+    )
+    pwav_level = _scale_to(pwav_rms, 1.0, float(np.sqrt(pwav_rms.max())))
     pwav_h = np.clip(np.round(_PWAV_GAIN * pwav_level + _PWAV_OFFSET), 2, 25)
     pwav_white = np.clip(
-        np.round(_WHITE_GAIN * _pool_columns(white_frac, _PWAV_ENTRIES, "mean") + _WHITE_OFFSET),
+        np.round(
+            _PWAV_WHITE_GAIN * _pool_columns(white_frac, _PWAV_ENTRIES, "mean") + _PWAV_WHITE_OFFSET
+        ),
         0,
         7,
     )
     pwav = (pwav_white.astype(np.uint8) << 5) | pwav_h.astype(np.uint8)
 
-    # -- PWV2: Tiny Preview (100 columns, height only) --------------------
-    # dB of the bass band's RMS per bucket tracks Rekordbox best (r 0.90).
-    samples2 = _pool_columns(np.full(n_cols, float(hop)), _PWV2_ENTRIES, "sum")
-    pwv2_rms = np.sqrt(_pool_columns(band_energy[0], _PWV2_ENTRIES, "sum") / samples2)
-    pwv2_db = 20.0 * np.log10(_scale_to(pwv2_rms, 1.0, float(pwv2_rms.max())) + 1e-9)
-    pwv2_level = np.clip(1.0 + pwv2_db / _PWV2_DB_RANGE, 0.0, 1.0)
+    # -- PWV2: Tiny Preview (100 columns, height 1..15, no whiteness) -----
+    # dB of the bass band's RMS per bucket tracks Rekordbox closest.
+    pwv2_rms = np.sqrt(
+        _pool_columns(low_energy, _PWV2_ENTRIES, "sum")
+        / _pool_columns(col_samples, _PWV2_ENTRIES, "sum")
+    )
+    pwv2_rel = _scale_to(pwv2_rms, 1.0, float(np.percentile(pwv2_rms, 99)))
+    pwv2_level = np.clip(1.0 + 20.0 * np.log10(pwv2_rel + 1e-9) / _PWV2_DB_RANGE, 0.0, None)
     pwv2 = np.clip(np.round(_PWV2_GAIN * pwv2_level + _PWV2_OFFSET), 1, 15).astype(np.uint8)
 
     # -- PWV4: Color Preview (1200 x 6 bytes) ------------------------------
     # b0 = overall level (peak >> 1), b1/b2 unknown -> 0, b3/b4/b5 = R/G/B =
-    # low/mid/high (bucket max, 7-bit).
+    # low/mid/high (bucket max, fixed gain, 7-bit).
     p4_level = np.round(127 * np.clip(_pool_columns(peak, _PWV4_ENTRIES, "max"), 0, 1))
     p4_bands = [
-        np.clip(np.round(127 * w * _pool_columns(bp, _PWV4_ENTRIES, "max")), 0, 127)
-        for bp, w in zip(band_peak, _PWV4_BAND_WEIGHTS, strict=True)
+        np.clip(np.round(g * _pool_columns(bp, _PWV4_ENTRIES, "max")), 0, 127)
+        for bp, g in zip(band_peak, _PWV4_BAND_GAIN, strict=True)
     ]
     pwv4 = [
         [int(p4_level[i]), 0, 0, int(p4_bands[0][i]), int(p4_bands[1][i]), int(p4_bands[2][i])]
@@ -1646,15 +1699,15 @@ def generate_waveform_data(
     ]
 
     # -- PWV5: Color Detail (u16 R=low G=mid B=high, normalised) ------------
-    wl, wm, wh = (w * bp for w, bp in zip(_PWV5_BAND_WEIGHTS, band_peak, strict=True))
-    strongest = np.maximum(np.maximum(wl, wm), wh)
+    # Strongest channel -> full scale (7; green tops out at 5 in Rekordbox).
+    strongest = np.maximum(np.maximum(lo_pk, mi_pk), hi_pk)
     lit = strongest > 1e-9
     r5 = np.zeros(n_cols)
     g5 = np.zeros(n_cols)
     b5 = np.zeros(n_cols)
-    r5[lit] = np.round(7 * wl[lit] / strongest[lit])
-    g5[lit] = np.round(5 * wm[lit] / strongest[lit])
-    b5[lit] = np.round(7 * wh[lit] / strongest[lit])
+    r5[lit] = np.round(7 * lo_pk[lit] / strongest[lit])
+    g5[lit] = np.round(5 * mi_pk[lit] / strongest[lit])
+    b5[lit] = np.round(7 * hi_pk[lit] / strongest[lit])
     pwv5 = (
         (r5.astype(np.uint16) << 13)
         | (g5.astype(np.uint16) << 10)
@@ -1663,21 +1716,19 @@ def generate_waveform_data(
     )
 
     # -- PWV7: 3-Band Detail (150/sec x [low, mid, high], 0..127) ---------
-    # Rekordbox scales each band per track (its PWVC words track that gain);
-    # each band's 99th percentile is pinned to Rekordbox's typical level.
     pwv7_bands = [
-        np.clip(np.round(_scale_to(bp, t, float(np.percentile(bp, 99)))), 0, 127)
-        for bp, t in zip(band_peak, _PWV7_P99_TARGET, strict=True)
+        _band_scale(_release_envelope(bp, rel), scale)
+        for bp, rel, scale in zip(band_peak, _PWV7_RELEASE, _PWV7_BAND_SCALE, strict=True)
     ]
     pwv7 = np.stack(pwv7_bands, axis=1).astype(np.uint8).tolist()
 
     # -- PWV6: 3-Band Preview (1200 x [low, mid, high], 0..127) -----------
-    # Energy overview: band RMS per bucket, then per-track band scaling.
-    samples6 = _pool_columns(np.full(n_cols, float(hop)), _PWV6_ENTRIES, "sum")
+    # Bucket mean of the column peaks, two-bucket trailing average.
     pwv6_bands = []
-    for be, t in zip(band_energy, _PWV6_P99_TARGET, strict=True):
-        r = np.sqrt(_pool_columns(be, _PWV6_ENTRIES, "sum") / samples6)
-        pwv6_bands.append(np.clip(np.round(_scale_to(r, t, float(np.percentile(r, 99)))), 0, 127))
+    for bp, scale in zip(band_peak, _PWV6_BAND_SCALE, strict=True):
+        m = _pool_columns(bp, _PWV6_ENTRIES, "mean")
+        m[1:] = 0.5 * (m[1:] + m[:-1])
+        pwv6_bands.append(_band_scale(m, scale))
     pwv6 = np.stack(pwv6_bands, axis=1).astype(np.uint8).tolist()
 
     # -- 3-Band float arrays (0..1 per band, for our own renderer) ---------
