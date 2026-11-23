@@ -8288,4 +8288,6 @@ def duplicates_merge(body: DuplicateMergeRequest):
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    from .logging_utils import uvicorn_log_config
+
+    uvicorn.run(app, host="127.0.0.1", port=8000, log_config=uvicorn_log_config())

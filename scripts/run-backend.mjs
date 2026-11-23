@@ -9,6 +9,7 @@
 //
 // Order: $LMS_PYTHON > .venv/Scripts/python.exe | .venv/bin/python > python.
 import { existsSync } from "node:fs";
+import { homedir } from "node:os";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -26,7 +27,12 @@ function resolvePython() {
 
 const python = resolvePython();
 const args = process.argv.length > 2 ? process.argv.slice(2) : ["-m", "app.main"];
-console.log(`[run-backend] ${python} ${args.join(" ")}`);
+// The interpreter path names the user's home; logs must not (see app/logging_utils.py).
+// $LMS_PYTHON may use forward slashes and other case than homedir().
+const norm = (p) => p.replace(/\\/g, "/").toLowerCase();
+const home = homedir();
+const shown = norm(python).startsWith(norm(home) + "/") ? "~" + python.slice(home.length) : python;
+console.log(`[run-backend] ${shown} ${args.join(" ")}`);
 
 // PYTHONUTF8: the Windows console defaults to cp1252, which renders every
 // em-dash in a log message as a replacement character.
