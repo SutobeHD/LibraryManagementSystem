@@ -752,6 +752,7 @@ Log redaction helpers — scrub absolute paths from log lines + tracebacks.
 - `safe_error_message_str()` — Strip absolute paths from a rendered log/error string.
 - `RedactingFormatter` — `logging.Formatter` that scrubs paths from message + cached traceback.
 - `  RedactingFormatter.format()`
+- `uvicorn_log_config()` — uvicorn's own logging config with scrubbing formatters.
 
 ### `app/main.py`
 
@@ -4396,6 +4397,13 @@ Unit tests for `app.logging_utils.RedactingFormatter`.
 - `test_safe_error_message_str_noop_on_clean_input()`
 - `test_non_exception_log_format_unchanged()` — A path-free `logger.info("hello")` must be byte-identical via
 - `test_allowed_roots_boot_line_hides_user_paths()` — The boot line used to log the list repr: doubled backslashes beat the scrub.
+- `test_every_spelling_of_the_home_path_is_scrubbed()`
+- `test_a_longer_name_sharing_the_prefix_is_left_alone()`
+- `test_text_after_the_prefix_survives()`
+- `test_uvicorn_access_line_is_scrubbed()`
+- `test_uvicorn_error_traceback_is_scrubbed()`
+- `test_uvicorn_log_config_is_a_valid_dict_config()`
+- `test_sidecar_entry_point_passes_the_log_config()`
 
 ### `tests/test_main_route_table.py`
 
