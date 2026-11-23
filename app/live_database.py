@@ -1050,14 +1050,19 @@ class LiveRekordboxDB:
     def _write_import_analysis_columns(
         self, tid: str, track_data: dict[str, Any]
     ) -> dict[str, Any]:
-        """Write BPM (centi-BPM), length (whole seconds) and key into a new content row.
+        """Write BPM (centi-BPM), length (whole seconds), FileType and key into a new row.
 
         Returns the values that landed as cache fields (``BPM``, ``TotalTime``, ``Key``);
         a refused write is logged and leaves them out, so the cache never shows a BPM
         master.db does not hold. ``analysed`` / ``AnalysisDataPath`` stay untouched here:
         they belong to ANLZ files, which ``attach_import_anlz`` writes.
+
+        FileType comes from the file's extension (``library_format_swap.file_type_for``):
+        rbox ``create_content`` leaves 0 for an mp3, where Rekordbox writes 1. Never
+        from other library rows: some still carry an old wrong code (AIFF = 6).
         """
         from .database import db_lock
+        from .library_format_swap import file_type_for
 
         try:
             bpm = float(track_data.get("BPM") or 0)
@@ -1065,6 +1070,7 @@ class LiveRekordboxDB:
         except (TypeError, ValueError):
             bpm, length = 0.0, 0.0
         key_name = self._import_key_name(track_data)
+        file_type = file_type_for(str(track_data.get("path") or ""))
 
         out: dict[str, Any] = {}
         try:
@@ -1076,7 +1082,9 @@ class LiveRekordboxDB:
                     item.bpm = round(bpm * 100)
                 if length > 0:
                     item.length = max(1, round(length))
-                if bpm > 0 or length > 0:
+                if file_type:
+                    item.file_type = file_type
+                if bpm > 0 or length > 0 or file_type:
                     self.db.update_content(item)
                     if bpm > 0:
                         out["BPM"] = round(bpm * 100) / 100.0
@@ -1087,19 +1095,21 @@ class LiveRekordboxDB:
                     out["Key"] = key_name
         except Exception as e:  # rbox raises its own error types
             logger.error(
-                "op=import_analysis_columns tid=%s bpm=%s length=%s key=%s err=%s",
+                "op=import_analysis_columns tid=%s bpm=%s length=%s file_type=%s key=%s err=%s",
                 tid,
                 bpm,
                 length,
+                file_type,
                 key_name,
                 e,
             )
         else:
             logger.info(
-                "op=import_analysis_columns tid=%s bpm=%s length=%s key=%s",
+                "op=import_analysis_columns tid=%s bpm=%s length=%s file_type=%s key=%s",
                 tid,
                 out.get("BPM"),
                 out.get("TotalTime"),
+                file_type,
                 out.get("Key"),
             )
         return out
