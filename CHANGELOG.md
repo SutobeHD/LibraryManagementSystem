@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+- Rekordbox XML export:
+  - Added: right-click a playlist, smart playlist or folder -> "Als
+    Rekordbox-XML exportieren" writes `exports/<name>.xml` (a folder with its
+    whole subtree). Settings > Export gained an "XML export scope" picker,
+    default "Ganze Library". The toast reports the exported track count and
+    how many streaming tracks were skipped.
+  - Fixed: exporting the whole library (5041 tracks, 265 MB) took 12-20 s
+    and hit the 10 s request timeout, so the toast said "Export failed" while
+    the file was still being written. The export request now waits up to
+    5 minutes.
+  - Fixed: the playlist right-click menu could run up to 55 px past the
+    bottom of the window; it is now clamped by its measured size.
 - Beat grid (MP3):
   - Fixed: MP3 beat grids sat about 25 ms away from Rekordbox's. The grid was
     shifted by a fixed 22.5 ms because the LAME header was never actually read.
