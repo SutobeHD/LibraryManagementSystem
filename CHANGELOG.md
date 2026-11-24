@@ -3,10 +3,10 @@
 ## [Unreleased]
 
 - Rekordbox XML export:
-  - Added: right-click a playlist, smart playlist or folder -> "Als
-    Rekordbox-XML exportieren" writes `exports/<name>.xml` (a folder with its
-    whole subtree). Settings > Export gained an "XML export scope" picker,
-    default "Ganze Library". The toast reports the exported track count and
+  - Added: right-click a playlist, smart playlist or folder -> "Export as
+    Rekordbox XML" writes `exports/<name>.xml` (a folder with its whole
+    subtree). Settings > Export gained an "XML export scope" picker, default
+    "Whole library". The toast reports the exported track count and
     how many streaming tracks were skipped.
   - Fixed: exporting the whole library (5041 tracks, 265 MB) took 12-20 s
     and hit the 10 s request timeout, so the toast said "Export failed" while

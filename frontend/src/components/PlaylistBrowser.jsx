@@ -491,7 +491,7 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
             console.error('[PlaylistBrowser] Rekordbox XML export failed', err);
             const detail = err.response?.data?.detail;
             toast.error(
-                `Rekordbox-XML-Export von "${node.Name}" fehlgeschlagen${detail ? `: ${detail}` : ''}`
+                `Rekordbox XML export of "${node.Name}" failed${detail ? `: ${detail}` : ''}`
             );
         }
     };
@@ -998,8 +998,8 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
                                 onClick={() => handleExportXml(contextMenu.node)}
                                 className="w-full flex items-center gap-3 px-4 py-2 hover:bg-white/5 text-sm transition-colors text-ink-primary"
                             >
-                                <FileOutput size={14} className="text-amber2" /> Als Rekordbox-XML
-                                exportieren
+                                <FileOutput size={14} className="text-amber2" /> Export as Rekordbox
+                                XML
                             </button>
                             <button
                                 onClick={() => handleDelete(contextMenu.node)}

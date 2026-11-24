@@ -499,9 +499,9 @@ export async function exportRekordboxXml(node = null) {
 
 /** One-line toast text for an `exportRekordboxXml` result. */
 export function rekordboxXmlExportSummary(data) {
-    let text = `${data.exported} Tracks als Rekordbox-XML exportiert: ${data.path}`;
+    let text = `Exported ${data.exported} tracks as Rekordbox XML: ${data.path}`;
     if (data.skipped_streaming > 0) {
-        text += ` (${data.skipped_streaming} Streaming-Tracks ohne lokale Datei übersprungen)`;
+        text += ` (${data.skipped_streaming} streaming tracks without a local file skipped)`;
     }
     return text;
 }

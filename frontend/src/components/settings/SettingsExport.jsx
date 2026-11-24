@@ -149,11 +149,11 @@ const SettingsExport = ({ settings, setSettings }) => {
                         onChange={(e) => setXmlScopeId(e.target.value)}
                         className="input-glass w-full"
                     >
-                        <option value="">Ganze Library</option>
+                        <option value="">Whole library</option>
                         {xmlScopeRows.map(({ node, depth }) => (
                             <option key={node.ID} value={String(node.ID)}>
                                 {'\u00a0\u00a0'.repeat(depth)}
-                                {node.Type === '0' ? `${node.Name} (Ordner)` : node.Name}
+                                {node.Type === '0' ? `${node.Name} (folder)` : node.Name}
                             </option>
                         ))}
                     </select>
