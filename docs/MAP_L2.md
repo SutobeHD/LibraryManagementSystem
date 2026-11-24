@@ -1114,7 +1114,8 @@ pairing_store — in-memory one-shot pairing codes (Phase-2 auth, T2).
 phrase_db_writer.py — write phrase memory cues into Rekordbox master.db (djmdCue).
 
 - `RekordboxLockedError` — master.db is locked — Rekordbox is probably running.
-- `backup_master_db()` — Copy `db_path` (+ its -wal) to timestamped `.phrasebak-*` files.
+- `backup_master_db()` — Copy `db_path` (+ its -wal + `masterPlaylists6.xml`) to timestamped backups.
+- `prune_backup_sets()` — Delete all but the newest `keep` sets of one backup family.
 - `restore_master_db()` — Roll master.db back from ONE backup set (all files, one timestamp).
 - `write_phrase_memory_cues()` — Write phrase memory cues (Kind=0) into djmdCue for one track.
 
@@ -3402,6 +3403,12 @@ Artist-Hub merge apply/revert tests (T-6 + T-11a — app/artist_store/merge.py).
 - `test_apply_refuses_a_group_with_nothing_to_absorb()`
 - `test_apply_refuses_a_bare_artist_name_where_a_group_id_belongs()`
 - `test_tag_updates_only_ever_carries_the_allowlisted_field()`
+- `test_apply_snapshots_db_and_playlist_xml_before_the_first_write()`
+- `test_snapshot_comes_before_the_canonical_artist_is_created()`
+- `test_a_failed_snapshot_refuses_the_merge_before_any_write()`
+- `test_revert_takes_its_own_snapshot()`
+- `test_merge_keeps_only_the_newest_snapshot_sets()`
+- `test_a_fake_backend_takes_no_snapshot()`
 
 ### `tests/test_artist_merge_preview.py`
 
@@ -4792,6 +4799,12 @@ Unit tests for app/phrase_db_writer.py (djmdCue memory-cue writer).
 - `test_restore_refuses_a_set_without_the_main_db()`
 - `test_restore_returns_zero_when_no_backups()`
 - `test_restore_refuses_while_rekordbox_runs()`
+- `test_backup_set_includes_the_playlist_xml()`
+- `test_restore_puts_the_playlist_xml_back_with_the_db()`
+- `test_restore_leaves_an_xml_the_set_does_not_hold()`
+- `test_a_decrypted_copy_never_pulls_in_the_playlist_xml()` — The XML belongs to master.db; a copy's set must not carry (and restore) it.
+- `test_backup_families_never_mix()`
+- `test_prune_keeps_the_newest_sets_of_one_family()`
 - `TestMasterDbWriteLock` — Snapshot and restore are master.db writers — they hold the global lock.
 - `  TestMasterDbWriteLock.test_db_lock_is_the_global_write_lock()`
 - `  TestMasterDbWriteLock.test_snapshot_is_taken_under_the_lock()` — Outside it, another writer can commit between copy and write.

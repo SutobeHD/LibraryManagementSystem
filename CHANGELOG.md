@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- Backups before writes:
+  - Added: an artist merge (and its revert) now copies `master.db`, its `-wal`
+    and `masterPlaylists6.xml` beside the database before its first write
+    (`.mergebak-<stamp>`, newest 5 sets kept). Restoring the set puts the
+    playlist XML back together with the database. If the copy fails, the merge
+    is refused before anything is written.
 - Beat grid (MP3):
   - Fixed: MP3 beat grids sat about 25 ms away from Rekordbox's. The grid was
     shifted by a fixed 22.5 ms because the LAME header was never actually read.
