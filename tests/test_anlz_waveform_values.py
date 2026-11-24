@@ -210,17 +210,19 @@ def test_mp3_lead_in_rules():
     assert ae._mp3_lead_in_samples(b"\x00" * 64) is None
 
 
-def test_waveform_lead_in_reads_past_id3(tmp_path: Path):
+def test_mp3_lead_in_reads_past_id3(tmp_path: Path):
     tag_body = b"\x00" * 300_000  # big ID3v2 (embedded artwork) must be skipped by seek
     size = len(tag_body)
     syncsafe = bytes([(size >> 21) & 0x7F, (size >> 14) & 0x7F, (size >> 7) & 0x7F, size & 0x7F])
     mp3 = tmp_path / "x.mp3"
     mp3.write_bytes(b"ID3\x04\x00\x00" + syncsafe + tag_body + _mpeg1_frame(b"Info", 576) * 3)
-    assert ae.waveform_lead_in_s(str(mp3)) == pytest.approx(2257 / 44100)
+    assert ae.mp3_lead_in_s(str(mp3)) == pytest.approx(2257 / 44100)
+    # the beat grid is shifted by the same lead-in as the waveform
+    assert ae.get_encoder_delay(str(mp3)) == pytest.approx(2257 / 44100)
     flac = tmp_path / "x.flac"
     flac.write_bytes(b"fLaC")
-    assert ae.waveform_lead_in_s(str(flac)) == 0.0
-    assert ae.waveform_lead_in_s(str(tmp_path / "missing.mp3")) == 0.0
+    assert ae.mp3_lead_in_s(str(flac)) == 0.0
+    assert ae.mp3_lead_in_s(str(tmp_path / "missing.mp3")) == 0.0
 
 
 def test_lead_in_shifts_columns():

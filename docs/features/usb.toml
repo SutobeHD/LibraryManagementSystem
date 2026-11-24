@@ -150,7 +150,7 @@ status = "partial"
 test = "testen"
 desc = "Eingebettetes Cover oder cover.jpg nach PIONEER/Artwork (klein + mittel)."
 paths = ["app/usb_artwork.py", "tests/test_usb_artwork.py"]
-todo = ["_bucket_for: id 1 -> 00001 (Referenz-Stick), nicht 00000", "Cover kommen aus den eingebetteten Tags, nicht aus der Library (328 geschrieben vs 290 Library-Cover)", "Mittleres Bild: unser F:-Stick zeigt ~500x500, rbxport-Referenz 240x240 - an einem echten Rekordbox-Export klären (bisher 500 gelassen)"]
+todo = ["Cover kommen aus den eingebetteten Tags, nicht aus der Library (328 geschrieben vs 290 Library-Cover)", "Mittleres Bild: unser F:-Stick zeigt ~500x500, rbxport-Referenz 240x240 - an einem echten Rekordbox-Export klären (bisher 500 gelassen)"]
 notes = "PC-Test 2026-11-22: B8 gefixt - beide JPEGs je Track, dekodierbar, 80x80, DB verweist darauf. rbxport nutzt id//20+1; docs/reference/rbxport/export.md §5. Pillow==13.0.0 jetzt in requirements.txt + backend.spec (Build bricht ohne ab); vorher blieb PIONEER/Artwork leer (B8, fix/kernloop-0.1-bugs). Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): B8 (Pillow fehlte, 0 Cover) in PR #82 gefixt - neu prüfen. Cover-Ordner gefixt (fix/usb-export-data): 20 Bilder pro Ordner ab 00001, dazu b-Kopien wie Rekordbox; PC-Test: 40 Cover in 00001-00003, je a/a_m/b/b_m. Re-Sync-Cover gefixt (fix/usb-extras): PIONEER/Artwork/.lms-artwork.json merkt pro Bild-id den Hash des Quellbilds - neu schreiben nur bei anderem Hash, Cover nicht mehr benutzter ids werden nach dem Sync gelöscht; Track ohne Cover erbt kein altes mehr."
 
 [[feature]]

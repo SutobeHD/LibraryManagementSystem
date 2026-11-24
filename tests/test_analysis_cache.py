@@ -129,7 +129,7 @@ def test_json_default_handles_numpy():
 
 
 # ---------------------------------------------------------------------------
-# Depth-aware entries (ANALYSIS_VERSION 7; 4, 5 and 6 were taken twice, see app/analysis_cache.py)
+# Depth-aware entries (ANALYSIS_VERSION 8; 4 to 7 were taken twice, see app/analysis_cache.py)
 # ---------------------------------------------------------------------------
 
 
@@ -140,7 +140,7 @@ def _src(tmp_path, name="song.wav", size=2048):
 
 
 def test_version_bumped_for_depth_entries_and_regression_bpm():
-    assert ANALYSIS_VERSION == 7
+    assert ANALYSIS_VERSION == 8
     assert DEPTH_RANK == {"rekordbox": 0, "high": 1}
 
 

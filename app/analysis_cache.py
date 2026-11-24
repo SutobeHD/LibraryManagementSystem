@@ -41,9 +41,12 @@ logger = logging.getLogger(__name__)
 # 5: main = comb refit (exact BPM + uniform grid where the tracker slipped); branch = both 4s.
 # 6: main = Rekordbox-faithful waveform values (peak^2 heights, pooled previews);
 #    branch = depth-aware entries + regression BPM + comb refit.
-# 7: all of the above — depth-aware entries (rekordbox / high), mood / genre_hint / stereo
-#    nullable, extras, regression BPM, comb refit, Rekordbox-faithful waveform values.
-ANALYSIS_VERSION = 7
+# 7: main = MP3 beat grid shifted by the per-file header lead-in (was 22.5 ms);
+#    branch = depth-aware entries + everything up to the waveform values.
+# 8: all of the above — depth-aware entries (rekordbox / high), mood / genre_hint / stereo
+#    nullable, extras, regression BPM, comb refit, Rekordbox-faithful waveform values,
+#    per-file MP3 lead-in.
+ANALYSIS_VERSION = 8
 
 USE_CONTENT_HASH = False  # opt-in: also compare a quick xxhash/md5 sample
 
