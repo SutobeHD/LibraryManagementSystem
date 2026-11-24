@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+- Beat grid (MP3):
+  - Fixed: MP3 beat grids sat about 25 ms away from Rekordbox's. The grid was
+    shifted by a fixed 22.5 ms because the LAME header was never actually read.
+    It now moves by the same per-file decoder lead-in as the waveform: 0 ms
+    without a Xing/Info frame, 25.1 ms with one, 51.2 ms with a LAME tag.
+    Measured against Rekordbox on 18 MP3s (6 per header type), the median grid
+    error went from 24.3 ms to 5.2 ms (no Info frame 26.3 -> 3.9 ms, LAME tag
+    24.6 -> 4.0 ms, Info frame unchanged at about 12 ms).
+  - Changed: cached analyses are re-run once (analysis cache version 7).
+  - Added: `scripts/compare_rekordbox.py` reports `median_signed_ms` per track
+    (our beat minus Rekordbox's), so a grid that sits early or late shows up
+    as a sign instead of only a distance.
 - Waveforms (ANLZ):
   - Fixed: the waveforms written to `.DAT` / `.EXT` / `.2EX` looked unlike
     Rekordbox's (about twice as tall and flat, colours swapped, values out of

@@ -61,7 +61,7 @@ LibraryManagementSystem -- High-Accuracy Analysis Engine (v2.0)
 - `detect_beats_madmom()` — RNN-based beat tracking using madmom.
 - `detect_beats()` — High-accuracy BPM and beat grid detection.
 - `find_first_signal_onset()` — Find the time (in seconds) of the first non-silent audio.
-- `waveform_lead_in_s()` — Silence (s) to prepend to the decoded audio so waveform columns sit on
+- `mp3_lead_in_s()` — Seconds Rekordbox's MP3 decode runs ahead of ours: waveform columns get
 - `generate_waveform_data()` — Generate ALL waveform data required for Rekordbox ANLZ files:
 - `detect_phrases()` — Adaptive song-structure detection (Energy + MFCC timbre changes).
 - `generate_hot_cues()`
@@ -2912,7 +2912,7 @@ Value model of the ANLZ waveform tags (app/analysis_engine.py generate_waveform_
 - `test_pool_columns_reduces_every_column()`
 - `test_preview_keeps_a_short_transient()` — Old np.interp point sampling skipped most columns: a click between two
 - `test_mp3_lead_in_rules()`
-- `test_waveform_lead_in_reads_past_id3()`
+- `test_mp3_lead_in_reads_past_id3()`
 - `test_lead_in_shifts_columns()`
 
 ### `tests/test_anlz_writer_guards.py`
@@ -3907,6 +3907,7 @@ Unit tests for the pure comparison helpers in scripts/compare_rekordbox.py.
 - `test_bpm_relation_zero()`
 - `test_beatgrid_metrics_aligned()`
 - `test_beatgrid_metrics_offset()`
+- `test_beatgrid_metrics_signed_early()`
 - `test_beatgrid_metrics_empty()`
 - `test_rb_key_name_camelot_passes_through()`
 - `test_rb_key_name_musical_notation()`

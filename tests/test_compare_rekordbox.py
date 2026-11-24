@@ -118,12 +118,20 @@ def test_beatgrid_metrics_offset():
     assert m["first_offset_ms"] == 10.0
     # only RB beats within [10, 1510] count; each is 10ms from nearest
     assert m["mean_abs_err_ms"] == 10.0
+    assert m["median_signed_ms"] == 10.0  # ours late
+
+
+def test_beatgrid_metrics_signed_early():
+    rb = [100.0, 600.0, 1100.0, 1600.0]
+    ours = [75.0, 575.0, 1075.0, 1575.0, 2075.0]
+    assert cmp.beatgrid_metrics(rb, ours)["median_signed_ms"] == -25.0
 
 
 def test_beatgrid_metrics_empty():
     m = cmp.beatgrid_metrics([], [1.0, 2.0])
     assert m["matched"] == 0
     assert m["mean_abs_err_ms"] == -1.0
+    assert m["median_signed_ms"] is None
 
 
 # --- Rekordbox key names (B15) ----------------------------------------------

@@ -171,10 +171,6 @@ def _ensure_libs():
 # Containers without encoder delay -- beat-grid is sample-accurate.
 _ZERO_DELAY_FORMATS = {".flac", ".wav", ".aiff", ".aif", ".ogg", ".opus"}
 
-# Default MP3 encoder delay (LAME/Xing typical: 528 samples + ~470 padding @ 44.1kHz)
-# Rekordbox compensates ~22.5ms; we use exact value when LAME header is present.
-_MP3_DEFAULT_DELAY_S = 0.0225
-
 # AAC typical encoder delay (Apple/Nero: ~2112 priming samples = 47.9ms @ 44.1kHz).
 # Raw ADTS .aac only. In an MP4 container (.m4a/.mp4) the decoder already drops
 # the priming samples through the edit list and Rekordbox's grid carries no
@@ -187,8 +183,10 @@ def get_encoder_delay(file_path: str) -> float:
     """
     Return encoder delay (seconds) to compensate beat-grid alignment.
 
-    For MP3 and raw AAC the encoder prepends silence which the decoder plays
-    back -- this shifts all timestamps. Rekordbox compensates this.
+    For MP3 our decoder trims the gapless lead-in that Rekordbox keeps, so the
+    grid moves by the same per-file lead-in as the waveform (mp3_lead_in_s:
+    0 / 25.1 / 51.2 ms for no Info frame / Info frame / Info + LAME tag).
+    Raw AAC: the encoder prepends silence which the decoder plays back.
 
     For lossless (FLAC, WAV, AIFF), ungapped containers (Ogg, Opus) and AAC in
     an MP4 container without an iTunSMPB tag, delay = 0.
@@ -198,19 +196,7 @@ def get_encoder_delay(file_path: str) -> float:
         return 0.0
 
     if ext == ".mp3":
-        if _MUTAGEN_AVAILABLE:
-            try:
-                from mutagen.mp3 import MP3
-
-                mf = MP3(file_path)
-                # mutagen exposes encoder_delay (samples) when LAME tag present
-                delay_samples = getattr(mf.info, "encoder_delay", 0) or 0
-                if delay_samples > 0:
-                    sr = getattr(mf.info, "sample_rate", 44100) or 44100
-                    return float(delay_samples) / float(sr)
-            except Exception:
-                pass
-        return _MP3_DEFAULT_DELAY_S
+        return mp3_lead_in_s(file_path)
 
     if ext in (".m4a", ".aac", ".mp4"):
         if _MUTAGEN_AVAILABLE:
@@ -1099,7 +1085,7 @@ def detect_beats_madmom(
             # Per-beat confidence on the grid beats (before any shifts)
             raw_confidences = _compute_beat_confidence(grid_times, onset_env, sr, HOP_OE)
 
-            # Format-aware encoder-delay compensation (0 for FLAC/WAV, ~22.5ms for MP3)
+            # Format-aware encoder-delay compensation (0 for FLAC/WAV, MP3 per header)
             beat_times = grid_times + encoder_delay
             n_orig = len(beat_times)
 
@@ -1169,7 +1155,7 @@ def detect_beats(
     Tries madmom RNN first, falls back to librosa with parabolic interpolation.
 
     Args:
-        encoder_delay: Format-specific compensation in seconds (MP3 ~22.5ms, FLAC 0)
+        encoder_delay: Format-specific compensation in seconds (MP3 0-51 ms, FLAC 0)
         first_signal_t: Time of first non-silent audio (skip leading silence beats)
     """
     # Empty input (zero-byte / corrupt-decode file) — scipy sosfilt in the
@@ -1494,9 +1480,9 @@ def _mp3_lead_in_samples(data: bytes) -> tuple[int, int] | None:
     return 0, sr
 
 
-def waveform_lead_in_s(file_path: str) -> float:
-    """Silence (s) to prepend to the decoded audio so waveform columns sit on
-    Rekordbox's timeline. Non-zero for MP3 only; other formats decode in sync."""
+def mp3_lead_in_s(file_path: str) -> float:
+    """Seconds Rekordbox's MP3 decode runs ahead of ours: waveform columns get
+    this much silence prepended, beat times this much added. 0 for non-MP3."""
     if os.path.splitext(file_path)[1].lower() != ".mp3":
         return 0.0
     try:
@@ -1509,7 +1495,7 @@ def waveform_lead_in_s(file_path: str) -> float:
                 f.seek(0)
             data = f.read(_MP3_HEADER_SCAN + 512)
     except OSError as e:
-        logger.warning("op=waveform_lead_in file=%s err=%s", os.path.basename(file_path), e)
+        logger.warning("op=mp3_lead_in file=%s err=%s", os.path.basename(file_path), e)
         return 0.0
     found = _mp3_lead_in_samples(data)
     if found is None:
@@ -1614,7 +1600,7 @@ def generate_waveform_data(
     - 3-Band float arrays (rgb_low/mid/high, 0..1 per band)
 
     lead_in_s: silence prepended so columns line up with Rekordbox's decode
-    timeline (MP3 decoder lead-in, see waveform_lead_in_s).
+    timeline (MP3 decoder lead-in, see mp3_lead_in_s).
     """
     if lead_in_s > 0:
         y = np.concatenate([np.zeros(round(lead_in_s * sr), dtype=y.dtype), y])
@@ -2931,7 +2917,7 @@ def run_full_analysis(
         emit("waveform", 65)
         # Use native (or capped) SR audio so high-frequency band is visible
         waveform_result = generate_waveform_data(
-            y_for_waveform, waveform_sr, lead_in_s=waveform_lead_in_s(file_path)
+            y_for_waveform, waveform_sr, lead_in_s=mp3_lead_in_s(file_path)
         )
         emit("waveform", 80)
 
