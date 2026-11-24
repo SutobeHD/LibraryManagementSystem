@@ -1080,15 +1080,17 @@ class OneLibraryUsbWriter:
                 if label_id is not None:
                     slot.label_id = int(label_id)
 
-                # Artwork — extract embedded cover, write small+medium JPEGs
-                # to PIONEER/Artwork/<bucket>/, point the existing image row
-                # (image_id is preserved from the placeholder slot) at the
-                # small variant. Done BEFORE update_content so the FK stays
-                # valid in case the user-data overlay shifts image_id.
+                # Artwork — the library's cover (else embedded, else sidecar),
+                # small+medium JPEGs to PIONEER/Artwork/<bucket>/, point the
+                # existing image row (image_id is preserved from the placeholder
+                # slot) at the small variant. Done BEFORE update_content so the
+                # FK stays valid in case the user-data overlay shifts image_id.
                 art_id: int | None = None
                 if src_path is not None and _exists_safe(src_path):
                     try:
-                        art_id = self._write_track_artwork(db, slot, src_path, art_manifest)
+                        art_id = self._write_track_artwork(
+                            db, slot, src_path, art_manifest, t.get("artwork")
+                        )
                     except Exception as exc:
                         logger.debug("[OneLibrary] artwork skipped for slot %s: %s", slot.id, exc)
 
@@ -1741,16 +1743,27 @@ class OneLibraryUsbWriter:
         )
 
     def _write_track_artwork(
-        self, db, slot, audio_path: Path, manifest: dict[str, str] | None = None
+        self,
+        db,
+        slot,
+        audio_path: Path,
+        manifest: dict[str, str] | None = None,
+        library_artwork: str | None = None,
     ) -> int | None:
         """Generate the bucketed artwork pair for one track and update the
         OneLibrary `image` row to point at the small JPEG.
 
+        `library_artwork` is the track's artwork path in the library
+        (master.db ImagePath), resolved like `GET /api/artwork` does: the cover
+        the app and Rekordbox show wins over the file's embedded/sidecar art.
+
         Reuses whichever image_id the placeholder slot already references
         (template-baseline images carry empty paths after anonymisation).
         Returns the image id when the track has a cover on the stick, else None.
+        The legacy export.pdb reads the same image rows (`_write_pdb_from_db`).
         """
         from . import usb_artwork
+        from .library_artwork import library_artwork_file
 
         image_id = getattr(slot, "image_id", None)
         if image_id in (None, 0):
@@ -1765,7 +1778,13 @@ class OneLibraryUsbWriter:
                 logger.debug("[OneLibrary] create_image failed: %s", exc)
                 return None
 
-        result = usb_artwork.write_artwork_pair(audio_path, int(image_id), self.pioneer, manifest)
+        result = usb_artwork.write_artwork_pair(
+            audio_path,
+            int(image_id),
+            self.pioneer,
+            manifest,
+            library_image=library_artwork_file(library_artwork),
+        )
         if not result:
             return None  # no cover: the image row keeps the template's empty path
 
@@ -1814,23 +1833,6 @@ class OneLibraryUsbWriter:
         bad = '<>:"/\\|?*'
         out = "".join(c if c not in bad else "_" for c in s).strip()
         return out[:80] or "Unknown"
-
-    def _copy_artwork(self, track: dict, content_id: str) -> None:
-        """Copy cover-art into PIONEER/Artwork/<bucket>/<hash>.jpg if available."""
-        art = track.get("artwork")
-        if not art:
-            return
-        src = Path(art)
-        if not src.exists():
-            return
-        bucket = "P" + str(int(content_id) // 1000).zfill(3) if content_id.isdigit() else "P000"
-        target_dir = self.artwork_dir / bucket
-        target_dir.mkdir(parents=True, exist_ok=True)
-        h = hashlib.sha1(content_id.encode()).hexdigest()[:8].upper()
-        try:
-            shutil.copy2(str(src), str(target_dir / f"{h}.jpg"))
-        except Exception as e:
-            logger.debug(f"Artwork copy skipped: {e}")
 
     @staticmethod
     def _anlz_bucket(content_id: int) -> tuple:
