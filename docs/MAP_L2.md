@@ -1510,6 +1510,7 @@ Rekordbox collection XML (DJ_PLAYLISTS) writer for the /api/rekordbox/export bri
 - `scAuthTokenBody()` — The `POST /api/soundcloud/auth-token` body for one `scLogin()` result.
 - `cancellableGet()` — ─── AbortController helpers ────────────────────────────────────────────────── export function crea…
 - `fetchLibraryTracks()` — export function cancellablePost(url, data, config = {}) { const controller = new AbortController();…
+- `exportRekordboxXml()` — Write Rekordbox XML into the backend's `exports/` folder (`POST /api/rekordbox/export`).
 
 ### `frontend/src/api/scRefreshClassification.js`
 

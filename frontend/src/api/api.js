@@ -455,6 +455,10 @@ export function fetchLibraryTracks(config = {}) {
 // name would not open on Windows.
 const XML_FILENAME_ILLEGAL = /[<>:"/\\|?*]/g;
 const XML_FILENAME_RESERVED = /^(con|prn|aux|nul|com\d|lpt\d)$/i;
+// The route builds the file synchronously: the whole 5041-track library
+// (265 MB XML) took 12-20 s on 2026-11-25, past the 10 s default, so the
+// toast said "failed" while the backend went on writing the file.
+const XML_EXPORT_TIMEOUT_MS = 300_000;
 
 function xmlExportFilename(name) {
     const base = Array.from(String(name || ''), (ch) => (ch < ' ' ? '_' : ch))
@@ -475,16 +479,21 @@ function xmlExportFilename(name) {
  */
 export async function exportRekordboxXml(node = null) {
     if (node) {
-        const res = await api.post('/api/rekordbox/export', {
-            playlist_id: String(node.ID),
-            filename: xmlExportFilename(node.Name),
-        });
+        const res = await api.post(
+            '/api/rekordbox/export',
+            { playlist_id: String(node.ID), filename: xmlExportFilename(node.Name) },
+            { timeout: XML_EXPORT_TIMEOUT_MS }
+        );
         return res.data;
     }
     const tracks = await fetchLibraryTracks();
     // Live-library tracks carry `ID`, XML-mode tracks `id`.
     const ids = tracks.data.map((t) => t.ID ?? t.id).filter(Boolean);
-    const res = await api.post('/api/rekordbox/export', { track_ids: ids });
+    const res = await api.post(
+        '/api/rekordbox/export',
+        { track_ids: ids },
+        { timeout: XML_EXPORT_TIMEOUT_MS }
+    );
     return res.data;
 }
 
