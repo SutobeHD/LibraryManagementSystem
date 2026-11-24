@@ -8,7 +8,12 @@ import {
     useDeferredValue,
 } from 'react';
 import { createPortal } from 'react-dom';
-import api, { getScAuthMode, fetchLibraryTracks } from '../api/api';
+import api, {
+    getScAuthMode,
+    fetchLibraryTracks,
+    exportRekordboxXml,
+    rekordboxXmlExportSummary,
+} from '../api/api';
 import { log } from '../utils/log';
 import { SEARCH_SYNTAX_HINT, filterTracks } from '../utils/trackSearch';
 import { useToast } from './ToastContext';
@@ -35,6 +40,7 @@ import {
     GripVertical,
     Library,
     Disc,
+    FileOutput,
 } from 'lucide-react';
 import TrackTable from './TrackTable';
 import SoundCloudProgressModal from './SoundCloudProgressModal';
@@ -473,6 +479,19 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
             toast.error('Failed to delete.');
         }
         setContextMenu(null);
+    };
+
+    const handleExportXml = async (node) => {
+        setContextMenu(null);
+        try {
+            toast.success(rekordboxXmlExportSummary(await exportRekordboxXml(node)));
+        } catch (err) {
+            console.error('[PlaylistBrowser] Rekordbox XML export failed', err);
+            const detail = err.response?.data?.detail;
+            toast.error(
+                `Rekordbox-XML-Export von "${node.Name}" fehlgeschlagen${detail ? `: ${detail}` : ''}`
+            );
+        }
     };
 
     const handleRemoveTrack = async (trackId) => {
@@ -949,6 +968,13 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
                                 className="w-full flex items-center gap-3 px-4 py-2 hover:bg-white/5 text-sm transition-colors text-cyan-300"
                             >
                                 <Plus size={14} /> Duplizieren
+                            </button>
+                            <button
+                                onClick={() => handleExportXml(contextMenu.node)}
+                                className="w-full flex items-center gap-3 px-4 py-2 hover:bg-white/5 text-sm transition-colors text-ink-primary"
+                            >
+                                <FileOutput size={14} className="text-amber2" /> Als Rekordbox-XML
+                                exportieren
                             </button>
                             <button
                                 onClick={() => handleDelete(contextMenu.node)}
