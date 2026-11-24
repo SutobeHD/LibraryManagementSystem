@@ -242,6 +242,8 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
     const [dbLoaded, setDbLoaded] = useState(true);
     const [isProcessing, setIsProcessing] = useState(false);
     const [contextMenu, setContextMenu] = useState(null);
+    const contextMenuRef = useRef(null);
+    const [contextMenuSize, setContextMenuSize] = useState(null);
     const [showSmartEditor, setShowSmartEditor] = useState(false);
     const [smartEditorParent, setSmartEditorParent] = useState('ROOT');
     const [smartEditorEditing, setSmartEditorEditing] = useState(null);
@@ -621,6 +623,16 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
         }
     };
 
+    // Clamp to the viewport with the measured size: rows differ per node type,
+    // and the old fixed 320 px estimate pushed the last rows off-screen.
+    useLayoutEffect(() => {
+        const el = contextMenuRef.current;
+        if (!contextMenu || !el) return;
+        const w = el.offsetWidth;
+        const h = el.offsetHeight;
+        setContextMenuSize((prev) => (prev?.w === w && prev?.h === h ? prev : { w, h }));
+    }, [contextMenu]);
+
     useEffect(() => {
         // Close context menu only on LEFT-click (button 0) outside the menu.
         const handleMouseDown = (e) => {
@@ -911,12 +923,25 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
                 {contextMenu &&
                     createPortal(
                         <div
+                            ref={contextMenuRef}
                             data-context-menu="true"
                             className="bg-mx-shell border border-white/20 rounded-xl shadow-2xl py-1.5 min-w-[220px] animate-fade-in"
                             style={{
                                 position: 'fixed',
-                                top: Math.min(contextMenu.y, window.innerHeight - 320),
-                                left: Math.min(contextMenu.x, window.innerWidth - 230),
+                                top: Math.max(
+                                    0,
+                                    Math.min(
+                                        contextMenu.y,
+                                        window.innerHeight - (contextMenuSize?.h ?? 0)
+                                    )
+                                ),
+                                left: Math.max(
+                                    0,
+                                    Math.min(
+                                        contextMenu.x,
+                                        window.innerWidth - (contextMenuSize?.w ?? 0)
+                                    )
+                                ),
                                 zIndex: 99999,
                                 backdropFilter: 'blur(12px)',
                             }}
