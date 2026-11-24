@@ -12,10 +12,12 @@ Where:
              Rekordbox exports, docs/reference/rbxport/export.md §5).
   <N>      = the OneLibrary `image.id` integer (matches the FK on content)
 
-Extraction order:
-  1. Embedded ID3 APIC (MP3) / FLAC Picture / MP4 covr atom
-  2. Sidecar `cover.jpg` next to the audio file
-  3. None — caller falls back to no image_id reference
+Source order (first image that decodes wins):
+  1. The library's cover: master.db `ImagePath` (what Rekordbox and the app show),
+     resolved by `library_artwork.library_artwork_file`
+  2. Embedded ID3 APIC (MP3) / FLAC Picture / MP4 covr atom
+  3. Sidecar `cover.jpg` next to the audio file
+  4. None — caller falls back to no image_id reference
 
 Returned image is always JPEG so the CDJ is happy regardless of the source
 format (PNG, BMP, etc. all converted via Pillow).
@@ -35,6 +37,7 @@ import json
 import logging
 import os
 import re
+from collections.abc import Iterator
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -131,15 +134,35 @@ def _extract_sidecar(audio_path: Path) -> bytes | None:
     return None
 
 
-def get_artwork_bytes(audio_path: Path) -> bytes | None:
-    """Public single-shot extractor — embedded → sidecar → None.
+def _source_images(audio_path: Path, library_image: Path | None) -> Iterator[bytes]:
+    """Candidate cover images, best first: library cover → embedded → sidecar.
+
+    Lazy: the audio file is only opened when the library cover is missing or
+    turns out unusable.
+    """
+    if library_image is not None:
+        try:
+            raw = library_image.read_bytes()
+        except OSError as exc:
+            logger.debug("[artwork] library cover %s unreadable: %s", library_image, exc)
+            raw = b""
+        if raw:
+            yield raw
+    if not audio_path.is_file():
+        return
+    for extract in (_extract_embedded, _extract_sidecar):
+        raw = extract(audio_path)
+        if raw:
+            yield raw
+
+
+def get_artwork_bytes(audio_path: Path, library_image: Path | None = None) -> bytes | None:
+    """Public single-shot extractor — library cover → embedded → sidecar → None.
 
     Returned bytes are guaranteed only to be a non-empty image; the caller
     must run them through Pillow to normalise to JPEG.
     """
-    if not audio_path.is_file():
-        return None
-    return _extract_embedded(audio_path) or _extract_sidecar(audio_path)
+    return next(_source_images(audio_path, library_image), None)
 
 
 def _resize_to_jpeg(raw: bytes, size: tuple[int, int], quality: int) -> bytes | None:
@@ -211,8 +234,13 @@ def write_artwork_pair(
     image_id: int,
     pioneer_dir: Path,
     manifest: dict[str, str] | None = None,
+    library_image: Path | None = None,
 ) -> tuple[Path, Path] | None:
     """Extract+write small/medium artwork JPEGs to the bucketed CDJ layout.
+
+    `library_image` is the track's library cover file (master.db ImagePath); it
+    wins over the audio file's embedded and sidecar art. A source that does not
+    decode falls through to the next one.
 
     Returns (small_path, medium_path) on success, or None when no usable art
     was found or Pillow is unavailable.
@@ -228,38 +256,37 @@ def write_artwork_pair(
     medium_path = target_dir / f"a{image_id}_m.jpg"
     copies = [target_dir / f"b{image_id}.jpg", target_dir / f"b{image_id}_m.jpg"]
 
-    raw = get_artwork_bytes(audio_path)
-    if not raw:
-        logger.debug("[artwork] no embedded/sidecar art for %s", audio_path)
-        return None
-
-    digest = source_digest(raw)
     key = str(int(image_id))
-    if (
-        manifest is not None
-        and manifest.get(key) == digest
-        and all(p.exists() for p in (small_path, medium_path, *copies))
-    ):
+    for raw in _source_images(audio_path, library_image):
+        digest = source_digest(raw)
+        if (
+            manifest is not None
+            and manifest.get(key) == digest
+            and all(p.exists() for p in (small_path, medium_path, *copies))
+        ):
+            return small_path, medium_path
+
+        small_bytes = _resize_to_jpeg(raw, SMALL_SIZE, JPEG_QUALITY_SMALL)
+        medium_bytes = _resize_to_jpeg(raw, MEDIUM_SIZE, JPEG_QUALITY_MEDIUM)
+        if not small_bytes and not medium_bytes:
+            continue
+
+        target_dir.mkdir(parents=True, exist_ok=True)
+        if small_bytes:
+            small_path.write_bytes(small_bytes)
+            copies[0].write_bytes(small_bytes)
+        if medium_bytes:
+            medium_path.write_bytes(medium_bytes)
+            copies[1].write_bytes(medium_bytes)
+        if manifest is not None:
+            # A variant that failed to encode fails the exists() check next time.
+            manifest[key] = digest
+
+        logger.debug("[artwork] wrote %s + _m.jpg", small_path.name)
         return small_path, medium_path
 
-    small_bytes = _resize_to_jpeg(raw, SMALL_SIZE, JPEG_QUALITY_SMALL)
-    medium_bytes = _resize_to_jpeg(raw, MEDIUM_SIZE, JPEG_QUALITY_MEDIUM)
-    if not small_bytes and not medium_bytes:
-        return None
-
-    target_dir.mkdir(parents=True, exist_ok=True)
-    if small_bytes:
-        small_path.write_bytes(small_bytes)
-        copies[0].write_bytes(small_bytes)
-    if medium_bytes:
-        medium_path.write_bytes(medium_bytes)
-        copies[1].write_bytes(medium_bytes)
-    if manifest is not None:
-        # A variant that failed to encode fails the exists() check next time.
-        manifest[key] = digest
-
-    logger.debug("[artwork] wrote %s + _m.jpg", small_path.name)
-    return small_path, medium_path
+    logger.debug("[artwork] no usable library/embedded/sidecar art for %s", audio_path)
+    return None
 
 
 def prune_artwork(pioneer_dir: Path, live_ids: set[int], manifest: dict[str, str]) -> int:
