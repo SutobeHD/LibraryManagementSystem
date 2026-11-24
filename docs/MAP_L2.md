@@ -1345,6 +1345,19 @@ SoundCloud Downloader — Dedup-aware download pipeline with two acquisition pat
 - `  SoundCloudDownloader.note_names()` — Every task of one SoundCloud track shows the names the track carries now.
 - `  SoundCloudDownloader.cleanup_processes()` — No-op: kept for API compatibility.
 
+### `app/tag_backups.py`
+
+tag_backups — exact copy of an audio file before the app first rewrites its tags.
+
+- `BackupEntry` — One generation: the exact copy and its manifest.
+- `backup_root()` — ``%APPDATA%/MusicLibraryManager/tag-write-backups`` (format-swap's convention).
+- `file_key()` — Store key of one audio file: stable across spellings of the same path.
+- `generations()` — Every intact generation of one file, oldest first.
+- `ensure_backup()` — The generation holding this file's state before the app's writes; copy if none.
+- `record_written()` — Remember the app's own write, so the next one is not mistaken for a foreign edit.
+- `atomic_rewrite()` — Run ``mutate`` on a temp copy beside ``path``, then swap it in with ``os.replace``.
+- `restore()` — Put a generation (default: the newest) back over ``path``, byte for byte.
+
 ### `app/templates/build_template.py`
 
 Build a clean exportLibrary_template.db from any Rekordbox-exported USB stick.
@@ -5444,6 +5457,30 @@ Contract tests for ``GET /api/system/health`` -- unauth'd liveness probe.
 - `  TestHealthLeaksNothing.test_response_model_filters_undeclared_fields()` — ``response_model`` pins the schema so future edits can't leak.
 - `TestHealthHasNoSideEffects`
 - `  TestHealthHasNoSideEffects.test_does_not_lazily_build_live_db()` — ``db.active_db`` constructs ``LiveRekordboxDB`` on first touch.
+
+### `tests/test_tag_backups.py`
+
+Tag writes keep an exact copy first, rewrite atomically and respect the size cap.
+
+- `store()`
+- `test_first_write_keeps_an_exact_copy_and_later_writes_do_not()`
+- `test_every_spelling_of_one_path_shares_the_copy()`
+- `test_an_outside_edit_gets_its_own_generation()`
+- `test_backup_false_takes_no_copy()`
+- `test_cap_prunes_the_oldest_copies_first()`
+- `test_a_copy_larger_than_the_cap_is_still_kept()`
+- `test_crash_leftovers_are_swept_but_an_unreadable_manifest_keeps_its_copy()`
+- `test_a_writer_failing_mid_save_leaves_the_original_byte_identical()`
+- `test_a_file_held_open_by_another_process_is_not_replaced()`
+- `test_a_file_changed_while_its_copy_was_edited_is_not_replaced()`
+- `test_a_track_streaming_to_the_player_does_not_block_the_write()` — The stream reader holds no handle between chunks (Windows refuses os.replace then).
+- `test_a_killed_process_leaves_the_original_untouched()` — A hard kill mid-save (no finally, no except) — the strongest crash we can stage.
+- `test_no_copy_means_no_write()`
+- `test_a_read_only_file_is_refused_without_a_copy()`
+- `test_log_lines_carry_no_path()`
+- `test_tags_land_audio_and_cover_stay_and_restore_is_byte_exact()`
+- `test_restore_refuses_a_damaged_copy()`
+- `test_restore_without_a_copy_is_a_no_op()`
 
 ### `tests/test_track_batch_tags.py`
 

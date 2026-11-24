@@ -62,7 +62,7 @@ status = "shipped"
 test = "getestet"
 tested = "2026-11-14"
 desc = "ANLZ-.bak mit Prune, master.db-Snapshot vor Format-Swap und Artist-Merge plus Rollback, Undo-Journale."
-notes = "Kein allgemeines master.db-Backup - jedes Feature sichert nur für sich. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): ok. Seit 2026-11-25 (fix/backup-before-tag-writes): Artist-Merge apply/revert -> Satz master.db + -wal + masterPlaylists6.xml neben master.db (.mergebak-<stamp>, 5 Sätze); phrase_db_writer-Sätze nehmen die XML ebenfalls mit."
+notes = "Kein allgemeines master.db-Backup - jedes Feature sichert nur für sich. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): ok. Seit 2026-11-25 (fix/backup-before-tag-writes): Artist-Merge apply/revert -> Satz master.db + -wal + masterPlaylists6.xml neben master.db (.mergebak-<stamp>, 5 Sätze); phrase_db_writer-Sätze nehmen die XML ebenfalls mit. Audio-Dateien vor Tag-Writes: tag-write-backups (5 GiB Deckel, s. file-tag-writeback)."
 
 # ── Standalone & XML ──────────────────────────────────────────────────────
 

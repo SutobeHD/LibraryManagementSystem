@@ -858,16 +858,21 @@ _STREAM_MEDIA_TYPES = {
 
 
 def _read_file_range(file_path: Path, start: int, end: int) -> Iterator[bytes]:
-    """Bytes ``start..end`` (inclusive) of ``file_path`` in 1 MiB reads. Blocking."""
-    with open(file_path, "rb") as f:
-        f.seek(start)
-        remaining = end - start + 1
-        while remaining > 0:
-            data = f.read(min(_STREAM_CHUNK_BYTES, remaining))
-            if not data:
-                break
-            remaining -= len(data)
-            yield data
+    """Bytes ``start..end`` (inclusive) of ``file_path`` in 1 MiB reads. Blocking.
+
+    Reopened per chunk, like ``playable_audio._read_block``: the browser reads a playing
+    track slowly, and a handle held between chunks blocks the tag writer's atomic
+    ``os.replace`` (``app/tag_backups.py``) on Windows for as long as it plays.
+    """
+    pos = start
+    while pos <= end:
+        with open(file_path, "rb") as f:
+            f.seek(pos)
+            data = f.read(min(_STREAM_CHUNK_BYTES, end - pos + 1))
+        if not data:
+            break
+        pos += len(data)
+        yield data
 
 
 def _byte_range_response(

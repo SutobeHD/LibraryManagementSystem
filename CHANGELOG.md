@@ -8,6 +8,17 @@
     (`.mergebak-<stamp>`, newest 5 sets kept). Restoring the set puts the
     playlist XML back together with the database. If the copy fails, the merge
     is refused before anything is written.
+  - Added: before the app first writes tags into an audio file, it keeps an
+    exact copy of the file in `%APPDATA%/MusicLibraryManager/tag-write-backups/`
+    (capped at 5 GiB, oldest copies pruned first). Later edits of the same file
+    add no copy; a file changed outside the app since gets a new one. If the copy
+    cannot be made, the tags are not written. Fresh SoundCloud downloads are not
+    copied.
+  - Fixed: tag writes are atomic. The tags go into a temp copy beside the file,
+    which then replaces the original, so a crash mid-save leaves the original
+    untouched instead of a half-written file.
+  - Changed: the audio stream reopens the file for every 1 MiB chunk, so a
+    playing track no longer holds it open and blocks the tag write on Windows.
 - Beat grid (MP3):
   - Fixed: MP3 beat grids sat about 25 ms away from Rekordbox's. The grid was
     shifted by a fixed 22.5 ms because the LAME header was never actually read.
