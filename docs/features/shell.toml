@@ -83,9 +83,9 @@ name = "Track/Playlist-Rechtsklickmenüs"
 status = "shipped"
 test = "getestet"
 tested = "2026-11-14"
-desc = "Portal-Menüs: Track 9 Aktionen, Playlist 7 Aktionen; funktioniert in WebView2."
+desc = "Portal-Menüs: Track 9 Aktionen, Playlist 8 Aktionen; funktioniert in WebView2."
 related = ["track-table", "playlist-tree-crud", "context-menu-system"]
-notes = "Eigene Implementierung in TrackTable.jsx/PlaylistBrowser.jsx, nicht das shared ContextMenu. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): ok."
+notes = "2026-11-25: Playlist-Menü + 'Export as Rekordbox XML' (rekordbox-xml-bridge); Position wird nach gemessener Menügröße an den Viewport geklemmt (fixe 320 px schnitten 8-9-Zeilen-Menüs bis 55 px ab). Eigene Implementierung in TrackTable.jsx/PlaylistBrowser.jsx, nicht das shared ContextMenu. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): ok."
 
 [[feature]]
 id = "context-menu-system"

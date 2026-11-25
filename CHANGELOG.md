@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+- Rekordbox XML export:
+  - Added: right-click a playlist, smart playlist or folder -> "Export as
+    Rekordbox XML" writes `exports/<name>.xml` (a folder with its whole
+    subtree). Settings > Export gained an "XML export scope" picker, default
+    "Whole library". The toast reports the exported track count and
+    how many streaming tracks were skipped.
+  - Fixed: exporting the whole library (5041 tracks, 265 MB) took 12-20 s
+    and hit the 10 s request timeout, so the toast said "Export failed" while
+    the file was still being written. The export request now waits up to
+    5 minutes.
+  - Fixed: the playlist right-click menu could run up to 55 px past the
+    bottom of the window; it is now clamped by its measured size.
 - USB covers:
   - Fixed: the stick got its covers from the audio file's embedded tags, else
     a `cover.jpg` / `folder.jpg` next to it, not from the library. It now takes
