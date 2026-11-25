@@ -3,6 +3,17 @@
 ## [Unreleased]
 
 - Rekordbox XML export:
+  - Added: right-click a playlist, smart playlist or folder -> "Export as
+    Rekordbox XML" writes `exports/<name>.xml` (a folder with its whole
+    subtree). Settings > Export gained an "XML export scope" picker, default
+    "Whole library". The toast reports the exported track count and
+    how many streaming tracks were skipped.
+  - Fixed: exporting the whole library (5041 tracks, 265 MB) took 12-20 s
+    and hit the 10 s request timeout, so the toast said "Export failed" while
+    the file was still being written. The export request now waits up to
+    5 minutes.
+  - Fixed: the playlist right-click menu could run up to 55 px past the
+    bottom of the window; it is now clamped by its measured size.
   - Fixed: an export started in the first ~30 s after the live library loaded
     (or the mode switched) wrote every track without beat grid and reported
     success: the grids come from a background loader that was still running.

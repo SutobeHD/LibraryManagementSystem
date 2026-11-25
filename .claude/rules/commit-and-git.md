@@ -140,7 +140,7 @@ Every push must be revertable via future `git revert`. No public-history rewrite
 
 ### NOT auto-fired by the hook
 
-The push hook only fires after `git commit`. Merges (`git merge`, `gh pr merge`), rebase, and cherry-pick are **allowed without a prompt on the user's explicit instruction** (see `agentic-mode.md` "Just do these") but the agent runs them deliberately — they are never triggered automatically. Tags (`git tag`) still prompt. `gh pr create` runs without asking (see `agentic-mode.md`).
+The push hook only fires after `git commit`. Merges (`git merge`, `gh pr merge`), rebase, and cherry-pick are **autonomous** — the agent merges its own finished, CI-green PRs without asking (standing permission 2026-11-25, see `agentic-mode.md` "Just do these") — but it runs them deliberately; no hook triggers them. Tags (`git tag`) still prompt. `gh pr create` runs without asking (see `agentic-mode.md`).
 
 ---
 
