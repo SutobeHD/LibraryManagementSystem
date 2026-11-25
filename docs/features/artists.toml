@@ -57,7 +57,7 @@ routes = ["/api/artists/merge", "/api/artists/jobs"]
 depends_on = ["artist-store-sidecar", "live-master-db", "file-tag-writeback", "metadata-fixer", "rekordbox-running-guard"]
 related = ["usb-folder-relocation", "name-normalisation"]
 todo = ["Mehrfach-Credits nicht plattmachen: Gruppe FREE DL = 26 von 26 umzuschreibenden Tracks Compound ('Bad Bunny, Pietro GAIN, Free DL' wird 'FREE DL') - Compound-Tracks ausschließen oder Credit in place ersetzen", "Apply + Revert real testen (auf Kopie der master.db)"]
-notes = "Nie fuzzy. Waisen löschen nur Opt-in (nullt Remixer/Composer, Revert stellt das nicht her). Preview 2026-11-07 gegen Live-DB geprüft: 6 Gruppen, Dry-Run-Zahlen plausibel, nichts angewendet."
+notes = "Nie fuzzy. Waisen löschen nur Opt-in (nullt Remixer/Composer, Revert stellt das nicht her). Preview 2026-11-07 gegen Live-DB geprüft: 6 Gruppen, Dry-Run-Zahlen plausibel, nichts angewendet. Seit 2026-11-25 (fix/backup-before-tag-writes): apply + revert sichern vorher master.db + -wal + masterPlaylists6.xml (.mergebak-, 5 Sätze, Dateinamen in Run-Note + library_backup), Tag-Writes gehen über tag_backups (Kopie vor dem ersten Write). PC: apply(write_tags=False) auf Library-Kopie, 1 Track, Snapshot + Restore byte-gleich; Revert nicht PC-getestet."
 
 [[feature]]
 id = "artist-projection-rekordbox"
