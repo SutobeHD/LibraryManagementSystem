@@ -79,6 +79,7 @@
 | `app/soundcloud_api.py` | SoundCloud API client — playlists, likes, per-artist catalogue, and track search. |
 | `app/soundcloud_auth.py` | SoundCloud OAuth token store + silent refresh (persistent login, Option A). |
 | `app/soundcloud_downloader.py` | SoundCloud Downloader — Dedup-aware download pipeline with two acquisition paths. |
+| `app/tag_backups.py` | tag_backups — exact copy of an audio file before the app first rewrites its tags. |
 | `app/templates/build_template.py` | Build a clean exportLibrary_template.db from any Rekordbox-exported USB stick. |
 | `app/track_fields.py` | Track-metadata field policy: which keys a library backend stores, and their value rules. |
 | `app/usb_artwork.py` | USB artwork extraction + bucketed write to PIONEER/Artwork/. |
@@ -389,6 +390,7 @@
 | `tests/test_stream_ranges.py` | RFC 7233 Range + HEAD on both stream routes, raw files and the AIFF WAV view alike. |
 | `tests/test_stream_unicode_filename.py` | Regression: GET /api/stream 500 on non-latin-1 filenames. |
 | `tests/test_system_health.py` | Contract tests for ``GET /api/system/health`` -- unauth'd liveness probe. |
+| `tests/test_tag_backups.py` | Tag writes keep an exact copy first, rewrite atomically and respect the size cap. |
 | `tests/test_track_batch_tags.py` | PATCH /api/tracks/batch writes the audio-file tags like the single-track edit. |
 | `tests/test_track_batch_writes.py` | Track edits are all or nothing and name an unknown id (PC test 2026-11-22). |
 | `tests/test_track_delete_routes.py` | Deleting a track (PC test 2026-11-22). |

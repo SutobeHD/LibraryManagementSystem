@@ -570,6 +570,94 @@ def test_restore_refuses_while_rekordbox_runs(tmp_path, monkeypatch):
     assert (tmp_path / "master.db").read_bytes() == b"LIVE"
 
 
+# ── masterPlaylists6.xml + backup families ────────────────────────────────
+
+
+def _library(tmp_path: Path) -> Path:
+    db = tmp_path / "master.db"
+    db.write_bytes(b"DB-v1")
+    (tmp_path / "master.db-wal").write_bytes(b"WAL-v1")
+    (tmp_path / W.PLAYLIST_XML).write_bytes(b"<PLAYLISTS v1/>")
+    return db
+
+
+def test_backup_set_includes_the_playlist_xml(tmp_path):
+    db = _library(tmp_path)
+
+    backups = W.backup_master_db(str(db))
+
+    bases = sorted(Path(b).name.rpartition(".phrasebak-")[0] for b in backups)
+    assert bases == ["master.db", "master.db-wal", W.PLAYLIST_XML]
+    assert len({Path(b).name.rpartition(".phrasebak-")[2] for b in backups}) == 1  # one stamp
+
+
+def test_restore_puts_the_playlist_xml_back_with_the_db(tmp_path, _rekordbox_closed):
+    db = _library(tmp_path)
+    W.backup_master_db(str(db))
+    db.write_bytes(b"DB-v2")
+    (tmp_path / W.PLAYLIST_XML).write_bytes(b"<PLAYLISTS v2 with a new playlist/>")
+
+    assert W.restore_master_db(str(db)) == 3
+    assert db.read_bytes() == b"DB-v1"
+    assert (tmp_path / "master.db-wal").read_bytes() == b"WAL-v1"
+    assert (tmp_path / W.PLAYLIST_XML).read_bytes() == b"<PLAYLISTS v1/>"
+
+
+def test_restore_leaves_an_xml_the_set_does_not_hold(tmp_path, _rekordbox_closed):
+    db = tmp_path / "master.db"
+    db.write_bytes(b"DB-v1")
+    W.backup_master_db(str(db))  # no XML beside the db yet
+    (tmp_path / W.PLAYLIST_XML).write_bytes(b"<PLAYLISTS later/>")
+
+    assert W.restore_master_db(str(db)) == 1
+    assert (tmp_path / W.PLAYLIST_XML).read_bytes() == b"<PLAYLISTS later/>"
+
+
+def test_a_decrypted_copy_never_pulls_in_the_playlist_xml(tmp_path):
+    """The XML belongs to master.db; a copy's set must not carry (and restore) it."""
+    copy = tmp_path / "decrypted.db"
+    copy.write_bytes(b"COPY")
+    (tmp_path / W.PLAYLIST_XML).write_bytes(b"<PLAYLISTS/>")
+
+    backups = W.backup_master_db(str(copy))
+
+    assert [Path(b).name.rpartition(".phrasebak-")[0] for b in backups] == ["decrypted.db"]
+
+
+def test_backup_families_never_mix(tmp_path, _rekordbox_closed):
+    db = _library(tmp_path)
+    merge_set = W.backup_master_db(str(db), marker=".mergebak-")
+    db.write_bytes(b"DB-v2")
+    W.backup_master_db(str(db))  # a newer phrase set
+    db.write_bytes(b"DB-v3")
+
+    assert W.restore_master_db(str(db), marker=".mergebak-") == 3
+    assert db.read_bytes() == b"DB-v1"  # the merge set, not the newer phrase one
+    assert all(".mergebak-" in b for b in merge_set)
+    with pytest.raises(ValueError, match="not a phrase backup file"):
+        W.restore_master_db(str(db), backups=merge_set)  # wrong family marker
+
+
+def test_prune_keeps_the_newest_sets_of_one_family(tmp_path, monkeypatch):
+    db = _library(tmp_path)
+    stamps = iter(range(1, 10))
+
+    class _Ticking(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2026, 11, 25, 1, 2, next(stamps))
+
+    monkeypatch.setattr(W, "datetime", _Ticking)
+    sets = [W.backup_master_db(str(db), marker=".mergebak-") for _ in range(4)]
+    phrase = W.backup_master_db(str(db))
+
+    assert W.prune_backup_sets(str(db), marker=".mergebak-", keep=2) == 6
+    left = {str(p) for p in tmp_path.glob("*.mergebak-*")}
+    assert left == set(sets[2]) | set(sets[3])
+    assert all(Path(b).exists() for b in phrase)  # another family is never touched
+    assert db.read_bytes() == b"DB-v1"
+
+
 # ── structural invariants ─────────────────────────────────────────────────
 
 

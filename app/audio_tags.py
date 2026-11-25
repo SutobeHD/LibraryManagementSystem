@@ -15,6 +15,10 @@ Format coverage:
 
 Failures are non-fatal: if a file is locked, missing, or in an unsupported
 format the function logs and returns False; the DB write still stands.
+
+Every write goes through ``app/tag_backups.py``: the first write to a file keeps an
+exact copy of it in the backup store, and the writer edits a temp copy that is
+``os.replace``d over the original, so a crash mid-save never leaves a damaged file.
 """
 
 from __future__ import annotations
@@ -29,6 +33,8 @@ from types import TracebackType
 from typing import Any
 
 import mutagen
+
+from app import tag_backups
 
 logger = logging.getLogger("AUDIO_TAGS")
 
@@ -144,7 +150,7 @@ def _rating_to_popm(stars: int) -> int:
     return {0: 0, 1: 1, 2: 64, 3: 128, 4: 196, 5: 255}[s]
 
 
-def _write_mp3(path: Path, fields: dict[str, Any], artwork: bytes | None) -> bool:
+def _write_mp3(path: Path, fields: dict[str, Any], artwork: bytes | None, suffix: str) -> bool:
     from mutagen.id3 import (
         APIC,
         COMM,
@@ -206,7 +212,7 @@ def _write_mp3(path: Path, fields: dict[str, Any], artwork: bytes | None) -> boo
         return False
 
 
-def _write_flac(path: Path, fields: dict[str, Any], artwork: bytes | None) -> bool:
+def _write_flac(path: Path, fields: dict[str, Any], artwork: bytes | None, suffix: str) -> bool:
     from mutagen.flac import FLAC, Picture
 
     try:
@@ -245,7 +251,7 @@ def _write_flac(path: Path, fields: dict[str, Any], artwork: bytes | None) -> bo
         return False
 
 
-def _write_mp4(path: Path, fields: dict[str, Any], artwork: bytes | None) -> bool:
+def _write_mp4(path: Path, fields: dict[str, Any], artwork: bytes | None, suffix: str) -> bool:
     from mutagen.mp4 import MP4, MP4Cover
 
     try:
@@ -280,10 +286,13 @@ def _write_mp4(path: Path, fields: dict[str, Any], artwork: bytes | None) -> boo
         return False
 
 
-def _write_ogg(path: Path, fields: dict[str, Any], artwork: bytes | None) -> bool:
-    """Covers .ogg (Vorbis) and .opus (OggOpus). Artwork in Ogg is rare; skipped."""
+def _write_ogg(path: Path, fields: dict[str, Any], artwork: bytes | None, suffix: str) -> bool:
+    """Covers .ogg (Vorbis) and .opus (OggOpus). Artwork in Ogg is rare; skipped.
+
+    ``suffix`` is the real file's: ``path`` is the temp copy the write lands in.
+    """
     try:
-        if path.suffix.lower() == ".opus":
+        if suffix == ".opus":
             from mutagen.oggopus import OggOpus as Ogg
         else:
             from mutagen.oggvorbis import OggVorbis as Ogg
@@ -307,10 +316,12 @@ def _write_ogg(path: Path, fields: dict[str, Any], artwork: bytes | None) -> boo
         return False
 
 
-def _write_aiff_wav(path: Path, fields: dict[str, Any], artwork: bytes | None) -> bool:
-    """AIFF and WAV both store an ID3 chunk; mutagen has dedicated wrappers."""
+def _write_aiff_wav(path: Path, fields: dict[str, Any], artwork: bytes | None, suffix: str) -> bool:
+    """AIFF and WAV both store an ID3 chunk; mutagen has dedicated wrappers.
+
+    ``suffix`` is the real file's: ``path`` is the temp copy the write lands in.
+    """
     try:
-        suffix = path.suffix.lower()
         if suffix == ".wav":
             from mutagen.wave import WAVE as Container
         else:  # .aiff / .aif
@@ -395,12 +406,19 @@ def write_tags(
     path: str | Path,
     updates: dict[str, Any],
     artwork: bytes | None = None,
+    *,
+    backup: bool = True,
 ) -> bool:
     """
     Mirror updates into the audio file's native tag format.
 
     Returns True on success, False on any failure (the DB write should still
-    proceed regardless — file write-back is best-effort).
+    proceed regardless — file write-back is best-effort). On False the file is
+    byte-identical to before: the writer only ever edits a temp copy.
+
+    ``backup`` (default on) keeps an exact copy of the file in the tag-write backup
+    store before the first write to it; no copy, no write. Pass False only for a
+    file the app produced itself moments ago (a fresh download).
     """
     if not updates and not artwork:
         return True
@@ -417,7 +435,7 @@ def write_tags(
         return True
     try:
         with _file_lock(_file_key(p)):
-            return handler(p, fields, artwork)
+            return _write_file(p, handler, fields, artwork, backup)
     except PermissionError as exc:
         # Common on Windows when Rekordbox or another player holds the file.
         logger.warning("Tag write blocked (file in use): %s — %s", path, exc)
@@ -425,6 +443,40 @@ def write_tags(
     except Exception as exc:
         logger.error("Tag write crashed for %s: %s", path, exc, exc_info=True)
         return False
+
+
+def _write_file(
+    p: Path,
+    handler: Any,
+    fields: dict[str, Any],
+    artwork: bytes | None,
+    backup: bool,
+) -> bool:
+    """Backup (first write only), then the handler on a temp copy swapped in atomically."""
+    if not os.access(p, os.W_OK):
+        logger.warning("op=tag_write status=read_only ext=%s", p.suffix.lower())
+        return False
+    entry = None
+    if backup:
+        try:
+            entry = tag_backups.ensure_backup(p)
+        except OSError as exc:
+            logger.warning(
+                "op=tag_backup status=failed ext=%s err=%s — tags not written",
+                p.suffix.lower(),
+                exc.strerror or type(exc).__name__,
+            )
+            return False
+    suffix = p.suffix.lower()
+    ok = tag_backups.atomic_rewrite(p, lambda tmp: handler(tmp, fields, artwork, suffix))
+    if ok and entry is not None:
+        try:
+            tag_backups.record_written(entry, p)
+        except OSError as exc:
+            # The write landed and the copy is intact; only the "this was us" marker is
+            # missing, so the next write takes one extra copy. Not a failed write.
+            logger.warning("op=tag_backup_mark key=%s err=%s", entry.key, exc.strerror)
+    return ok
 
 
 def load_artwork(image_path: str | Path) -> bytes | None:
