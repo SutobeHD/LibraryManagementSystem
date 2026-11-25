@@ -106,6 +106,7 @@ from .audio_analyzer import LIBROSA_AVAILABLE, AudioAnalyzer, fingerprint_pcm_md
 from .config import EXPORT_DIR, LOG_DIR, MUSIC_DIR, TEMP_DIR
 from .database import _STREAMING_PREFIXES, db, db_lock
 from .genre_atlas import get_atlas, library_spelling
+from .library_artwork import COVERS_DIR, ArtworkPathError, resolve_artwork_path
 from .metadata_fixer import schema as fixer_log
 from .phrase_generator import (
     PhraseNotAnalysedError,
@@ -366,8 +367,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 app.mount("/exports", StaticFiles(directory=EXPORT_DIR), name="exports")
 
-# Artwork Mount
-COVERS_DIR = Path(APP_DIR).parent / "app" / "data" / "covers"
+# Artwork Mount (COVERS_DIR: app/library_artwork.py)
 COVERS_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/api/artwork", StaticFiles(directory=COVERS_DIR), name="artwork")
 
@@ -4874,52 +4874,16 @@ def clear_import_tasks():
 async def get_artwork(path: str):
     """
     Serves artwork image from absolute path or Rekordbox relative path.
+
+    Path rules (share / covers jail, image types): `library_artwork.resolve_artwork_path`,
+    shared with the USB export so the stick shows the same cover.
     """
-    if not path:
-        raise HTTPException(404, "No path provided")
-
-    # Try resolving Rekordbox relative paths (e.g. /PIONEER/Artwork/...)
-    p_path = path
-    if path.startswith("/PIONEER/"):
-        app_data = os.environ.get("APPDATA")
-        if app_data:
-            # Rekordbox 6/7 stores artwork in AppData/Roaming/Pioneer/rekordbox/share
-            # The relative path starts with /PIONEER/ which matches inside the share folder.
-            rel = path.lstrip("/")  # Remove leading slash
-            p_path = Path(app_data) / "Pioneer" / "rekordbox" / "share" / rel
-            # logger.debug(f"Resolved PIONEER path: {p_path}")
-        else:
-            logger.warning("APPDATA not found, cannot resolve PIONEER artwork path")
-
-    file_path = Path(p_path).resolve()
-
-    # SECURITY: Directory Jail & Extension Validation
-    ALLOWED_ARTWORK_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif"}
-    if file_path.suffix.lower() not in ALLOWED_ARTWORK_EXTENSIONS:
-        raise HTTPException(status_code=400, detail="Invalid artwork file type")
-
-    # Ensure the path is either in the local covers dir or the Pioneer share dir
-    is_allowed = False
-    if str(file_path).startswith(str(COVERS_DIR.resolve())):
-        is_allowed = True
-    elif os.environ.get("APPDATA"):
-        rb_share_dir = (
-            Path(os.environ.get("APPDATA")) / "Pioneer" / "rekordbox" / "share"
-        ).resolve()
-        if str(file_path).startswith(str(rb_share_dir)):
-            is_allowed = True
-
-    # As a fallback, if not in defined locations, allow only if it's explicitly tracked in the DB as artwork.
-    # Note: we mostly rely on the above checks for safety.
-    if not is_allowed:
-        logger.warning(f"SECURITY: Blocked access to non-artwork path: {file_path}")
-        raise HTTPException(
-            status_code=403, detail="Access denied: path outside allowed artwork directories"
-        )
-
-    if not file_path.exists() or not file_path.is_file():
-        raise HTTPException(404, "Artwork file not found")
-
+    try:
+        file_path = resolve_artwork_path(path)
+    except ArtworkPathError as exc:
+        if exc.status == 403:
+            logger.warning("SECURITY: Blocked access to non-artwork path: %s", path)
+        raise HTTPException(status_code=exc.status, detail=exc.detail) from None
     return FileResponse(file_path)
 
 

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import gc
 import io
+import struct
 from pathlib import Path
 
 import pytest
@@ -179,6 +180,110 @@ def test_an_unchanged_cover_is_not_rewritten(tmp_path: Path, monkeypatch) -> Non
     _sync(tmp_path, stick, tracks)
 
     assert all(path for _id, path in _covers(stick).values())
+
+
+# ---------------------------------------------------------------------------
+# The library's cover (master.db ImagePath) wins over the file's own art
+# ---------------------------------------------------------------------------
+
+
+def _with_library_cover(
+    t: dict, share: Path, color: tuple[int, int, int] | None, rel: str | None = None
+) -> dict:
+    rel = rel or f"/PIONEER/Artwork/0{t['id']}/{t['id']}-uuid/artwork.jpg"
+    if color is not None:
+        f = share / rel.lstrip("/")
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_bytes(_jpeg(color))
+    return dict(t, artwork=rel)
+
+
+@pytest.fixture
+def share(tmp_path: Path, monkeypatch) -> Path:
+    appdata = tmp_path / "appdata"
+    monkeypatch.setenv("APPDATA", str(appdata))
+    return appdata / "Pioneer" / "rekordbox" / "share"
+
+
+def _pdb_artwork(stick: Path) -> tuple[dict[int, str], dict[str, int]]:
+    """export.pdb: artwork id -> path, track title -> artwork id."""
+    from tests.test_onelibrary_track_limit import T_TRACKS, _decode_string, _read_pdb
+
+    tables = _read_pdb(stick / "PIONEER" / "rekordbox" / "export.pdb")
+    art = {
+        struct.unpack_from("<I", row, 0)[0]: _decode_string(row, 4)
+        for rows in tables[0x0D]
+        for row in rows
+    }
+    tracks = {}
+    for rows in tables[T_TRACKS]:
+        for row in rows:
+            offs = struct.unpack_from("<21H", row, 0x5E)
+            tracks[_decode_string(row, offs[17])] = struct.unpack_from("<I", row, 0x1C)[0]
+    return art, tracks
+
+
+def test_the_library_cover_goes_on_the_stick(tmp_path: Path, share: Path) -> None:
+    stick = tmp_path / "stick"
+    stick.mkdir()
+    tracks = [
+        # Rekordbox cover RED, cover.jpg BLUE next to the file: RED on the stick.
+        _with_library_cover(_track(tmp_path, "L0", BLUE), share, RED),
+        # No library cover: cover.jpg as before.
+        dict(_track(tmp_path, "S0", GREEN), artwork=""),
+        # ImagePath set, file gone from share/: cover.jpg as before.
+        _with_library_cover(_track(tmp_path, "M0", BLUE), share, None),
+        # Library cover only.
+        _with_library_cover(_track(tmp_path, "O0", None), share, GREEN),
+    ]
+    _sync(tmp_path, stick, tracks)
+
+    covers = _covers(stick)
+    for title, color in (("L0", RED), ("S0", GREEN), ("M0", BLUE), ("O0", GREEN)):
+        image_id, rel = covers[title]
+        small = stick / rel.lstrip("/")
+        assert _close(_color_of(small.read_bytes()), color), title
+        assert _close(_color_of(small.with_name(f"a{image_id}_m.jpg").read_bytes()), color), title
+
+    # The legacy export.pdb points at the same files under the same ids.
+    art, pdb_tracks = _pdb_artwork(stick)
+    assert art == {image_id: rel for image_id, rel in covers.values()}
+    assert pdb_tracks == {title: image_id for title, (image_id, _rel) in covers.items()}
+
+
+def test_library_cover_resync_rewrites_only_what_changed(
+    tmp_path: Path, share: Path, monkeypatch
+) -> None:
+    stick = tmp_path / "stick"
+    stick.mkdir()
+    tracks = [
+        _with_library_cover(_track(tmp_path, "L0", BLUE), share, RED),
+        _with_library_cover(_track(tmp_path, "L1", BLUE), share, GREEN),
+    ]
+    _sync(tmp_path, stick, tracks)
+    art = stick / "PIONEER" / "Artwork"
+    before = {p: p.stat().st_mtime_ns for p in art.rglob("*.jpg")}
+
+    # The cover of L1 is changed in Rekordbox, L0 stays.
+    (share / tracks[1]["artwork"].lstrip("/")).write_bytes(_jpeg(BLUE))
+    resized: list[int] = []
+    real_resize = usb_artwork._resize_to_jpeg
+
+    def counting(raw, size, quality):
+        resized.append(1)
+        return real_resize(raw, size, quality)
+
+    monkeypatch.setattr(usb_artwork, "_resize_to_jpeg", counting)
+    _sync(tmp_path, stick, tracks)
+
+    covers = _covers(stick)
+    assert _close(_color_of((stick / covers["L0"][1].lstrip("/")).read_bytes()), RED)
+    assert _close(_color_of((stick / covers["L1"][1].lstrip("/")).read_bytes()), BLUE)
+    assert len(resized) == 2  # small + medium of L1 only
+    l0_id = covers["L0"][0]
+    for p, mtime in before.items():
+        if p.name.lstrip("ab").split("_")[0].split(".")[0] == str(l0_id):
+            assert p.stat().st_mtime_ns == mtime, p.name
 
 
 # ---------------------------------------------------------------------------

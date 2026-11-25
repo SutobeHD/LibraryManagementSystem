@@ -51,6 +51,7 @@
 | `app/folder_watcher.py` | FolderWatcher — auto-import audio files from user-configured folders. |
 | `app/genre_atlas.py` | Genre suggestions from the genre-atlas snapshot (read-only, explainable). |
 | `app/import_tracker.py` | Per-file import-progress tracker — gives the frontend a live transparent |
+| `app/library_artwork.py` | Library artwork path -> image file on disk. |
 | `app/library_format_swap.py` | Library-wide audio format conversion engine. |
 | `app/library_source.py` | LibrarySource — uniform abstraction over Live (master.db) and XML modes. |
 | `app/live_database.py` | *(no module docstring)* |
@@ -337,6 +338,7 @@
 | `tests/test_import_dedup.py` | Import dedup — ``/api/library/import-paths``, ``/api/library/scan-folder`` and |
 | `tests/test_import_tracker.py` | Tests for app/import_tracker.py — live import-progress tracker. |
 | `tests/test_library_analysis.py` | Tests for scripts/library_analysis.py on a synthetic atlas and a handful of tracks. |
+| `tests/test_library_artwork.py` | One artwork resolver for the app and the stick (`app/library_artwork.py`). |
 | `tests/test_library_format_swap.py` | Tests for app.library_format_swap. |
 | `tests/test_library_measure_anlz.py` | Tests for scripts/library_measure_anlz.py on synthetic ANLZ bytes. |
 | `tests/test_library_measure_audio.py` | Tests for scripts/library_measure_audio.py: resume key / skip logic, error rows, the summary |
