@@ -1387,7 +1387,8 @@ class ImportManager:
             artwork_path = ""
             try:
                 # Ensure covers dir exists
-                COVERS_DIR = Path(REKORDBOX_ROOT).parent / "app" / "data" / "covers"
+                from .library_artwork import COVERS_DIR
+
                 COVERS_DIR.mkdir(parents=True, exist_ok=True)
 
                 # Each import re-extracts cover art rather than hash-matching against existing
@@ -1426,7 +1427,6 @@ class ImportManager:
                     bg_path = COVERS_DIR / bg_name
                     with open(bg_path, "wb") as f:
                         f.write(art_data)
-                    artwork_path = str(bg_path.relative_to(Path(REKORDBOX_ROOT).parent))
                     # Fix path for frontend: absolute or relative strictly?
                     # Let's use absolute path for internally managed, but relative for portability?
                     # Rekordbox uses absolute. Let's stick to absolute for now to be safe with serving.
