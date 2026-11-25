@@ -55,7 +55,7 @@ def sandbox_root(tmp_path: Path) -> Iterator[Path]:
 def submitted(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     paths: list[str] = []
 
-    def _analyze_track(task_id: str, file_path: str, mode: str = "accuracy") -> dict[str, Any]:
+    def _analyze_track(task_id: str, file_path: str, depth: str = "rekordbox") -> dict[str, Any]:
         paths.append(file_path)
         return {"status": "queued", "task_id": task_id}
 
@@ -131,10 +131,14 @@ _RESULTS: dict[str, dict[str, Any]] = {
 class _PathLeakingWriter:
     """Yields what ``AnalysisDBWriter`` yields: counters merged with the raw result."""
 
-    def analyze_and_save(self, tid: str, force: bool = False) -> dict[str, Any]:
+    def analyze_and_save(
+        self, tid: str, force: bool = False, depth: str = "rekordbox"
+    ) -> dict[str, Any]:
         return dict(_RESULTS[tid])
 
-    def analyze_batch(self, track_ids: list[str], force: bool = False) -> Iterator[dict[str, Any]]:
+    def analyze_batch(
+        self, track_ids: list[str], force: bool = False, depth: str = "rekordbox"
+    ) -> Iterator[dict[str, Any]]:
         for i, tid in enumerate(track_ids):
             yield {"track_id": tid, "index": i + 1, "total": len(track_ids), **_RESULTS[tid]}
 

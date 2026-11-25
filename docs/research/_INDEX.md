@@ -47,6 +47,7 @@ _(none)_
 _(none)_
 
 ### approvalgate ⛔ THE GATE
+- [approvalgate_sound-component-sorting.md](implement/approvalgate_sound-component-sorting.md) — ⛔ **AWAITING /approve** (revision 5.1) — Sort by sound components; user judged plan 4.1 good and asked for more features from the collected data → rework D + E: ≈ 16 more values (kick pitch, off-beat / rolling bass, one-note bass, big drop, longest stretch without the main part, bars after the last drop, …), 3 more kinds (Kick, Groove, Klang gesamt), 4 filters incl. mix partner, ≤ 33 ms extra per track, no new dependency; 8 gate decisions confirmed at defaults 2026-11-22; Plan-Reviewer PASS round 7 (2026-11-22)
 - [approvalgate_recording-booth.md](implement/approvalgate_recording-booth.md) — ⛔ **AWAITING /approve** (re-planned) — DJ-set recorder; **lead model now DDJ-GRV6** (4-channel / STEMS-native / GROOVE CIRCUIT + Sound-Color/Beat-FX + 4 decks) after gate-reject 2026-06-02. Plan re-scoped: GRV6 outline + full control map (stem-ISO/drum/FX), spike 1c extended (EQ + stem-ISO/sound-color/GROOVE-CIRCUIT on-the-wire), 4-deck timeline, 4-channel meters; mockup rebuilt 4-channel GRV6; 16 tasks (3 spikes + 10 core + 3 video); capture unchanged (class-MIDI → `midir`); live track-id unmet (PDL=Export-only) → post-hoc reconcile (2026-06-02)
 
 ### rework

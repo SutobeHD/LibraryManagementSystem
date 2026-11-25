@@ -18,6 +18,7 @@
 | `app/analysis_cache.py` | LibraryManagementSystem -- Analysis Result Cache |
 | `app/analysis_db_writer.py` | LibraryManagementSystem -- Analysis-to-Database Writer |
 | `app/analysis_engine.py` | LibraryManagementSystem -- High-Accuracy Analysis Engine (v2.0) |
+| `app/analysis_extras.py` | Stage-E audio extras E1-E8 (docs/LIBRARY_ANALYSIS_HANDOVER.md §3.5 + §5 tier rule). |
 | `app/analysis_settings.py` | LibraryManagementSystem -- Analysis Settings |
 | `app/anlz_cue_patch.py` | anlz_cue_patch.py — non-destructive memory-cue injection into existing ANLZ files. |
 | `app/anlz_safe.py` | Safe wrapper around `rbox.MasterDb` + `rbox.Anlz` for PQTZ beatgrid loading. |
@@ -111,6 +112,7 @@
 | `frontend/src/audio/dawState/regions.js` | regionsReducer — region create / split / move / delete / resize / clipboard. |
 | `frontend/src/audio/dawState/selection.js` | selectionReducer — region selection set and time-range selection. |
 | `frontend/src/audio/dawState/transport.js` | transportReducer — playhead, BPM, zoom/scroll, snap-grid, edit-mode, project metadata, and audio-source actio… |
+| `frontend/src/components/analysisDepth.js` | Copy for the two depth levels — shared by the Settings cards and the per-run dialog. |
 | `frontend/src/components/artistHub/artistCatalogueApi.js` | artistCatalogueApi — the SoundCloud half of the Artist Hub's HTTP surface. |
 | `frontend/src/components/artistHub/artistDiscoveryApi.js` | artistDiscoveryApi — the discovery + background-sync half of the Artist Hub's HTTP surface. |
 | `frontend/src/components/artistHub/artistHubApi.js` | artistHubApi — the merge + projection half of the Artist Hub's HTTP surface. |
@@ -226,7 +228,7 @@
 | `frontend/src/components/editor/RegionBlock.jsx` | RegionBlock - Visual representation of an audio region on the timeline Displays the waveform, envelope overla… |
 | `frontend/src/components/editor/TimelineCanvas.jsx` | TimelineCanvas - Main editing canvas for the non-destructive audio editor Features: - Zoomable timeline with … |
 | `frontend/src/components/format-swap/ScopeBucketPicker.jsx` | ScopeBucketPicker — 4-bucket scope chooser for the Format Converter. |
-| `frontend/src/components/settings/SettingsAnalysis.jsx` | SettingsAnalysis — Quality preset, ranking filter, library insight thresholds. |
+| `frontend/src/components/settings/SettingsAnalysis.jsx` | SettingsAnalysis — Analysis depth, ranking filter, library insight thresholds. |
 | `frontend/src/components/settings/SettingsAppearance.jsx` | SettingsAppearance — UI theme (skin), waveform band colours, locale picker. |
 | `frontend/src/components/settings/SettingsAudio.jsx` | SettingsAudio — CPAL output device picker (Tauri-only enumeration). |
 | `frontend/src/components/settings/SettingsControls.jsx` | SettingsControls — Shared building blocks for the tabbed Settings panel. |
@@ -281,7 +283,10 @@
 | `tests/test_analysis_api_hygiene.py` | POST /api/audio/analyze sandbox + path-free analyze-batch / analyze-full bodies. |
 | `tests/test_analysis_cache.py` | Tests for app/analysis_cache.py — persistent analysis-result cache. |
 | `tests/test_analysis_db_writer.py` | Unit tests for AnalysisDBWriter — the values it writes into Rekordbox master.db. |
+| `tests/test_analysis_depth_settings.py` | The `analysis_depth` setting ("rekordbox" | "high") and how the analyze routes resolve it. |
 | `tests/test_analysis_edge.py` | Edge-case robustness for the analysis engine entry points. |
+| `tests/test_analysis_engine_depth.py` | run_full_analysis depth switch ("rekordbox" | "high"). |
+| `tests/test_analysis_extras.py` | Tests for app/analysis_extras.py: E1-E8 on synthetic signals, the A1 tier rule and the |
 | `tests/test_analyze_db_routes.py` | POST /api/track/{tid}/analyze-full and POST /api/library/analyze-batch. |
 | `tests/test_anlz_cue_layout.py` | Byte-layout regression tests for the ANLZ cue + VBR tags. |
 | `tests/test_anlz_cue_patch.py` | Round-trip tests for app/anlz_cue_patch.py. |
@@ -332,8 +337,11 @@
 | `tests/test_genre_atlas_routes.py` | Route tests for the genre-atlas hints (app/main.py). |
 | `tests/test_import_dedup.py` | Import dedup — ``/api/library/import-paths``, ``/api/library/scan-folder`` and |
 | `tests/test_import_tracker.py` | Tests for app/import_tracker.py — live import-progress tracker. |
+| `tests/test_library_analysis.py` | Tests for scripts/library_analysis.py on a synthetic atlas and a handful of tracks. |
 | `tests/test_library_artwork.py` | One artwork resolver for the app and the stick (`app/library_artwork.py`). |
 | `tests/test_library_format_swap.py` | Tests for app.library_format_swap. |
+| `tests/test_library_measure_anlz.py` | Tests for scripts/library_measure_anlz.py on synthetic ANLZ bytes. |
+| `tests/test_library_measure_audio.py` | Tests for scripts/library_measure_audio.py: resume key / skip logic, error rows, the summary |
 | `tests/test_library_quality_stats.py` | GET /api/library/quality-stats — lossless/lossy counts by file extension (B16). |
 | `tests/test_library_source.py` | Tests for app/library_source.py — the Live/XML normalization layer. |
 | `tests/test_library_tracks_light.py` | GET /api/library/tracks — the optional ``light`` projection (app/main.py). |
@@ -424,7 +432,89 @@
 | `scripts/dev/rescan_unreadable.py` | Re-scan only the rows marked unreadable in an audio_report.json. |
 | `scripts/dev/safe_format_swap.py` | safe_format_swap.py -- defensive m4a -> AIFF swap for ONE Rekordbox playlist. |
 | `scripts/dev/scan_audio_quality.py` | Scan an audio library with ffprobe, aggregate codec/bitrate/sample-rate. |
+| `scripts/dev/sound_component_research/baseline/bench_hpss.py` | Cost of hpss variants on the middle 120 s (CPU s, process_time) + effect on hpr_mid_db. |
+| `scripts/dev/sound_component_research/baseline/evaluate.py` | Plausibility evaluation of the baseline features (no ground truth). |
+| `scripts/dev/sound_component_research/baseline/explore.py` | *(no module docstring)* |
+| `scripts/dev/sound_component_research/baseline/features.py` | No-new-dependency baseline features for sound components (W2 bass, W4/W5 hats, W6 melody). |
+| `scripts/dev/sound_component_research/baseline/patch2.py` | One-off patch of features.py after the label-free picker tuning (tune_hats.py). |
+| `scripts/dev/sound_component_research/baseline/posthoc.py` | Post-hoc checks on the stored results (no audio access). |
+| `scripts/dev/sound_component_research/baseline/run.py` | Run the baseline features on the sample. |
+| `scripts/dev/sound_component_research/baseline/select_sample.py` | Seeded stratified sample of 40 local tracks + Rekordbox PQTZ beat grids. |
+| `scripts/dev/sound_component_research/baseline/synthetic_truth.py` | Synthetic sanity check for the pickers / classifiers / decay estimators (known truth). |
+| `scripts/dev/sound_component_research/baseline/tune_hats.py` | Label-free tuning of the high-band onset picker. |
+| `scripts/dev/sound_component_research/baseline/w8_compare.py` | W2b cross-check against the app's own whole-track numbers (audio_w8.jsonl, bass.share_60/120). |
+| `scripts/dev/sound_component_research/derived/cost_probe.py` | Marginal cost of the candidate values: (a) everything derived from stored fingerprints, timed on |
+| `scripts/dev/sound_component_research/derived/derive_eval.py` | Which further values can the audio component pass give away for free? |
+| `scripts/dev/sound_component_research/derived/derived_defs.py` | Definitions of the derived values: the stored fingerprints (as the plan stores them) and the |
+| `scripts/dev/sound_component_research/derived/grid_lag_blocks.py` | Grid offset per block of window M (lag + contrast), for the 60 fresh tracks of rework A. |
+| `scripts/dev/sound_component_research/derived/grid_lag_eval.py` | Evaluate grid_lag_blocks.jsonl: repeatability of the grid offset, distribution, contrast as a trust signal. |
+| `scripts/dev/sound_component_research/derived/synth_bassline.py` | Known-truth check of the low-end rhythm and note-movement candidates (no audio files). |
+| `scripts/dev/sound_component_research/derived_structure/derive_confirm.py` | Sensitivity runs on top of derive_features.py: (1) copy agreement on the pairs whose ANLZ |
+| `scripts/dev/sound_component_research/derived_structure/derive_features.py` | Which further per-track features fall out of what the planned structure scan already reads |
+| `scripts/dev/sound_component_research/derived_structure/derive_followup.py` | Follow-up to derive_features.py: grid / cue / status facts for the whole library, a no-audio |
+| `scripts/dev/sound_component_research/derived_structure/mix_partner_joint.py` | Joint copy agreement of intro AND outro bars (mix-partner filter), same code path as derive_features.py. |
+| `scripts/dev/sound_component_research/melody/analyze_melody.py` | Probes 2 + 3 (W8): note events -> 16-step top-voice sequences on the Rekordbox grid -> |
+| `scripts/dev/sound_component_research/melody/analyze_w6.py` | Probe 4 (W6 "how melodic" = lead, not pad): scalar candidates from basic-pitch notes on the |
+| `scripts/dev/sound_component_research/melody/build_pairs.py` | Probe 1 (W8 weak ground truth): original <-> remix / edit pairs from title stems. |
+| `scripts/dev/sound_component_research/melody/build_samples.py` | Sample sets + Rekordbox beat grids + analysis windows for the melody probes. |
+| `scripts/dev/sound_component_research/melody/extract.py` | Probe 2 extraction: 4 x 30 s windows -> htdemucs (GPU, shifts 0, overlap 0.1) -> basic-pitch |
+| `scripts/dev/sound_component_research/melody/fewshot_clap.py` | Probe 5 (W3 mechanism proxy): K-shot classes on CLAP (`laion/clap-htsat-unfused`) window |
+| `scripts/dev/sound_component_research/melody/mcommon.py` | Shared helpers for the melody probes (torch env `tmp/sc-bench/venv`). |
+| `scripts/dev/sound_component_research/melody/time_windows.py` | Probe 6 timing: htdemucs on the whole track vs on 4 x 30 s windows (GPU, shifts 0, overlap 0.1). |
+| `scripts/dev/sound_component_research/models/bench_basicpitch.py` | basic-pitch (ONNX backend, CPU) on the `other` stem 30 s window. |
+| `scripts/dev/sound_component_research/models/bench_clap.py` | LAION-CLAP via transformers: embedding throughput + zero-shot sanity (mix vs `other` stem). |
+| `scripts/dev/sound_component_research/models/bench_demucs.py` | Demucs separation timing. |
+| `scripts/dev/sound_component_research/models/bench_features.py` | Per-stem cheap features after in-memory separation (GPU, default config). |
+| `scripts/dev/sound_component_research/models/bench_pitch.py` | torchcrepe (tiny/full) on the `other` stem, 30 s window, GPU vs CPU. |
+| `scripts/dev/sound_component_research/models/common.py` | Shared helpers for the sc-bench measurement spike. |
+| `scripts/dev/sound_component_research/onnx/bp_dump_windows.py` | Dump the 30 s mix windows (22050 Hz mono) used by the earlier basic-pitch bench, so both envs read identical … |
+| `scripts/dev/sound_component_research/onnx/bp_min.py` | Minimal basic-pitch pre / post-processing without importing `basic_pitch` (no TensorFlow, no pretty_midi). |
+| `scripts/dev/sound_component_research/onnx/bp_probe.py` | basic-pitch nmp.onnx with the minimal pre/post (bp_min) vs the official package output. |
+| `scripts/dev/sound_component_research/onnx/bp_ref_official.py` | Reference: official basic_pitch 0.4.0 predict() (ONNX backend) on the dumped windows. |
+| `scripts/dev/sound_component_research/onnx/clap_dump_48k.py` | Dump the 48 kHz mono mix of the 6 tracks (temporary, tmp/ only) so torch env and onnx env embed identical sam… |
+| `scripts/dev/sound_component_research/onnx/clap_export.py` | Export the CLAP audio tower (+ projection) of laion/clap-htsat-unfused to ONNX and write torch reference |
+| `scripts/dev/sound_component_research/onnx/clap_fe_min.py` | CLAP log-mel features without transformers / torch: mirrors `ClapFeatureExtractor` for |
+| `scripts/dev/sound_component_research/onnx/clap_probe.py` | CLAP audio tower ONNX: feature parity (numpy/librosa vs HF extractor), embedding parity vs torch, speed. |
+| `scripts/dev/sound_component_research/onnx/dml_placement.py` | Count how many graph nodes DirectML takes vs CPU fallback (verbose session log parsed from stderr). |
+| `scripts/dev/sound_component_research/onnx/htd_conv1d_to_2d.py` | DirectML workaround attempt: rewrite every 1-D Conv / ConvTranspose of htdemucs_core.onnx as a 2-D op with a |
+| `scripts/dev/sound_component_research/onnx/htd_debug_outputs.py` | Add intermediate tensors as graph outputs (torch env has `onnx`): python htd_debug_outputs.py <models_dir>. |
+| `scripts/dev/sound_component_research/onnx/htd_dml_bisect.py` | First tensor where DirectML leaves the CPU result (needs htdemucs_core_debug.onnx from htd_debug_outputs.py). |
+| `scripts/dev/sound_component_research/onnx/htd_dml_diag.py` | Why does htdemucs_core.onnx diverge on DirectML? |
+| `scripts/dev/sound_component_research/onnx/htd_export.py` | htdemucs (official demucs 4.1.0 weights from dl.fbaipublicfiles.com) -> ONNX core network. |
+| `scripts/dev/sound_component_research/onnx/melody_e2e.py` | End-to-end melody path on onnxruntime only: separation (`other`) -> basic-pitch on 4 x 30 s windows. |
+| `scripts/dev/sound_component_research/onnx/microbench.py` | Best-case forward time of one ONNX graph: N runs on fixed random input, report min / median (the minimum is r… |
+| `scripts/dev/sound_component_research/onnx/oc_common.py` | Shared helpers for the ONNX probe (B0-1). |
+| `scripts/dev/sound_component_research/onnx/sep_dump_mix.py` | Dump the 44.1 kHz stereo mixes (temporary, tmp/ only) so torch env and onnx env separate identical samples. |
+| `scripts/dev/sound_component_research/onnx/sep_min.py` | Source separation on onnxruntime + numpy / librosa only (no torch): STFT / iSTFT + chunking outside the graph. |
+| `scripts/dev/sound_component_research/onnx/sep_probe.py` | Separation on ONNX: parity vs torch references (SI-SDR) + speed. |
+| `scripts/dev/sound_component_research/onnx/sep_quality.py` | Can licence-clean umxhq replace htdemucs for the melody path? |
+| `scripts/dev/sound_component_research/onnx/summ.py` | Summarise a results JSONL: median of numeric fields grouped by the config keys. |
+| `scripts/dev/sound_component_research/onnx/umx_export.py` | Open-Unmix umxhq: export the four spectrogram models to ONNX (STFT stays outside the graph) and write torch |
+| `scripts/dev/sound_component_research/sections/bench_decode.py` | Decode cost through an ffmpeg subprocess (what the app would use for m4a): whole track vs one |
+| `scripts/dev/sound_component_research/sections/eval_sections.py` | Evaluation of extract.py output: three stabilities per scalar, hat grid shares, hat pattern |
+| `scripts/dev/sound_component_research/sections/extract.py` | Section-aware window measurement for the sound-component rework (hats grid position, pattern |
+| `scripts/dev/sound_component_research/sections/select_fresh.py` | Seeded stratified held-out sample: 60 local tracks with Rekordbox PQTZ grid + PSSI phrases, |
+| `scripts/dev/sound_component_research/sections/synth_kicktail.py` | Synthetic check of the kick-tail measures in extract.bass_block_m (known truth). |
+| `scripts/dev/sound_component_research/similarity/eval_sim.py` | Own-half retrieval of W1 / W5 fingerprint variants built from run_sim.py output. |
+| `scripts/dev/sound_component_research/similarity/run_sim.py` | Raw per-half descriptors for the W1 (bass sound + line) and W5 (hat sound) similarity fingerprints. |
+| `scripts/dev/sound_component_research/similarity/select_extra.py` | Seeded extra set of 10 lossy (mp3 / m4a) tracks with Rekordbox PQTZ grids, same pool rules as |
+| `scripts/dev/sound_component_research/similarity/w1_w5_combos.py` | Final W1 / W5 combinations on top of eval_sim.py (re-runs it silently). |
+| `scripts/dev/sound_component_research/structure/common.py` | W9 structure-similarity prototype: load phrases, build the three representations. |
+| `scripts/dev/sound_component_research/structure/extract_phrases.py` | Read-only: per-phrase PSSI entries for every track -> tmp/sc-struct/phrases.jsonl. |
+| `scripts/dev/sound_component_research/structure/t0_quality.py` | *(no module docstring)* |
+| `scripts/dev/sound_component_research/structure/t2_groups.py` | Task 2 (exact-structure groups), task 6 (sortable-column distributions), extra task-5 counts. |
+| `scripts/dev/sound_component_research/structure/t2b_coarse.py` | Coarser exact-group keys + stability of keys/columns across same-audio copies. |
+| `scripts/dev/sound_component_research/structure/t3_metrics.py` | Task 3: the three metric families, compute cost seed-vs-all and all-pairs. |
+| `scripts/dev/sound_component_research/structure/t4_sanity.py` | Task 4: nearest neighbours for 6 seeds + BPM/genre signal test. |
+| `scripts/dev/sound_component_research/structure/t5_nwtune.py` | NW parameter sensitivity, scored on (a) retrieval of same-audio copies with differing analysis, |
+| `scripts/dev/sound_component_research/structure/t6_binned.py` | Metric (i'): edit distance on the 8-bar (or 4-bar) binned label string = shift-tolerant Hamming. |
+| `scripts/dev/sound_component_research/structure/t7_cluster.py` | Task 7: k-medoids / agglomerative on metric (iii) and (ii)/(i-b); do nameable families emerge? |
+| `scripts/dev/sound_component_research/structure/t8_rules.py` | Rule-based families + alternative drop definition + final column table. |
+| `scripts/dev/sound_component_research/structure/t9_hybrid.py` | Task 9: hybrid structure distance = 0.5 RLE-NW (t3_metrics) + 0.5 binned 8-bar edit distance |
 | `scripts/feature_map.py` | Feature registry plus a live overlay of which branch or worktree touches which feature. |
+| `scripts/library_analysis.py` | Whole-library analysis: which track fields are filled, how the Genre field is used, and how |
+| `scripts/library_measure_anlz.py` | Stage D of docs/LIBRARY_ANALYSIS_HANDOVER.md: read Rekordbox's own ANLZ analysis files. |
+| `scripts/library_measure_audio.py` | Decode-once audio measurement runner: Stage E of docs/LIBRARY_ANALYSIS_HANDOVER.md (§3.5). |
 | `scripts/pipeline_dashboard.py` | Local web dashboard for the research pipeline. |
 | `scripts/pipeline_status.py` | Show the research pipeline state at a glance. |
 | `scripts/print_routine.py` | Extract the deploy-ready prompt from a routine .md file. |

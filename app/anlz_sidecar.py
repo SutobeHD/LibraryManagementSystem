@@ -23,6 +23,8 @@ from typing import Any
 
 from platformdirs import user_cache_dir
 
+from .analysis_cache import DEFAULT_DEPTH
+
 logger = logging.getLogger(__name__)
 
 _APP_DIRNAME = "MusicLibraryManager"
@@ -48,14 +50,17 @@ def legacy_sidecar_dir_for(file_path: Path) -> Path:
 
 
 def write_companion_anlz(
-    file_path: Path, analysis_result: dict[str, Any] | None = None
+    file_path: Path,
+    analysis_result: dict[str, Any] | None = None,
+    depth: str = DEFAULT_DEPTH,
 ) -> Path | None:
     """
     Write DAT/EXT/2EX for file_path into the LMS ANLZ cache. Returns the cache
     directory on success, None on failure. Never writes next to the audio file.
 
-    If analysis_result is None, runs the full analysis pipeline (uses the
-    on-disk cache so re-imports are cheap).
+    If analysis_result is None, runs the full analysis pipeline at ``depth``
+    (uses the on-disk cache so re-imports are cheap; ANLZ needs only the
+    rekordbox level, so the default is right for USB export).
 
     NEVER raises — ANLZ is best-effort. The caller should never fail an
     import just because beatgrid binaries couldn't be written.
@@ -69,7 +74,7 @@ def write_companion_anlz(
         if analysis_result is None:
             from .analysis_engine import run_full_analysis
 
-            analysis_result = run_full_analysis(str(file_path)) or {}
+            analysis_result = run_full_analysis(str(file_path), depth=depth) or {}
             if analysis_result.get("status") != "ok":
                 logger.warning(
                     "anlz_sidecar: analysis returned status=%s for %s",

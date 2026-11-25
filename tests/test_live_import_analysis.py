@@ -431,7 +431,8 @@ def test_import_puts_anlz_in_the_share_in_live_mode_never_next_to_the_audio(
     monkeypatch.setattr("app.audio_tags.read_tags", lambda p: {"title": "T"})
     monkeypatch.setattr(services.SettingsManager, "load", lambda: {"write_tags_to_files": False})
     monkeypatch.setattr(
-        "app.anlz_sidecar.write_companion_anlz", lambda p, r=None: companion.append(p)
+        "app.anlz_sidecar.write_companion_anlz",
+        lambda p, r=None, depth="rekordbox": companion.append(p),
     )
 
     tid, _ = services.ImportManager.process_import(audio, analysis_result=dict(_FULL))

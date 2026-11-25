@@ -388,7 +388,8 @@ def test_fresh_analysis_fallback_never_writes_into_the_music_folder(
 
     monkeypatch.setattr("app.anlz_writer.write_anlz_files", _write)
     monkeypatch.setattr(
-        "app.analysis_engine.run_full_analysis", lambda p: {"status": "ok", "waveform": {}}
+        "app.analysis_engine.run_full_analysis",
+        lambda p, depth="rekordbox": {"status": "ok", "waveform": {}},
     )
     w = _writer(tmp_path)
 
