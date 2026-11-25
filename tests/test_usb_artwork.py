@@ -98,3 +98,100 @@ def test_pillow_is_pinned_and_bundled() -> None:
     assert pins == ["Pillow==13.0.0"]
     spec = (ROOT / "backend.spec").read_text(encoding="utf-8")
     assert "_installed('PIL')" in spec  # the build refuses to run without Pillow
+
+
+# ---------------------------------------------------------------------------
+# Source order: library cover (master.db ImagePath) -> embedded -> sidecar
+# ---------------------------------------------------------------------------
+
+RED, GREEN, BLUE = (220, 20, 20), (20, 200, 20), (20, 20, 220)
+
+
+def _jpeg(color: tuple[int, int, int]) -> bytes:
+    buf = io.BytesIO()
+    Image.new("RGB", (300, 300), color).save(buf, format="JPEG")
+    return buf.getvalue()
+
+
+def _color(path: Path) -> tuple[int, int, int]:
+    img = _decode(path.read_bytes()).convert("RGB")
+    return img.getpixel((img.width // 2, img.height // 2))
+
+
+def _close(a, b, tol: int = 40) -> bool:
+    return all(abs(x - y) <= tol for x, y in zip(a, b, strict=True))
+
+
+@pytest.fixture
+def three_covers(tmp_path: Path) -> tuple[Path, Path]:
+    """An MP3 with an embedded GREEN cover, a BLUE cover.jpg, a RED library cover."""
+    from mutagen.id3 import APIC, ID3
+
+    album = tmp_path / "music" / "Album"
+    album.mkdir(parents=True)
+    audio = album / "track.mp3"
+    audio.write_bytes(b"\xff\xfb" + b"\0" * 64)
+    tags = ID3()
+    tags.add(APIC(encoding=3, mime="image/jpeg", type=3, desc="", data=_jpeg(GREEN)))
+    tags.save(str(audio))
+    (album / "cover.jpg").write_bytes(_jpeg(BLUE))
+    library = tmp_path / "share" / "artwork.jpg"
+    library.parent.mkdir()
+    library.write_bytes(_jpeg(RED))
+    return audio, library
+
+
+def test_the_library_cover_wins(three_covers, tmp_path: Path) -> None:
+    audio, library = three_covers
+    pioneer = tmp_path / "stick" / "PIONEER"
+
+    small, medium = usb_artwork.write_artwork_pair(audio, 1, pioneer, library_image=library)
+
+    assert _close(_color(small), RED) and _close(_color(medium), RED)
+    assert usb_artwork.get_artwork_bytes(audio, library) == library.read_bytes()
+
+
+def test_without_a_library_cover_embedded_then_sidecar(three_covers, tmp_path: Path) -> None:
+    audio, _library = three_covers
+    pioneer = tmp_path / "stick" / "PIONEER"
+
+    small, _medium = usb_artwork.write_artwork_pair(audio, 1, pioneer)
+    assert _close(_color(small), GREEN)
+
+    plain = audio.with_name("plain.mp3")
+    plain.write_bytes(b"\xff\xfb" + b"\0" * 64)
+    small, _medium = usb_artwork.write_artwork_pair(plain, 2, pioneer)
+    assert _close(_color(small), BLUE)
+
+
+def test_an_undecodable_library_cover_falls_through(three_covers, tmp_path: Path) -> None:
+    audio, library = three_covers
+    library.write_bytes(b"not a jpeg")
+    pioneer = tmp_path / "stick" / "PIONEER"
+    manifest: dict[str, str] = {}
+
+    small, _medium = usb_artwork.write_artwork_pair(
+        audio, 1, pioneer, manifest, library_image=library
+    )
+
+    assert _close(_color(small), GREEN)
+    embedded = usb_artwork._extract_embedded(audio)
+    assert embedded and manifest == {"1": usb_artwork.source_digest(embedded)}
+
+
+def test_a_matching_library_cover_is_not_reencoded(
+    three_covers, tmp_path: Path, monkeypatch
+) -> None:
+    audio, library = three_covers
+    pioneer = tmp_path / "stick" / "PIONEER"
+    manifest: dict[str, str] = {}
+    usb_artwork.write_artwork_pair(audio, 1, pioneer, manifest, library_image=library)
+
+    def boom(*_a, **_k):
+        raise AssertionError("unchanged library cover re-read from the audio file or re-encoded")
+
+    monkeypatch.setattr(usb_artwork, "_resize_to_jpeg", boom)
+    monkeypatch.setattr(usb_artwork, "_extract_embedded", boom)
+    monkeypatch.setattr(usb_artwork, "_extract_sidecar", boom)
+
+    assert usb_artwork.write_artwork_pair(audio, 1, pioneer, manifest, library_image=library)

@@ -12,7 +12,10 @@ Broad permission to act locally. `.claude/settings.json` allowlist reflects this
 - `git checkout -b`, `git switch -c` (new branches).
 - `gh pr/issue view`, `gh pr list`, `gh run list` — read-only GitHub queries.
 - **`gh pr create`** — open the PR as soon as a branch is pushed and its work is done. Don't ask first (user decision 2026-11-22). Stacked branch → base it on its parent branch.
-- **Merge on the user's explicit instruction** — `git merge`, `git rebase main`/`origin/*`, `git cherry-pick`, and `gh pr merge` (incl. `routine/*` PRs) run without a confirm prompt **when the user asked for the merge**. Don't merge proactively or "to be helpful" — only when instructed. Force-push stays denied, so a rebase you can't fast-forward still can't be pushed.
+- **Merge autonomously** — `git merge`, `git rebase main`/`origin/*`, `git cherry-pick`, `gh pr merge` (incl. `routine/*` PRs) run without asking (standing user permission 2026-11-25: "das darfst du mittlerweile selber"). Merge a finished PR yourself once its CI is green and the change is verified, then delete its branch. Never end a turn with "Soll ich mergen?" / "Soll ich einen PR öffnen?" — do it and report the link.
+  - Before merging: CI green on the current `main` base (main moved and touches the same files → update the branch, wait for CI again); the change's own tests pass; review findings fixed.
+  - Still check with the user first: another session's in-flight PR/branch (recent commits or a live worktree — it's their work, coordinate), Dependabot / dependency-bump PRs (version bump = security decision, see "Confirm first"), red CI.
+  - Force-push stays denied, so a rebase you can't fast-forward still can't be pushed.
 - **Advance research-pipeline docs in a work-state** (draft / explore / plan / implement) — follow the stage logic in `docs/research/routines/`. Stop at every `*gate_` — those are user-only. Run `/pipeline` to see state.
 
 ## Branch & scope discipline — confirm at task start
@@ -29,7 +32,7 @@ Repo culture is **maximum AI autonomy + minimum manual steps**. When you spot a 
 - `git push --force` (never to `main`). Plain `git push` is auto-fired by hook — see `commit-and-git.md`.
 - Plain `git pull` / `git pull origin` (non-ff). `git pull --ff-only` is auto-allowed; a non-ff pull rewrites local history on a drifted base → needs sign-off.
 - `git reset --hard`, `git clean -fd`, history rewrites. (Branch deletion: `git branch -d` merged-branch cleanup after a PR merge is autonomous; `-D` force-delete is deny-listed.)
-- `gh pr close`, `gh issue close`. (`gh pr create` is autonomous; `gh pr merge` on explicit instruction — see "Just do these".)
+- `gh pr close`, `gh issue close`. (`gh pr create` and `gh pr merge` are autonomous — see "Just do these".)
 - `npm/pip/cargo` install of new dep — security decision.
 - Version bumps in `requirements.txt`, `Cargo.toml`, `package.json` `dependencies`.
 - Write to `.env.*` variants not covered by the deny list. (`./.env` / `./.env.local` are read- **and** write-denied in settings.json — hand the user a paste-ready block instead, see troubleshooting #13. `.env.example` is freely editable.)

@@ -210,27 +210,13 @@ class RekordboxXML:
             if rating is not None:
                 track.set("Rating", str(rating))
 
-            # 1. Beatgrid (TEMPO Tags)
-            # Rekordbox XML uses <TEMPO Inizio="..." Bpm="..." Metro="..." Battito="..." />
-            # Support for Dynamic Grids: Use tempoAnchors if available, otherwise fallback to beatGrid
-            tempo_anchors = data.get("tempoAnchors")
-            if tempo_anchors:
-                # DYNAMIC GRID: Export the structural tempo shifts
-                for anchor in tempo_anchors:
-                    tempo = ET.SubElement(track, "TEMPO")
-                    tempo.set("Inizio", str(anchor["time"]))
-                    tempo.set("Bpm", str(anchor["bpm"]))
-                    tempo.set("Metro", anchor.get("metro", "4/4"))
-                    tempo.set("Battito", str(anchor.get("beat", 1)))
-            else:
-                # STATIC GRID (Fallback): Export the standard beat markers
-                beat_grid = data.get("beatGrid") or []
-                for beat in beat_grid:
-                    tempo = ET.SubElement(track, "TEMPO")
-                    tempo.set("Inizio", str(beat["time"]))
-                    tempo.set("Bpm", str(beat["bpm"]))
-                    tempo.set("Metro", beat.get("metro", "4/4"))
-                    tempo.set("Battito", str(beat.get("beat", 1)))
+            # 1. Beatgrid: one TEMPO per beat, so the first Inizio is the first beat.
+            for beat in data.get("beatGrid") or []:
+                tempo = ET.SubElement(track, "TEMPO")
+                tempo.set("Inizio", str(beat["time"]))
+                tempo.set("Bpm", str(beat["bpm"]))
+                tempo.set("Metro", beat.get("metro", "4/4"))
+                tempo.set("Battito", str(beat.get("beat", 1)))
 
             # 2. Cues & Markers (POSITION_MARK Tags)
             # Rekordbox XML POSITION_MARK attributes:

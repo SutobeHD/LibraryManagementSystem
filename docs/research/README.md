@@ -116,7 +116,7 @@ The pipeline runs **fully autonomously** from `drafting_` to `approvalgate_` —
 
 User runs `/approve <slug>` or `/reject <slug> "<reason>"`. After `/approve`, the build runs autonomously — **nothing is re-researched**, the Task Queue is the fixed scope.
 
-**Merge is a separate, non-gate step.** When `research-implement` opens a `routine/*` PR, you test the branch locally and merge it yourself. Routines **never** merge or rebase to `main`. This is landing finished, already-approved work — not a decision point.
+**Merge is a separate, non-gate step.** When `research-implement` opens a `routine/*` PR, the interactive agent tests the branch and merges it once CI is green (the user may too). Routines **never** merge or rebase to `main`. This is landing finished, already-approved work — not a decision point.
 
 ---
 
@@ -174,7 +174,7 @@ Routines may write code — **only** in `inprogress_`, **only** on `routine/*` b
 3. **Small commits** — 1 task = 1 feature = 1 PR. Atomic Conventional Commits (`commit-and-git.md`). Clean error-tracking.
 4. **Test on branch** — push branch → `gh pr create` vs `main`. CI (`ci.yml`) runs automatically on PRs: `pytest` + `cargo test` + `npm build` are blocking.
 5. **Agent review** — review-agent verifies the task vs the plan spec. CI green **and** review pass → PR "ready".
-6. **Merge (user)** — user tests the ready branch locally, then merges it. Routines never merge/rebase to `main`. (Not a gate — the decision was the Approval Gate; this is just landing finished work.)
+6. **Merge (interactive agent)** — the agent tests the ready branch, merges it once CI is green (the user may too). Routines never merge/rebase to `main`. (Not a gate — the decision was the Approval Gate; this is just landing finished work.)
 7. **Failure path** — CI red or review fail → task stays unchecked in the queue, branch stays open with a diagnosis note, next run fixes it.
 
 ---

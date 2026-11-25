@@ -19,6 +19,31 @@
     untouched instead of a half-written file.
   - Changed: the audio stream reopens the file for every 1 MiB chunk, so a
     playing track no longer holds it open and blocks the tag write on Windows.
+- Rekordbox XML export:
+  - Added: right-click a playlist, smart playlist or folder -> "Export as
+    Rekordbox XML" writes `exports/<name>.xml` (a folder with its whole
+    subtree). Settings > Export gained an "XML export scope" picker, default
+    "Whole library". The toast reports the exported track count and
+    how many streaming tracks were skipped.
+  - Fixed: exporting the whole library (5041 tracks, 265 MB) took 12-20 s
+    and hit the 10 s request timeout, so the toast said "Export failed" while
+    the file was still being written. The export request now waits up to
+    5 minutes.
+  - Fixed: the playlist right-click menu could run up to 55 px past the
+    bottom of the window; it is now clamped by its measured size.
+- USB covers:
+  - Fixed: the stick got its covers from the audio file's embedded tags, else
+    a `cover.jpg` / `folder.jpg` next to it, not from the library. It now takes
+    the cover Rekordbox and the app show (master.db ImagePath, same resolver as
+    `GET /api/artwork`) and uses embedded, then sidecar art only for tracks the
+    library has no cover for. On a copy of the real library (4909 local
+    tracks) the old order put another image than the library's on 899 tracks
+    (all from a folder cover) and none on 39 that have one. A 40-track export
+    went from 8 of 29 library covers right to 29 of 29; `export.pdb` carries
+    the same artwork rows. A re-sync leaves unchanged covers alone.
+  - Changed: `/api/artwork` checks its folder jail with `Path.is_relative_to`
+    instead of a string prefix, so a sibling folder like `share_evil` no
+    longer passes.
 - Beat grid (MP3):
   - Fixed: MP3 beat grids sat about 25 ms away from Rekordbox's. The grid was
     shifted by a fixed 22.5 ms because the LAME header was never actually read.
