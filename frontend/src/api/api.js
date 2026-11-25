@@ -448,6 +448,16 @@ export function fetchLibraryTracks(config = {}) {
     });
 }
 
+/**
+ * Rekordbox beat grid of one track, `[{ time (s), bpm, beat }]` — a saved
+ * editor grid wins over the library's. `[]` when the track has none. The
+ * editors load it per track because the light list leaves `beatGrid` out.
+ */
+export async function fetchTrackBeatGrid(trackId, config = {}) {
+    const res = await api.get(`/api/track/${encodeURIComponent(trackId)}/beatgrid`, config);
+    return Array.isArray(res.data) ? res.data : [];
+}
+
 // ─── Rekordbox XML export ─────────────────────────────────────────────────────
 
 // The route answers 400 for these and for control characters instead of
