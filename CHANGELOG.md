@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+- Import covers:
+  - Fixed: the cover the import extracts from a file was saved to
+    `%APPDATA%/Pioneer/app/data/covers`, a folder `GET /api/artwork` and the
+    USB export refuse, so an imported track showed no cover (403) and the stick
+    got the embedded image. Covers now go to
+    `%APPDATA%/MusicLibraryManager/covers`, which the import, `/api/artwork`
+    and the USB export share (not the code tree: in the installed app that is a
+    temp folder deleted on exit). Covers already in the old folders stay
+    readable. Importing an MP3 and a FLAC into a copy of the real library:
+    before 403 for both, after 200 with the embedded bytes and the stick picks
+    the library cover.
+
 - USB covers:
   - Fixed: the stick got its covers from the audio file's embedded tags, else
     a `cover.jpg` / `folder.jpg` next to it, not from the library. It now takes
