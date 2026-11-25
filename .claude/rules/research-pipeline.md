@@ -8,7 +8,7 @@
 2. No existing doc → `/research-new <slug>` scaffolds `docs/research/research/idea_<slug>.md` from `_TEMPLATE.md`. User fills `## Original Idea` (1–3 sentences) — the only manual writing the pipeline needs.
 3. State chain (each `git mv` = + `## Lifecycle` line + `_INDEX.md` update):
    `idea_` → `drafting_` → `exploring_` → `evaluated_` → `draftplan_` → `review_` → `approvalgate_`⛔ → `accepted_` → `inprogress_` → `archived/implemented_`
-   Everything `drafting_` → `review_` runs **autonomously** — verification agents gate each hop, no user stop. The **single** user gate is `approvalgate_` (idea summary + mockup + change list). After `/approve` the build runs autonomously to PRs; you test the `routine/*` branch locally and merge it yourself.
+   Everything `drafting_` → `review_` runs **autonomously** — verification agents gate each hop, no user stop. The **single** user gate is `approvalgate_` (idea summary + mockup + change list). After `/approve` the build runs autonomously to PRs; the interactive agent tests the `routine/*` branch and merges it (the user may too).
 4. **Skip pipeline for:** one-off bug fixes, single-file refactors, plain questions, doc edits.
 
 Full stage/prefix cheat-sheet + 12 routines + branch flow: `docs/research/README.md`.
@@ -38,16 +38,16 @@ Every work routine spawns specialist sub-agents (Scout / Prior-Art / Risk-Surfac
 
 ## The one gate — single user sign-off point
 
-Routines advance **every** work-state autonomously (verification agents gate each hop). The user is asked **once**, at `approvalgate_`, and then again only to merge.
+Routines advance **every** work-state autonomously (verification agents gate each hop). The user is asked **once**, at `approvalgate_`. Merging is done by the interactive agent without asking.
 
 | Gate | State | User action |
 |---|---|---|
 | **Approval** | `approvalgate_` | `/approve` (→ `accepted_`) or `/reject "<reason>"` (→ `rework_`) — read the `## Approval Summary` (idea in plain words + change list) + `## Mockup`, then yes/no |
-| Merge | open PR | land the finished `routine/*` PR — **not a research gate**, just shipping. The user can merge it, or instruct the interactive agent to (`gh pr merge`). Test first when practical. |
+| Merge | open PR | land the finished `routine/*` PR — **not a research gate**, just shipping. The interactive agent merges it without asking once CI is green (`gh pr merge`); the user may too. Test first when practical. |
 
 **Only the user passes the Approval Gate.** A routine reaching `approvalgate_` stops there. **Never** auto-advance it — that single sign-off is user-only.
 
-**Merging is not user-only.** The interactive agent may merge a finished `routine/*` PR (or any branch) **on the user's instruction** — `gh pr merge` is autonomous for it. What stays forbidden: the **remote routines** (claude.ai/code cron) never merge or rebase to `main` — they only open PRs and stop. Headless self-merge without human-in-the-loop is the line; an interactive merge the user asked for is not.
+**Merging is not user-only.** The interactive agent merges a finished, CI-green `routine/*` PR (or any branch) **without asking** — standing user permission 2026-11-25. What stays forbidden: the **remote routines** (claude.ai/code cron) never merge or rebase to `main` — they only open PRs and stop. Headless self-merge by a cron routine is the line; a merge by the interactive agent in a session the user runs is not.
 
 The earlier idea/mid-research/plan checkpoints (old GATE A/B/C) are gone as user stops — verification agents replace them: Idea-Verifier (drafting), Adversarial + Citation + Research-Verifier (exploring), Plan-Reviewer (review). Everything the user needs to decide is bundled into the Approval Summary + Mockup so the single yes/no is fully informed and **nothing is re-researched after `/approve`**.
 
@@ -57,7 +57,7 @@ The old "routines are docs-only" rule is relaxed. `research-implement` may write
 - in `inprogress_` state,
 - on `routine/<slug>-task-<N>` branches — **never `main`**,
 - Task Queue items approved at the Approval Gate — no freelancing, no new research,
-- 1 task = 1 small PR; CI + a review-agent gate it; the user — or the interactive agent on the user's instruction — tests locally + merges. (The remote routine itself never merges.)
+- 1 task = 1 small PR; CI + a review-agent gate it; the interactive agent (or the user) tests + merges. (The remote routine itself never merges.)
 
 `research-draft` / `research-explore` / `research-plan` stay docs-only. No routine touches `app/`, `frontend/`, `src-tauri/`, `tests/` outside an `inprogress_` doc's approved Task Queue.
 
