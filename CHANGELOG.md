@@ -31,6 +31,15 @@
     5 minutes.
   - Fixed: the playlist right-click menu could run up to 55 px past the
     bottom of the window; it is now clamped by its measured size.
+  - Fixed: an export started in the first ~30 s after the live library loaded
+    (or the mode switched) wrote every track without beat grid and reported
+    success: the grids come from a background loader that was still running.
+    On a copy of the real library (5041 tracks) the whole-library export at
+    t=0 had 4929 of 4929 tracks without TEMPO (2.2 MB instead of 265 MB). The
+    export now waits for the loader (up to 90 s) and writes 265 MB with TEMPO
+    on every track that has a grid; if the grids are still not there it
+    answers 503 "Beat grids are still loading" and writes no file. The USB
+    export was not affected: it copies the ANLZ files themselves.
 - USB covers:
   - Fixed: the stick got its covers from the audio file's embedded tags, else
     a `cover.jpg` / `folder.jpg` next to it, not from the library. It now takes
