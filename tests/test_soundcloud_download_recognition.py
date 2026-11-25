@@ -63,7 +63,9 @@ def written(monkeypatch) -> list[dict[str, Any]]:
 
     calls: list[dict[str, Any]] = []
 
-    def fake_write(path, updates, artwork=None):
+    def fake_write(path, updates, artwork=None, *, backup=True):
+        # A fresh download is the app's own file: no backup copy for it.
+        assert backup is False
         calls.append(dict(updates))
         return True
 

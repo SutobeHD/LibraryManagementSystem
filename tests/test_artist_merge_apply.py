@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Any, ClassVar
 
 import pytest
@@ -656,3 +657,131 @@ def test_apply_refuses_a_bare_artist_name_where_a_group_id_belongs(lock) -> None
 def test_tag_updates_only_ever_carries_the_allowlisted_field() -> None:
     assert merge._tag_updates("X") == {merge.TAG_FIELD_ARTIST: "X"}
     assert merge.TAG_FIELD_ARTIST == "Artist", "'ArtistName' is a silent no-op in rbox"
+
+
+# ------------------------------------------------- master.db snapshot (track-write-safety)
+
+
+def _live_library(db: FakeFacade, tmp_path: Path) -> Path:
+    """Give the fake a live ``master.db`` + ``-wal`` + ``masterPlaylists6.xml`` on disk."""
+    rb = tmp_path / "rekordbox"
+    rb.mkdir()
+    (rb / "master.db").write_bytes(b"DB-before")
+    (rb / "master.db-wal").write_bytes(b"WAL-before")
+    (rb / "masterPlaylists6.xml").write_bytes(b"<PLAYLISTS before/>")
+    db.mode = "live"  # type: ignore[attr-defined]
+    db.live_db_path = rb / "master.db"  # type: ignore[attr-defined]
+    return rb
+
+
+def _members(backups: tuple[str, ...]) -> list[str]:
+    return sorted(Path(b).name.rpartition(merge.LIBRARY_BACKUP_MARKER)[0] for b in backups)
+
+
+def _snapshots(rb: Path) -> int:
+    return len(list(rb.glob(f"*{merge.LIBRARY_BACKUP_MARKER}*")))
+
+
+def test_apply_snapshots_db_and_playlist_xml_before_the_first_write(
+    lock, tmp_path, monkeypatch
+) -> None:
+    from app import phrase_db_writer
+
+    db = _facade(lock, _rows(3))
+    rb = _live_library(db, tmp_path)
+    seen_at_write: list[int] = []
+    real_update = db.update_content
+
+    def _update(item: FakeContent) -> bool:
+        seen_at_write.append(_snapshots(rb))
+        return real_update(item)
+
+    db.update_content = _update  # type: ignore[method-assign]
+
+    result = merge.apply(db, [*VARIANTS, CANONICAL], CANONICAL)
+
+    assert _members(result.library_backup) == ["master.db", "master.db-wal", "masterPlaylists6.xml"]
+    assert seen_at_write and set(seen_at_write) == {3}  # the set existed before every write
+    note = json.loads(fixer_log.get_run(result.run_id)["note"])
+    names = sorted(Path(b).name for b in result.library_backup)
+    assert sorted(note["library_backup"]) == names
+    assert sorted(result.as_dict()["library_backup"]) == names
+
+    # The set restores db and playlist XML together.
+    (rb / "master.db").write_bytes(b"DB-after")
+    (rb / "masterPlaylists6.xml").write_bytes(b"<PLAYLISTS after/>")
+    monkeypatch.setattr(phrase_db_writer, "_rekordbox_running", lambda: False)
+    restored = phrase_db_writer.restore_master_db(
+        str(rb / "master.db"),
+        backups=list(result.library_backup),
+        marker=merge.LIBRARY_BACKUP_MARKER,
+    )
+    assert restored == 3
+    assert (rb / "master.db").read_bytes() == b"DB-before"
+    assert (rb / "masterPlaylists6.xml").read_bytes() == b"<PLAYLISTS before/>"
+
+
+def test_snapshot_comes_before_the_canonical_artist_is_created(lock, tmp_path) -> None:
+    db = _facade(lock, [("t0", VARIANTS[0]), ("t1", VARIANTS[1])])  # no canonical row yet
+    rb = _live_library(db, tmp_path)
+    real_create = db.create_artist
+    seen: list[int] = []
+
+    def _create(name: str) -> FakeArtist:
+        seen.append(_snapshots(rb))
+        return real_create(name)
+
+    db.create_artist = _create  # type: ignore[method-assign]
+
+    merge.apply(db, [*VARIANTS, CANONICAL], CANONICAL)
+
+    assert seen == [3]
+
+
+def test_a_failed_snapshot_refuses_the_merge_before_any_write(lock, tmp_path, monkeypatch) -> None:
+    from app import phrase_db_writer
+
+    db = _facade(lock, [("t0", VARIANTS[0]), ("t1", VARIANTS[1])])
+    _live_library(db, tmp_path)
+
+    def _disk_full(path: str, *, marker: str = "") -> list[str]:
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(phrase_db_writer, "backup_master_db", _disk_full)
+
+    with pytest.raises(merge.MergeError, match=r"could not back up master.db"):
+        merge.apply(db, [*VARIANTS, CANONICAL], CANONICAL)
+    assert db.update_content_calls == []
+    assert db.created_artists == []
+    assert fixer_log.list_runs() == []
+
+
+def test_revert_takes_its_own_snapshot(lock, tmp_path) -> None:
+    db = _facade(lock, _rows(2))
+    _live_library(db, tmp_path)
+    applied = merge.apply(db, [*VARIANTS, CANONICAL], CANONICAL)
+
+    reverted = merge.revert(db, applied.run_id)
+
+    assert _members(reverted.library_backup) == _members(applied.library_backup)
+    assert set(reverted.library_backup).isdisjoint(applied.library_backup)
+
+
+def test_merge_keeps_only_the_newest_snapshot_sets(lock, tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(merge, "LIBRARY_BACKUP_KEEP", 2)
+    db = _facade(lock, _rows(2))
+    rb = _live_library(db, tmp_path)
+    last: tuple[str, ...] = ()
+    for _ in range(3):
+        applied = merge.apply(db, [*VARIANTS, CANONICAL], CANONICAL)
+        last = merge.revert(db, applied.run_id).library_backup
+
+    left = {str(p) for p in rb.glob(f"*{merge.LIBRARY_BACKUP_MARKER}*")}
+    assert len(left) == 2 * 3  # two sets of db + wal + xml
+    assert set(last) <= left
+
+
+def test_a_fake_backend_takes_no_snapshot(lock) -> None:
+    db = _facade(lock, _rows(2))  # no mode / live_db_path: XML mode or a test fake
+
+    assert merge.apply(db, [*VARIANTS, CANONICAL], CANONICAL).library_backup == ()
