@@ -6,11 +6,12 @@ one of 4719 tracks loaded zero cues with only a single ERROR line to show
 for it. The fallback reads Rekordbox's own per-track JSON mirror
 (djmdContentCue) instead, which recovers 852 cues across 746 tracks.
 
-Also pins the Num convention. `djmdCue.Kind` counts 0 = memory cue,
-1..N = hot cue slot, while POSITION_MARK (xml_generator.py:56) and the
-timeline (TimelineCanvas.jsx:416) read -1 = memory cue, 0-7 = hot cue
-A-H. Passing Kind through as Num would label every memory cue "Hot Cue A"
-and shift A-H by one at USB/XML export.
+Also pins the Num convention. `djmdCue.Kind` counts 0 = memory cue and
+1, 2, 3, 5, 6, 7, 8, 9 = hot cues A-H (no 4: a real track with all eight hot
+cues carries exactly those), while POSITION_MARK (xml_generator.py) and the
+timeline (TimelineCanvas.jsx) read -1 = memory cue, 0-7 = hot cue A-H.
+Passing Kind through as Num would label every memory cue "Hot Cue A"; Kind - 1
+put D-G one pad late and H on a ninth pad.
 """
 
 from __future__ import annotations
@@ -195,10 +196,10 @@ def test_fallback_warns_that_it_may_under_report(caplog):
 
 @pytest.mark.parametrize(
     ("kind", "expected_num"),
-    [(0, -1), (1, 0), (2, 1), (8, 7), (9, 8)],
+    [(0, -1), (1, 0), (2, 1), (3, 2), (5, 3), (6, 4), (8, 6), (9, 7), (4, -1), (10, -1)],
 )
 def test_kind_maps_to_the_position_mark_num_convention(kind, expected_num):
-    """Kind 0 is a memory cue (-1); hot slot N is Num N-1, i.e. A-H."""
+    """Kind 0 is a memory cue (-1); Kinds 1-3, 5-9 are A-H; any other Kind stays a memory cue."""
     inst = _db(
         FakeDb(cues_raises=True, content_cues=[FakeContentCueRow("100", [_entry(kind=kind)])])
     )

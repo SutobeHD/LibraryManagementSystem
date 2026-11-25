@@ -4570,16 +4570,29 @@ def rbx_export(r: RbxSyncReq) -> dict[str, Any]:
 
 @app.post("/api/rekordbox/import", dependencies=[Depends(require_session)])
 async def rbx_import(r: RbxImportReq):
-    """Imports tracks and metadata from a Rekordbox XML file."""
+    """Add/update library tracks from a Rekordbox XML file, matched by path.
+
+    ``status`` is ``success`` only without failed tracks, ``partial`` when some failed,
+    ``error`` when all did; ``details.errors`` names each failed track. It said success
+    for an import that changed nothing and failed every track.
+    """
     await asyncio.to_thread(_reject_while_rekordbox_runs, "importing tracks")
     try:
         if not os.path.exists(r.xml_path):
             raise HTTPException(404, "XML file not found")
 
         results = RekordboxBridge.import_library(r.xml_path)
+        failed = len(results["errors"])
+        done = results["added"] + results["updated"] + results["unchanged"]
+        message = (
+            f"Import complete: {results['added']} added, {results['updated']} updated, "
+            f"{results['unchanged']} unchanged"
+        )
+        if failed:
+            message += f", {failed} failed (first: {results['errors'][0]})"
         return {
-            "status": "success",
-            "message": f"Import complete: {results['added']} added, {results['updated']} updated.",
+            "status": "success" if not failed else ("partial" if done else "error"),
+            "message": message + ".",
             "details": results,
         }
     except HTTPException:

@@ -16,7 +16,7 @@ tested = "2026-11-22"
 desc = "<audio>-Player: Play/Pause/Volume, Drag-Seek, amber Mirror-Scrubber."
 paths = ["frontend/src/components/Player.jsx", "frontend/src/components/shared/seededWaveform.js"]
 depends_on = ["audio-stream-route"]
-todo = ["Abspielen in WebView2 (Tauri) nicht geprüft"]
+todo = ["Abspielen in WebView2 (Tauri) nicht geprüft", "Kein onPause/onPlay am <audio>: pausiert der Browser das Element selbst, zeigt der Knopf weiter 'spielt' - 2026-11-25 einmal nach Sprung im versteckten Browser-Pane gesehen, danach nicht reproduzierbar"]
 notes = "PC-Test 2026-11-22 (Kopie der Library, main f3ce85d): MP3/AIFF/FLAC/M4A/WAV spielen im Browser; Pause, Sprung per Waveform, Lautstärke. Scrubber-Waveform ist eine seeded Pseudo-Kurve, keine echte Analyse."
 
 [[feature]]
@@ -24,12 +24,13 @@ id = "audio-stream-route"
 group = "Playback"
 name = "Audio-Streaming-Route"
 status = "shipped"
-test = "testen"
+test = "getestet"
+tested = "2026-11-25"
 desc = "Range-Request-Streaming, sandboxed via validate_audio_path, MIME pro Endung; AIFF geht als on-the-fly-WAV raus (Chromium/WebView2 dekodiert kein AIFF)."
 paths = ["app/playable_audio.py", "tests/test_playable_audio.py", "tests/test_stream_unicode_filename.py", "tests/test_stream_ranges.py"]
 routes = ["/api/stream", "/api/audio/stream"]
 depends_on = ["audio-path-sandbox"]
-notes = "Fix 2026-11-23 (fix/api-route-hygiene, am PC noch nicht geprüft): beide Routen teilen einen RFC-7233-Range-Pfad (main.py _byte_range_response) - Suffix bytes=-n liefert das Ende, Multi-Range/kaputter Header -> 200 ganze Datei, unerfüllbar -> 416 bytes */size; /api/audio/stream liefert 206 statt FileResponse-200, flac=audio/flac, m4a=audio/mp4; HEAD auf beiden Routen. PC-Test 2026-11-22: /api/stream Range 206 korrekt für mp3/flac/m4a/wav/aiff + Nicht-ASCII, AIFF kommt als RIFF/WAVE und ist seekbar (B10); Sperren 403/400/404 korrekt. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): ok."
+notes = "PC-Test 2026-11-25 (main a92a469, Library-Kopie, tmp/retest01/stream_test.py): 146/146 - beide Routen, je mp3/flac/m4a/wav/aiff + Nicht-ASCII: HEAD-Länge, MIME, Bereich Anfang/Mitte/Suffix/offen byte-gleich zur Datei, Suffix über Dateigröße = ganze Datei, Multi-Range/kaputt/fremde Einheit/umgekehrt -> 200, unerfüllbar -> 416 bytes */size, HEAD mit Range 206 ohne Body; AIFF: RIFF/WAVE, 4 Teilbereiche = ganze Datei, PCM sample-gleich zur AIFF; Sperren außerhalb/.. /.txt/fehlt -> 403/400/400/404. Mini-Player: AIFF spielt über /api/stream, 3 Sprünge (65/27/88 %) spielen ab der Zielstelle weiter. Fix 2026-11-23 (fix/api-route-hygiene): beide Routen teilen einen RFC-7233-Range-Pfad (main.py _byte_range_response) - Suffix bytes=-n liefert das Ende, Multi-Range/kaputter Header -> 200 ganze Datei, unerfüllbar -> 416 bytes */size; /api/audio/stream liefert 206 statt FileResponse-200, flac=audio/flac, m4a=audio/mp4; HEAD auf beiden Routen. PC-Test 2026-11-22: /api/stream Range 206 korrekt für mp3/flac/m4a/wav/aiff + Nicht-ASCII, AIFF kommt als RIFF/WAVE und ist seekbar (B10); Sperren 403/400/404 korrekt. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): ok."
 
 # ── Waveform ──────────────────────────────────────────────────────────────
 

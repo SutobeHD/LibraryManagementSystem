@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+- Rekordbox XML bridge:
+  - Fixed: the XML export wrote no cue points for a live (master.db) library.
+    Hot cues, memory cues and loops now go out as `POSITION_MARK`.
+  - Fixed: hot cues D-H sat one pad late and H on a ninth pad that does not
+    exist. Rekordbox numbers hot cues A-H as 1, 2, 3, 5, 6, 7, 8, 9 in master.db;
+    the app read them as 1-8.
+  - Fixed: "Pull from Rekordbox" (XML import) updated no track and still said
+    "Import complete". Paths stored with `/` never matched, and every update sent
+    fields the library refuses. It now matches paths in any separator style,
+    writes only the tags the library stores and only when they changed, and
+    shows failures in a red toast with the track name.
 - Editor track browser:
   - Fixed: covers in the editor's track browser never loaded: the image URL
     was `/api/artwork/<path>` (the static covers mount, 404 for library
