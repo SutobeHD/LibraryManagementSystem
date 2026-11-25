@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- Editor track browser:
+  - Fixed: covers in the editor's track browser never loaded: the image URL
+    was `/api/artwork/<path>` (the static covers mount, 404 for library
+    paths). It now uses `/api/artwork?path=` like the track table and player.
 - Backups before writes:
   - Added: an artist merge (and its revert) now copies `master.db`, its `-wal`
     and `masterPlaylists6.xml` beside the database before its first write

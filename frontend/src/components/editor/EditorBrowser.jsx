@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Search, Music, Disc, User, Play, Plus, X, ListMusic } from 'lucide-react';
-import { fetchLibraryTracks } from '../../api/api';
+import api, { fetchLibraryTracks } from '../../api/api';
 
 const EditorBrowser = ({ onLoadTrack, onClose }) => {
     const [searchTerm, setSearchTerm] = useState('');
@@ -101,7 +101,7 @@ const EditorBrowser = ({ onLoadTrack, onClose }) => {
                             <div className="w-10 h-10 rounded bg-mx-card flex items-center justify-center flex-shrink-0 overflow-hidden relative">
                                 {track.Artwork ? (
                                     <img
-                                        src={`/api/artwork/${track.Artwork}`}
+                                        src={`${api.defaults.baseURL || ''}/api/artwork?path=${encodeURIComponent(track.Artwork)}`}
                                         alt=""
                                         className="w-full h-full object-cover"
                                         loading="lazy"

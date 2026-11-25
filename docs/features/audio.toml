@@ -136,7 +136,7 @@ name = "Non-Destructive Editor (alt)"
 status = "partial"
 desc = "Regionen, Envelopes/Fades, Palette-Clipboard, TimelineState."
 paths = ["frontend/src/components/editor/", "frontend/src/audio/TimelineState.js"]
-notes = "Verwaist, nirgends gemountet (nur EditorBrowser wird genutzt)."
+notes = "Verwaist, nirgends gemountet (nur EditorBrowser wird genutzt). EditorBrowser-Cover gefixt 2026-11-25: URL war /api/artwork/<Pfad> (Mount, 404), jetzt /api/artwork?path= wie TrackTable/Player - PC-Test: neue URL liefert das Library-Cover byte-gleich. EditorBrowser hängt nur am WaveformEditor, im Ranking (simpleMode) nicht aufrufbar."
 
 # ── Track-Editor ──────────────────────────────────────────────────────────
 
