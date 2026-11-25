@@ -947,7 +947,7 @@ Log redaction helpers — scrub absolute paths from log lines + tracebacks.
 - `load_lib()`
 - `unload_lib()`
 - `rbx_export()` — Write tracks, or one playlist/folder with its NODE tree, as Rekordbox XML into ``EXPORT_DIR``.
-- `rbx_import()` — Imports tracks and metadata from a Rekordbox XML file.
+- `rbx_import()` — Add/update library tracks from a Rekordbox XML file, matched by path.
 - `gen_smart()` — Rebuild the "By Label" auto-playlists.
 - `PathRequest` — Generic single-path body used by every endpoint that needs to point at
 - `ImportPathsReq` — Drag-drop import body.
@@ -1218,7 +1218,7 @@ RBEP Parser — Parses Rekordbox Editor Project (.rbep) files.
 - `RekordboxBridge`
 - `  RekordboxBridge.export_collection()` — Selected tracks as Rekordbox XML.
 - `  RekordboxBridge.export_playlist()` — One library playlist, or a folder with its subtree, as Rekordbox XML.
-- `  RekordboxBridge.import_library()` — Imports data from a Rekordbox XML and updates the local database.
+- `  RekordboxBridge.import_library()` — Add or update library tracks from a Rekordbox XML COLLECTION, matched by path.
 
 ### `app/rekordbox_export.py`
 
@@ -4447,7 +4447,7 @@ Cue loading in `app.live_database`.
 - `test_mirror_carries_colour_fields_and_tolerates_their_absence()`
 - `test_falls_back_to_the_mirror_when_djmd_cue_raises()` — The real-world case: one bad row kills the whole batch read.
 - `test_fallback_warns_that_it_may_under_report()`
-- `test_kind_maps_to_the_position_mark_num_convention()` — Kind 0 is a memory cue (-1); hot slot N is Num N-1, i.e.
+- `test_kind_maps_to_the_position_mark_num_convention()` — Kind 0 is a memory cue (-1); Kinds 1-3, 5-9 are A-H; any other Kind stays a memory cue.
 - `test_out_point_marks_a_loop()`
 - `test_cues_land_on_their_own_track()`
 - `test_cue_for_an_unknown_track_is_ignored()`
@@ -4964,11 +4964,20 @@ Tests for app/rbep_parser.py — Rekordbox Editor Project (.rbep) XML parser.
 
 ### `tests/test_rekordbox_bridge.py`
 
-Tests for app/rekordbox_bridge.py — Rekordbox XML <-> local DB import.
+Tests for app/rekordbox_bridge.py — Rekordbox XML <-> library.
 
-- `test_import_updates_existing_and_adds_new()`
+- `xml()`
+- `test_live_import_matches_forward_slash_paths_and_sends_only_changes()`
+- `test_reimport_of_identical_tags_writes_nothing()`
+- `test_new_unanalysed_track_is_added_without_invented_values()`
+- `test_xml_mode_import_takes_grid_cues_bpm_key_and_raw_rating()`
+- `test_live_rating_is_converted_to_stars()`
+- `test_track_without_tempo_keeps_the_library_grid()`
+- `test_failed_track_is_named_in_errors()`
 - `test_import_no_collection_raises()`
-- `test_import_parses_beatgrid()`
+- `test_import_route_status_reflects_failures()`
+- `test_export_writes_live_cues_as_position_marks()`
+- `test_export_keeps_xml_library_position_marks()`
 
 ### `tests/test_rekordbox_running_guard.py`
 

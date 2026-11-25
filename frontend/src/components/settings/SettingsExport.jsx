@@ -181,9 +181,14 @@ const SettingsExport = ({ settings, setSettings }) => {
                                 const res = await api.post('/api/rekordbox/import', {
                                     xml_path: path,
                                 });
-                                toast.success(res.data.message || 'Import complete');
-                            } catch {
-                                toast.error('Import failed');
+                                const notify =
+                                    res.data.status === 'success' ? toast.success : toast.error;
+                                notify(res.data.message || 'Import complete');
+                            } catch (err) {
+                                console.error('[SettingsExport] XML import failed', err);
+                                toast.error(
+                                    `Import failed: ${err?.response?.data?.detail || err.message}`
+                                );
                             }
                         }}
                         className="flex items-center justify-center gap-2 p-4 rounded-xl bg-mx-shell/50 border border-white/10 hover:border-amber2/50 hover:bg-amber2/5 transition-all text-sm"

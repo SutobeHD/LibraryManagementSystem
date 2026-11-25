@@ -1,4 +1,6 @@
 import logging
+import os
+import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
@@ -9,6 +11,97 @@ from .database import db
 from .xml_generator import RekordboxXML, XmlFolder, XmlPlaylist, is_streaming_path
 
 logger = logging.getLogger(__name__)
+
+# Track fields an XML import can carry; the active library stores only some of them.
+_IMPORT_FIELDS = frozenset(
+    {
+        "Title",
+        "Artist",
+        "Album",
+        "Genre",
+        "Comment",
+        "Key",
+        "Label",
+        "Rating",
+        "BPM",
+        "TotalTime",
+        "beatGrid",
+        "positionMarks",
+    }
+)
+_DRIVE_PATH = re.compile(r"[A-Za-z]:/")
+
+
+def _path_key(path: Any) -> str:
+    """Comparable library path: one separator style, case-folded where the OS ignores case."""
+    return os.path.normcase(os.path.normpath(str(path))) if path else ""
+
+
+def _float_or_none(value: str | None) -> float | None:
+    try:
+        return float(value) if value not in (None, "") else None
+    except ValueError:
+        return None
+
+
+def _import_rating(raw: str | None, backend: str) -> int | None:
+    """XML Rating (0, 51 ... 255) in the active library's scale: stars live, raw in XML mode."""
+    try:
+        value = int(raw) if raw is not None else -1
+    except ValueError:
+        return None
+    if not 0 <= value <= 255:
+        return None
+    return round(value / 51) if backend == "live" else value
+
+
+def _import_row(el: ET.Element, backend: str) -> dict[str, Any]:
+    """One COLLECTION TRACK as a library track dict, None for an attribute the XML lacks.
+
+    Grid and cue dicts have the shape ``RekordboxXMLDB`` parses them into. No TEMPO /
+    POSITION_MARK = None, not []: an un-analysed track in the XML must not erase the
+    library's grid or cues.
+    """
+    grid = [
+        {
+            "time": float(t.get("Inizio") or 0),
+            "bpm": float(t.get("Bpm") or 0),
+            "beat": int(t.get("Battito") or t.get("Battuta") or 1),
+            "metro": t.get("Metro", "4/4"),
+        }
+        for t in el.findall("TEMPO")
+    ]
+    raw = unquote(el.get("Location", "")).removeprefix("file://localhost/")
+    path = raw.replace("/", "\\") if _DRIVE_PATH.match(raw) else "/" + raw.lstrip("/")
+    marks = []
+    for mark in el.findall("POSITION_MARK"):
+        m: dict[str, Any] = {
+            "Name": mark.get("Name", ""),
+            "Type": mark.get("Type", "0"),
+            "Start": float(mark.get("Start") or 0),
+            "Num": int(mark.get("Num") or -1),
+            "Red": int(mark.get("Red") or 0),
+            "Green": int(mark.get("Green") or 0),
+            "Blue": int(mark.get("Blue") or 0),
+        }
+        if mark.get("End"):
+            m["End"] = float(mark.get("End") or 0)
+        marks.append(m)
+    return {
+        "path": path,
+        "Title": el.get("Name"),
+        "Artist": el.get("Artist"),
+        "Album": el.get("Album"),
+        "Genre": el.get("Genre"),
+        "Comment": el.get("Comments"),
+        "Key": el.get("Tonality"),
+        "Label": el.get("Label"),
+        "Rating": _import_rating(el.get("Rating"), backend),
+        "BPM": _float_or_none(el.get("AverageBpm")),
+        "TotalTime": _float_or_none(el.get("TotalTime")),
+        "beatGrid": grid or None,
+        "positionMarks": marks or None,
+    }
 
 
 class PlaylistNotFoundError(LookupError):
@@ -90,6 +183,41 @@ def _await_beatgrids(tracks: list[dict[str, Any]]) -> None:
         )
 
 
+def _position_marks(cues: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Live-library cues (``LiveRekordboxDB._cue_dict``) as POSITION_MARK dicts.
+
+    Start/End in seconds; Num -1 = memory cue, 0-7 = hot cue A-H; Type 4 = loop.
+    No colour: Rekordbox gives an imported hot cue its default colour.
+    """
+    marks: list[dict[str, Any]] = []
+    for cue in cues:
+        try:
+            start_ms, out_ms = int(cue["InMsec"]), int(cue.get("OutMsec") or -1)
+        except (KeyError, TypeError, ValueError):
+            continue
+        mark: dict[str, Any] = {
+            "Name": str(cue.get("Comment") or ""),
+            "Type": "4" if out_ms > start_ms else "0",
+            "Start": f"{start_ms / 1000:.3f}",
+            "Num": str(cue.get("Num", -1)),
+        }
+        if mark["Type"] == "4":
+            mark["End"] = f"{out_ms / 1000:.3f}"
+        marks.append(mark)
+    return marks
+
+
+def _with_cues(track: dict[str, Any]) -> dict[str, Any]:
+    """The track with ``positionMarks``; a live track carries its cues as ``Cues`` instead.
+
+    The export only read ``positionMarks``, which only the XML library fills: every
+    live-library export went out without a single cue.
+    """
+    if track.get("positionMarks") or not track.get("Cues"):
+        return track
+    return {**track, "positionMarks": _position_marks(track["Cues"])}
+
+
 def _write(
     tracks: _ExportTracks, nodes: list[XmlPlaylist | XmlFolder], output_path: Path
 ) -> RbxExportResult:
@@ -101,7 +229,7 @@ def _write(
             f"Nothing to export: all {skipped} tracks are streaming tracks without a local file."
         )
     _await_beatgrids(tracks.data)
-    path = RekordboxXML.generate(tracks.data, output_path, nodes)
+    path = RekordboxXML.generate([_with_cues(t) for t in tracks.data], output_path, nodes)
     return RbxExportResult(
         path=path,
         exported=len(tracks.data) - skipped,
@@ -143,85 +271,53 @@ class RekordboxBridge:
         return _write(tracks, [_xml_node(node, tracks, name)], output_path)
 
     @staticmethod
-    def import_library(xml_path: str) -> dict:
-        """Imports data from a Rekordbox XML and updates the local database."""
-        results: dict[str, Any] = {"added": 0, "updated": 0, "errors": []}
-        try:
-            tree = ET.parse(xml_path)
-            root = tree.getroot()
-            collection = root.find("COLLECTION")
-            if collection is None:
-                raise ValueError("Invalid Rekordbox XML: No COLLECTION found.")
+    def import_library(xml_path: str) -> dict[str, Any]:
+        """Add or update library tracks from a Rekordbox XML COLLECTION, matched by path.
 
-            for track_el in collection.findall("TRACK"):
-                try:
-                    # Extract basic info
-                    location = track_el.get("Location", "")
-                    # Convert file://localhost/C:/... to C:/... Rekordbox (and our export)
-                    # percent-encode the URL: an undecoded %20 never matched a library path.
-                    clean_path = (
-                        unquote(location).replace("file://localhost/", "").replace("/", "\\")
-                    )
-
-                    track_data: dict[str, Any] = {
-                        "Title": track_el.get("Name"),
-                        "Artist": track_el.get("Artist"),
-                        "Album": track_el.get("Album"),
-                        # `or default`, not get(name, default): a present-but-empty
-                        # attr (common on un-analyzed Rekordbox tracks) returns ""
-                        # which float("") would reject and drop the whole track.
-                        "BPM": float(track_el.get("AverageBpm") or 120),
-                        "path": clean_path,
-                        "TotalTime": float(track_el.get("TotalTime") or 0),
-                        "beatGrid": [],
-                        "positionMarks": [],
-                    }
-
-                    # Extract Beatgrid
-                    for tempo in track_el.findall("TEMPO"):
-                        track_data["beatGrid"].append(
-                            {
-                                "time": float(tempo.get("Inizio") or 0),
-                                "bpm": float(tempo.get("Bpm") or 0),
-                                "beat": int(tempo.get("Battito") or tempo.get("Battuta") or 1),
-                                "metro": tempo.get("Metro", "4/4"),
-                            }
-                        )
-
-                    # Extract Cues
-                    for mark in track_el.findall("POSITION_MARK"):
-                        track_data["positionMarks"].append(
-                            {
-                                "Name": mark.get("Name", ""),
-                                "Type": mark.get("Type", "0"),
-                                "Start": mark.get("Start", "0"),
-                                "Num": mark.get("Num", "-1"),
-                            }
-                        )
-
-                    # Update or Add to local DB
-                    # We match by path as the primary key for external sync
-                    existing_id = None
-                    for tid, t in db.tracks.items():
-                        if t.get("path") == clean_path:
-                            existing_id = tid
-                            break
-
-                    if existing_id:
-                        # RekordboxDB has no update_track(); the real merge API is
-                        # update_tracks_metadata (XML mode merges the dict, live
-                        # mode delegates to update_track_metadata).
-                        db.update_tracks_metadata([existing_id], track_data)
-                        results["updated"] += 1
-                    else:
-                        db.add_track(track_data)
-                        results["added"] += 1
-
-                except Exception as e:
-                    results["errors"].append(str(e))
-
-            db.save()
-            return results
-        except Exception as e:
-            logger.error(f"Import failed: {e}")
-            raise
+        An existing track gets only the fields the active library can store
+        (``db.writable_track_fields``) and only those whose value differs; the rest are
+        listed in ``not_written``. Sending every field made each update fail the
+        field allowlist, and comparing raw path strings missed every track stored
+        with ``/``. ``errors`` names the track per failure.
+        """
+        root = ET.parse(xml_path).getroot()
+        collection = root.find("COLLECTION")
+        if collection is None:
+            raise ValueError("Invalid Rekordbox XML: No COLLECTION found.")
+        backend = db.mode
+        writable = db.writable_track_fields()
+        by_path = {_path_key(t.get("path")): tid for tid, t in db.tracks.items() if t.get("path")}
+        results: dict[str, Any] = {
+            "added": 0,
+            "updated": 0,
+            "unchanged": 0,
+            "errors": [],
+            "not_written": sorted(_IMPORT_FIELDS - writable),
+        }
+        for track_el in collection.findall("TRACK"):
+            label = track_el.get("Name") or track_el.get("Location") or "?"
+            try:
+                row = _import_row(track_el, backend)
+                tid = by_path.get(_path_key(row["path"]))
+                if tid is None:
+                    new_id = db.add_track({k: v for k, v in row.items() if v is not None})
+                    if new_id:
+                        by_path[_path_key(row["path"])] = str(new_id)
+                    results["added"] += 1
+                    continue
+                current = db.tracks.get(tid) or {}
+                changes = {
+                    k: v
+                    for k, v in row.items()
+                    if k in writable and v is not None and v != current.get(k)
+                }
+                if not changes:
+                    results["unchanged"] += 1
+                    continue
+                db.update_tracks_metadata([tid], changes)
+                results["updated"] += 1
+            except Exception as e:
+                logger.warning("op=rbx_import track=%s err=%s", label, e)
+                results["errors"].append(f"{label}: {e}")
+        db.save()
+        return results
