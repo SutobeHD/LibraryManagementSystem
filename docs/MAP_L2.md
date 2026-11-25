@@ -513,6 +513,7 @@ Batch comment edits over the live library (``POST /api/tools/batch-comment``).
 - `  RekordboxDB.get_tracks_by_album()`
 - `  RekordboxDB.get_playlist_tracks()`
 - `  RekordboxDB.get_track_details()`
+- `  RekordboxDB.wait_for_beatgrids()` — True once the active library's beat grids are in memory; False on timeout.
 - `  RekordboxDB.add_track()`
 - `  RekordboxDB.attach_import_anlz()` — Live mode: ANLZ into Rekordbox's share + ``AnalysisDataPath``.
 - `  RekordboxDB.delete_track()`
@@ -723,6 +724,7 @@ LibrarySource — uniform abstraction over Live (master.db) and XML modes.
 - `LiveRekordboxDB`
 - `  LiveRekordboxDB.db()` — Thread-safe access to the database connection.
 - `  LiveRekordboxDB.load()` — Loads the library from the live master.db.
+- `  LiveRekordboxDB.wait_for_beatgrids()` — Block until the latest load's beat grids are in ``tracks``; False on timeout.
 - `  LiveRekordboxDB.get_all_labels()`
 - `  LiveRekordboxDB.get_all_albums()`
 - `  LiveRekordboxDB.get_all_tracks()`
@@ -1209,6 +1211,7 @@ RBEP Parser — Parses Rekordbox Editor Project (.rbep) files.
 *(no module docstring)*
 
 - `PlaylistNotFoundError`
+- `BeatgridsLoadingError` — The live library's beat grids are still loading; an export now would have no TEMPO.
 - `RbxExportResult`
 - `RekordboxBridge`
 - `  RekordboxBridge.export_collection()` — Selected tracks as Rekordbox XML.
@@ -4114,6 +4117,20 @@ Duplicate finder: O(n) digest grouping, parallel fingerprinting, location index.
 - `test_location_index_first_match_wins_and_keeps_all()`
 - `test_location_index_matches_like_windows_path_equality()`
 - `test_member_info_survives_bad_numeric_metadata()`
+
+### `tests/test_export_waits_for_beatgrids.py`
+
+The Rekordbox XML export must never write a live library's tracks without beat grids.
+
+- `live()`
+- `library()`
+- `exports()`
+- `test_wait_returns_only_after_the_loader_pass()`
+- `test_a_reload_during_a_pass_waits_for_a_second_pass()`
+- `test_export_during_the_grid_load_waits_and_writes_every_tempo()`
+- `test_export_answers_503_instead_of_a_file_without_grids()`
+- `test_tracks_that_carry_their_own_grid_do_not_wait()`
+- `test_xml_mode_has_nothing_to_wait_for()`
 
 ### `tests/test_external_track_match.py`
 

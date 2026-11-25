@@ -325,6 +325,7 @@
 | `tests/test_download_names_route.py` | ``POST /api/soundcloud/downloads/{sc_track_id}/names`` (artist hub T-31, Threat T18). |
 | `tests/test_download_registry.py` | Tests for app/download_registry.py — SoundCloud download dedup/history DB. |
 | `tests/test_duplicate_grouping.py` | Duplicate finder: O(n) digest grouping, parallel fingerprinting, location index. |
+| `tests/test_export_waits_for_beatgrids.py` | The Rekordbox XML export must never write a live library's tracks without beat grids. |
 | `tests/test_external_track_match.py` | external_track_match unit tests (external-track-match-unified-module T-3..T-9). |
 | `tests/test_ffmpeg_protocols.py` | Protocol-aware ffmpeg resolution and its use in the SoundCloud downloader (B18). |
 | `tests/test_folder_watcher.py` | Tests for app/folder_watcher.py — auto-import folder watcher. |

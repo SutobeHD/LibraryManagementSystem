@@ -357,6 +357,9 @@ class _TrackSource:
             return None
         return {"ID": "1", "Title": "T", "path": "C:/Music/t.aiff", "StockDate": "2022-02-02"}
 
+    def wait_for_beatgrids(self, timeout: float | None = None) -> bool:
+        return True
+
 
 @pytest.fixture
 def exports(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
