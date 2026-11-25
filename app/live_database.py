@@ -308,10 +308,14 @@ class LiveRekordboxDB:
                 "ISRC": getattr(item, "isrc", ""),
             }
 
-    # Rekordbox POSITION_MARK convention, shared by xml_generator.py:56 and
-    # TimelineCanvas.jsx:416 — Num -1 is a memory cue, 0-7 are hot cues A-H.
-    # djmdCue.Kind counts the other way: 0 = memory cue, 1..N = hot slot.
+    # Rekordbox POSITION_MARK convention, shared by xml_generator.py and
+    # TimelineCanvas.jsx — Num -1 is a memory cue, 0-7 are hot cues A-H.
+    # djmdCue.Kind: 0 = memory cue, hot cues A-H = 1, 2, 3, 5, 6, 7, 8, 9 (no 4).
+    # Measured on a 5041-track library: Kind values 0-3 and 5-9 only, and a track
+    # with all eight hot cues carries exactly 1, 2, 3, 5, 6, 7, 8, 9. Kind - 1 put
+    # D-G one pad late and H on a ninth pad that does not exist.
     MEMORY_CUE_NUM = -1
+    HOT_CUE_NUM_BY_KIND = {1: 0, 2: 1, 3: 2, 5: 3, 6: 4, 7: 5, 8: 6, 9: 7}
     CUE_TYPE_LOOP = 4
     CUE_TYPE_MARKER = 0
 
@@ -336,14 +340,16 @@ class LiveRekordboxDB:
         """One cue in the shape every consumer reads.
 
         Color / ColorTableIndex / ActiveLoop are the raw djmdCue values (None
-        when the source row lacks them); nothing interprets them yet.
+        when the source row lacks them); nothing interprets them yet. A Kind
+        outside ``HOT_CUE_NUM_BY_KIND`` stays a memory cue: its position survives,
+        no pad is guessed.
         """
         kind = int(kind or 0)
         out_msec = int(out_msec or -1)
         return {
             "ID": str(ident or ""),
             "Kind": kind,  # raw Rekordbox value, never clamped
-            "Num": LiveRekordboxDB.MEMORY_CUE_NUM if kind == 0 else kind - 1,
+            "Num": LiveRekordboxDB.HOT_CUE_NUM_BY_KIND.get(kind, LiveRekordboxDB.MEMORY_CUE_NUM),
             "Type": (
                 LiveRekordboxDB.CUE_TYPE_LOOP if out_msec > 0 else LiveRekordboxDB.CUE_TYPE_MARKER
             ),
