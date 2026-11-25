@@ -14,6 +14,19 @@
     5 minutes.
   - Fixed: the playlist right-click menu could run up to 55 px past the
     bottom of the window; it is now clamped by its measured size.
+- USB covers:
+  - Fixed: the stick got its covers from the audio file's embedded tags, else
+    a `cover.jpg` / `folder.jpg` next to it, not from the library. It now takes
+    the cover Rekordbox and the app show (master.db ImagePath, same resolver as
+    `GET /api/artwork`) and uses embedded, then sidecar art only for tracks the
+    library has no cover for. On a copy of the real library (4909 local
+    tracks) the old order put another image than the library's on 899 tracks
+    (all from a folder cover) and none on 39 that have one. A 40-track export
+    went from 8 of 29 library covers right to 29 of 29; `export.pdb` carries
+    the same artwork rows. A re-sync leaves unchanged covers alone.
+  - Changed: `/api/artwork` checks its folder jail with `Path.is_relative_to`
+    instead of a string prefix, so a sibling folder like `share_evil` no
+    longer passes.
 - Beat grid (MP3):
   - Fixed: MP3 beat grids sat about 25 ms away from Rekordbox's. The grid was
     shifted by a fixed 22.5 ms because the LAME header was never actually read.

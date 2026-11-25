@@ -664,6 +664,15 @@ Per-file import-progress tracker — gives the frontend a live transparent
 - `get()`
 - `clear_finished()` — Remove all Completed/Failed/Skipped rows.
 
+### `app/library_artwork.py`
+
+Library artwork path -> image file on disk.
+
+- `ArtworkPathError` — An artwork path the resolver refuses; `status` is what `/api/artwork` answers.
+- `rekordbox_share_dir()` — Rekordbox 6/7 share folder (root of ImagePath), or None without APPDATA.
+- `resolve_artwork_path()` — The image file a library artwork path points at.
+- `library_artwork_file()` — `resolve_artwork_path`, or None where the route would answer an error.
+
 ### `app/library_format_swap.py`
 
 Library-wide audio format conversion engine.
@@ -1367,7 +1376,7 @@ Track-metadata field policy: which keys a library backend stores, and their valu
 
 USB artwork extraction + bucketed write to PIONEER/Artwork/.
 
-- `get_artwork_bytes()` — Public single-shot extractor — embedded → sidecar → None.
+- `get_artwork_bytes()` — Public single-shot extractor — library cover → embedded → sidecar → None.
 - `source_digest()` — Identity of one source image under the current resize recipe.
 - `load_manifest()` — {image id: source digest} of the artwork on the stick; empty when unreadable.
 - `save_manifest()`
@@ -4238,6 +4247,18 @@ Tests for app/import_tracker.py — live import-progress tracker.
 - `test_prune_drops_oldest_finished_first()`
 - `test_prune_keeps_inflight_over_cap()` — Soft cap by design: active (non-terminal) tasks are never dropped, even
 
+### `tests/test_library_artwork.py`
+
+One artwork resolver for the app and the stick (`app/library_artwork.py`).
+
+- `share()` — APPDATA -> tmp; returns the Rekordbox share folder (with one cover in it).
+- `test_imagepath_resolves_inside_the_share()`
+- `test_absolute_path_in_the_covers_folder_passes()`
+- `test_refusals_carry_the_routes_status()`
+- `test_without_appdata_a_share_path_is_refused()`
+- `test_library_artwork_file_is_none_where_the_route_refuses()`
+- `test_route_serves_and_refuses_through_the_resolver()`
+
 ### `tests/test_library_format_swap.py`
 
 Tests for app.library_format_swap.
@@ -5541,6 +5562,11 @@ Cover art for the USB stick, with the real Pillow (B8, 0.1 core-loop test).
 - `test_write_artwork_pair_writes_both_cdj_variants()`
 - `test_artwork_folders_hold_twenty_images_from_00001()`
 - `test_pillow_is_pinned_and_bundled()`
+- `three_covers()` — An MP3 with an embedded GREEN cover, a BLUE cover.jpg, a RED library cover.
+- `test_the_library_cover_wins()`
+- `test_without_a_library_cover_embedded_then_sidecar()`
+- `test_an_undecodable_library_cover_falls_through()`
+- `test_a_matching_library_cover_is_not_reencoded()`
 
 ### `tests/test_usb_artwork_resync.py`
 
@@ -5551,6 +5577,9 @@ Cover files follow their slot across re-syncs (PC test 2026-11-22).
 - `test_a_track_without_cover_does_not_inherit_one()`
 - `test_a_changed_cover_is_rewritten()`
 - `test_an_unchanged_cover_is_not_rewritten()`
+- `share()`
+- `test_the_library_cover_goes_on_the_stick()`
+- `test_library_cover_resync_rewrites_only_what_changed()`
 - `test_files_without_a_manifest_entry_are_rewritten_once()` — A stick from before the manifest: its files say nothing about their source.
 - `test_prune_touches_only_dead_artwork()`
 - `test_manifest_roundtrip_and_garbage()`
