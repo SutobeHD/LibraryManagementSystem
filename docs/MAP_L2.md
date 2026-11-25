@@ -5466,6 +5466,7 @@ Tag writes keep an exact copy first, rewrite atomically and respect the size cap
 - `test_first_write_keeps_an_exact_copy_and_later_writes_do_not()`
 - `test_every_spelling_of_one_path_shares_the_copy()`
 - `test_an_outside_edit_gets_its_own_generation()`
+- `test_a_restored_file_reuses_its_generation()`
 - `test_backup_false_takes_no_copy()`
 - `test_cap_prunes_the_oldest_copies_first()`
 - `test_a_copy_larger_than_the_cap_is_still_kept()`

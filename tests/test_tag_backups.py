@@ -99,6 +99,20 @@ def test_an_outside_edit_gets_its_own_generation(tmp_path, store) -> None:
     assert copies == [original, outside]
 
 
+def test_a_restored_file_reuses_its_generation(tmp_path, store) -> None:
+    f = _mp3(tmp_path / "a.mp3")
+    original = f.read_bytes()
+    audio_tags.write_tags(f, {"Title": "One"})
+    ((first, _manifest),) = tag_backups.generations(f)
+    with audio_tags.FileWriteLocks([f]):
+        assert tag_backups.restore(f, first) is True
+    assert f.read_bytes() == original
+
+    audio_tags.write_tags(f, {"Title": "Two"})
+
+    assert [e for e, _m in tag_backups.generations(f)] == [first]  # no duplicate copy
+
+
 def test_backup_false_takes_no_copy(tmp_path, store) -> None:
     f = _mp3(tmp_path / "fresh.mp3")
 

@@ -98,7 +98,7 @@ def _real(path: str | Path) -> Path:
 def file_key(path: str | Path) -> str:
     """Store key of one audio file: stable across spellings of the same path."""
     normalised = os.path.normcase(str(_real(path)))
-    return hashlib.sha1(normalised.encode("utf-8")).hexdigest()[:20]
+    return hashlib.sha1(normalised.encode("utf-8"), usedforsecurity=False).hexdigest()[:20]
 
 
 def _fingerprint(path: Path) -> tuple[int, int]:
@@ -219,8 +219,10 @@ def ensure_backup(path: str | Path) -> BackupEntry:
     with _store_lock:
         current = _fingerprint(real)
         existing = generations(real)
-        if existing and _covers(existing[-1][1], current):
-            return existing[-1][0]
+        # Newest first: after a restore the file matches an older generation again.
+        for found, payload in reversed(existing):
+            if _covers(payload, current):
+                return found
         entry = _take_copy(real, key, current)
         logger.info(
             "op=tag_backup status=created key=%s ext=%s bytes=%d generation=%d",
