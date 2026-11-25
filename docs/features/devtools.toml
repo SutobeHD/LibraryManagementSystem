@@ -229,6 +229,7 @@ test = "getestet"
 tested = "2026-06-19"
 desc = "Backend mit venv-Python, Self-Healing-node_modules, dev:full, Preview-launch.json."
 paths = ["scripts/run-backend.mjs", "scripts/ensure-deps.mjs", ".claude/launch.json"]
+notes = "2026-11-26: run-backend.mjs reicht in einem Git-Worktree (kein eigenes .env) das .env des Haupt-Checkouts als LMS_ENV_FILE an das Backend (app/main.py lädt es zusätzlich) - SoundCloud-Credentials ohne Kopieren; geprüft im Worktree feature-map-phases: auth-status refreshable, POST /api/soundcloud/refresh -> refreshed."
 
 [[feature]]
 id = "e2e-webdriver"

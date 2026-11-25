@@ -10,7 +10,7 @@
 // Order: $LMS_PYTHON > .venv/Scripts/python.exe | .venv/bin/python > python.
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
@@ -25,7 +25,22 @@ function resolvePython() {
   return candidates.find(existsSync) ?? "python";
 }
 
+// A git worktree has no `.env` of its own (gitignored, never copied), and the backend
+// only loads the one beside its code. Hand it the main checkout's file instead, so a
+// worktree backend gets the same SoundCloud app credentials. Dev launcher only.
+function mainCheckoutEnvFile() {
+  if (process.env.LMS_ENV_FILE || existsSync(join(root, ".env"))) return null;
+  const res = spawnSync("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], {
+    cwd: root,
+    encoding: "utf8",
+  });
+  if (res.status !== 0) return null;
+  const candidate = join(dirname(res.stdout.trim()), ".env");
+  return existsSync(candidate) ? candidate : null;
+}
+
 const python = resolvePython();
+const envFile = mainCheckoutEnvFile();
 const args = process.argv.length > 2 ? process.argv.slice(2) : ["-m", "app.main"];
 // The interpreter path names the user's home; logs must not (see app/logging_utils.py).
 // $LMS_PYTHON may use forward slashes and other case than homedir().
@@ -33,13 +48,14 @@ const norm = (p) => p.replace(/\\/g, "/").toLowerCase();
 const home = homedir();
 const shown = norm(python).startsWith(norm(home) + "/") ? "~" + python.slice(home.length) : python;
 console.log(`[run-backend] ${shown} ${args.join(" ")}`);
+if (envFile) console.log("[run-backend] no .env in this worktree, using the main checkout's");
 
 // PYTHONUTF8: the Windows console defaults to cp1252, which renders every
 // em-dash in a log message as a replacement character.
 const child = spawn(python, args, {
     cwd: root,
     stdio: "inherit",
-    env: { ...process.env, PYTHONUTF8: "1" },
+    env: { ...process.env, PYTHONUTF8: "1", ...(envFile ? { LMS_ENV_FILE: envFile } : {}) },
 });
 for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => child.kill(sig));
 child.on("exit", (code, signal) => process.exit(code ?? (signal ? 1 : 0)));

@@ -51,6 +51,11 @@ try:
     from dotenv import load_dotenv
 
     load_dotenv(dotenv_path=Path(__file__).resolve().parent.parent / ".env", override=False)
+    # Dev launcher (scripts/run-backend.mjs) names the main checkout's file when this
+    # code runs from a git worktree, which has none of its own.
+    _extra_env_file = os.environ.get("LMS_ENV_FILE")
+    if _extra_env_file and Path(_extra_env_file).is_file():
+        load_dotenv(dotenv_path=_extra_env_file, override=False)
 except ImportError:
     pass  # dotenv not installed — rely on shell environment variables
 
