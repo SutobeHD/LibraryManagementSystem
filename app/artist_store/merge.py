@@ -100,6 +100,13 @@ FIELD_ARTIST_ROW = "artist_row"
 TAG_FIELD_ARTIST = "Artist"
 _ALLOWED_TAG_FIELDS = frozenset({TAG_FIELD_ARTIST})
 
+#: Backup family of the ``master.db`` snapshot each apply / revert takes before its
+#: first write (``app/phrase_db_writer.py:backup_master_db``, beside ``master.db``).
+LIBRARY_BACKUP_MARKER = ".mergebak-"
+
+#: Snapshot sets kept beside ``master.db``; older merge sets are pruned after a new one.
+LIBRARY_BACKUP_KEEP = 5
+
 SKIP_TAG_WRITE_FAILED = "tag_write_failed"
 SKIP_NO_LOCAL_FILE = "no_local_file"
 ABORT_REKORDBOX_RUNNING = "rekordbox_running"
@@ -155,6 +162,47 @@ def _write_tags(path: str, updates: Mapping[str, Any]) -> bool:
     from app import audio_tags
 
     return bool(audio_tags.write_tags(path, dict(updates)))
+
+
+def _snapshot_library(db: Any) -> tuple[str, ...]:
+    """Snapshot ``master.db`` (+ -wal + ``masterPlaylists6.xml``) before the first write.
+
+    One restorable set per run: ``restore_master_db(path, backups=<these>,
+    marker=LIBRARY_BACKUP_MARKER)`` puts the db and the playlist XML back together.
+    Taken under ``db_lock()`` so no other writer commits between copy and run. ``()``
+    when the backend is not a live ``master.db`` (XML mode, a test fake). Raises
+    ``OSError`` when the copy fails; the caller refuses the run.
+    """
+    if getattr(db, "mode", None) != "live":
+        return ()
+    path = getattr(db, "live_db_path", None)
+    if not path or not Path(path).is_file():
+        return ()
+    from app import phrase_db_writer as snapshots
+
+    with _db_lock():
+        created = snapshots.backup_master_db(str(path), marker=LIBRARY_BACKUP_MARKER)
+        snapshots.prune_backup_sets(
+            str(path), marker=LIBRARY_BACKUP_MARKER, keep=LIBRARY_BACKUP_KEEP
+        )
+    logger.info(
+        "op=artist_merge_backup files=%d playlist_xml=%s",
+        len(created),
+        any(Path(c).name.startswith("masterPlaylists6.xml") for c in created),
+    )
+    return tuple(created)
+
+
+def _take_snapshot(db: Any) -> tuple[str, ...]:
+    """:func:`_snapshot_library`, a failed copy turned into a refusal (no write yet)."""
+    try:
+        return _snapshot_library(db)
+    except OSError as e:
+        logger.warning("op=artist_merge_backup status=failed err=%s", e.strerror)
+        raise MergeError(
+            f"could not back up master.db before writing ({e.strerror or type(e).__name__}) "
+            "— nothing was changed"
+        ) from e
 
 
 def _read_tag_artist(path: str | None) -> str | None:
@@ -942,6 +990,7 @@ class MergeApplyResult:
     aborted: bool
     abort_reason: str
     elapsed_s: float
+    library_backup: tuple[str, ...] = ()
 
     @property
     def revertable(self) -> bool:
@@ -973,6 +1022,7 @@ class MergeApplyResult:
             "aborted": self.aborted,
             "abort_reason": self.abort_reason,
             "revertable": self.revertable,
+            "library_backup": [Path(b).name for b in self.library_backup],
             "elapsed_s": round(self.elapsed_s, 3),
         }
 
@@ -997,6 +1047,7 @@ class MergeRevertResult:
     abort_reason: str
     complete: bool
     elapsed_s: float
+    library_backup: tuple[str, ...] = ()
 
     @property
     def orphan_links_not_restored(self) -> bool:
@@ -1017,6 +1068,7 @@ class MergeRevertResult:
             "complete": self.complete,
             "orphan_links_not_restored": self.orphan_links_not_restored,
             "orphan_warning": ORPHAN_WARNING if self.artists_restored else "",
+            "library_backup": [Path(b).name for b in self.library_backup],
             "elapsed_s": round(self.elapsed_s, 3),
         }
 
@@ -1134,6 +1186,9 @@ def apply(
     * The pre-image is journalled **before** the write, so a crash can only ever leave
       a revert entry for a change that did not happen (a harmless no-op restore) —
       never a change with no way back.
+    * Before the first write, ``master.db`` (+ -wal + ``masterPlaylists6.xml``) is
+      snapshotted beside the db (:func:`_snapshot_library`, ``.mergebak-<stamp>``,
+      newest :data:`LIBRARY_BACKUP_KEEP` sets kept). A failed copy refuses the run.
 
     ``write_tags`` mirrors the new artist into the audio file. A file that cannot be
     written — locked, read-only, missing, unsupported format — is skipped and reported
@@ -1164,6 +1219,8 @@ def apply(
     verify = bool(write_tags) and (
         total <= VERIFY_BYTES_MAX_TRACKS if verify_bytes is None else bool(verify_bytes)
     )
+    # Before the first write — resolving the canonical artist may already create a row.
+    library_backup = _take_snapshot(db)
     canonical_artist_id = _resolve_canonical_artist(db, plan.canonical)
 
     run_id = fixer_log.create_run(
@@ -1180,6 +1237,7 @@ def apply(
                 "write_tags": bool(write_tags),
                 "verify_bytes": verify,
                 "delete_orphans": bool(delete_orphans),
+                "library_backup": [Path(b).name for b in library_backup],
             }
         ),
     )
@@ -1337,6 +1395,7 @@ def apply(
         aborted=aborted,
         abort_reason=abort_reason,
         elapsed_s=elapsed,
+        library_backup=library_backup,
     )
 
 
@@ -1413,6 +1472,7 @@ def revert(db: Any, run_id: str, *, write_tags: bool = True) -> MergeRevertResul
     _merge_run_note(run)
 
     pending = [m for m in fixer_log.get_mutations(run_id, reverse=True) if not m["reverted"]]
+    library_backup = _take_snapshot(db) if pending else ()
     remap: dict[str, str] = {}
     artists_restored = artists_failed = 0
     content_rows: list[Mapping[str, Any]] = []
@@ -1516,12 +1576,15 @@ def revert(db: Any, run_id: str, *, write_tags: bool = True) -> MergeRevertResul
         abort_reason=abort_reason,
         complete=complete,
         elapsed_s=elapsed,
+        library_backup=library_backup,
     )
 
 
 __all__ = [
     "CHUNK_SIZE",
     "FOLD_VERSION",
+    "LIBRARY_BACKUP_KEEP",
+    "LIBRARY_BACKUP_MARKER",
     "ORPHAN_WARNING",
     "VERIFY_BYTES_MAX_TRACKS",
     "MergeApplyResult",

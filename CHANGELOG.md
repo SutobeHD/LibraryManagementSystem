@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+- Backups before writes:
+  - Added: an artist merge (and its revert) now copies `master.db`, its `-wal`
+    and `masterPlaylists6.xml` beside the database before its first write
+    (`.mergebak-<stamp>`, newest 5 sets kept). Restoring the set puts the
+    playlist XML back together with the database. If the copy fails, the merge
+    is refused before anything is written.
+  - Added: before the app first writes tags into an audio file, it keeps an
+    exact copy of the file in `%APPDATA%/MusicLibraryManager/tag-write-backups/`
+    (capped at 5 GiB, oldest copies pruned first). Later edits of the same file
+    add no copy; a file changed outside the app since gets a new one. If the copy
+    cannot be made, the tags are not written. Fresh SoundCloud downloads are not
+    copied.
+  - Fixed: tag writes are atomic. The tags go into a temp copy beside the file,
+    which then replaces the original, so a crash mid-save leaves the original
+    untouched instead of a half-written file.
+  - Changed: the audio stream reopens the file for every 1 MiB chunk, so a
+    playing track no longer holds it open and blocks the tag write on Windows.
 - Rekordbox XML export:
   - Added: right-click a playlist, smart playlist or folder -> "Export as
     Rekordbox XML" writes `exports/<name>.xml` (a folder with its whole
@@ -36,6 +53,17 @@
   - Changed: `/api/artwork` checks its folder jail with `Path.is_relative_to`
     instead of a string prefix, so a sibling folder like `share_evil` no
     longer passes.
+- Import covers:
+  - Fixed: the cover the import extracts from a file was saved to
+    `%APPDATA%/Pioneer/app/data/covers`, a folder `GET /api/artwork` and the
+    USB export refuse, so an imported track showed no cover (403) and the stick
+    got the embedded image. Covers now go to
+    `%APPDATA%/MusicLibraryManager/covers`, which the import, `/api/artwork`
+    and the USB export share (not the code tree: in the installed app that is a
+    temp folder deleted on exit). Covers already in the old folders stay
+    readable. Importing an MP3 and a FLAC into a copy of the real library:
+    before 403 for both, after 200 with the embedded bytes and the stick picks
+    the library cover.
 - Beat grid (MP3):
   - Fixed: MP3 beat grids sat about 25 ms away from Rekordbox's. The grid was
     shifted by a fixed 22.5 ms because the LAME header was never actually read.

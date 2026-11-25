@@ -977,7 +977,9 @@ def _apply_sc_metadata(
     artwork_bytes = _fetch_artwork_bytes(sc_meta.get("artwork_url"))
 
     try:
-        ok = audio_tags.write_tags(file_path, updates, artwork=artwork_bytes)
+        # The file is this download's own output, seconds old: a backup copy would only
+        # crowd user-edit originals out of the capped tag-write backup store.
+        ok = audio_tags.write_tags(file_path, updates, artwork=artwork_bytes, backup=False)
         if ok:
             logger.info(
                 "[SC-DL] Tags written: %s — title=%r artist=%r genre=%r year=%s art=%s",

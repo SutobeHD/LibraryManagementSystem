@@ -47,6 +47,11 @@ Safety contract:
   * `restore_master_db` rolls back a whole backup SET (one timestamp), never a
     db from one generation beside a -wal from another: SQLite would replay the
     foreign WAL frames over the restored pages.
+  * A set of `master.db` also holds `masterPlaylists6.xml` when it sits beside
+    the db: rbox keeps the playlist tree in both, and a db rolled back under a
+    newer XML leaves Rekordbox with playlists the db does not know.
+  * `marker` names a backup family (`.phrasebak-` here, `.mergebak-` for the
+    artist merge); restore and prune only ever see sets of their own family.
 
 InFrame is derived as int(InMsec * 0.15) (150 frames/s — verified against real
 djmdCue rows). Memory cues are point cues: OutMsec=-1, OutFrame=0.
@@ -71,6 +76,8 @@ _PHRASE_COMMENT_RE = re.compile(r"^P\d+$")
 # InFrame = int(InMsec * _FRAMES_PER_MS); 150 fps, verified vs real djmdCue.
 _FRAMES_PER_MS = 0.15
 _BAK_MARKER = ".phrasebak-"
+# rbox's playlist tree beside master.db; part of every master.db snapshot set.
+PLAYLIST_XML = "masterPlaylists6.xml"
 # Rekordbox allocates random cue IDs; mirror that instead of max()+1.
 _MAX_CUE_ID = 2**28 - 1
 
@@ -95,7 +102,7 @@ def _rekordbox_running() -> bool:
         return False
 
 
-def _unique_stamp(base: Path) -> str:
+def _unique_stamp(base: Path, marker: str = _BAK_MARKER) -> str:
     """A `%Y%m%d-%H%M%S-%f` stamp no existing backup beside `base` uses.
 
     The stamp must stay lexicographically sortable (restore picks the newest set
@@ -105,70 +112,121 @@ def _unique_stamp(base: Path) -> str:
     silently overwrite the first generation. Step 1 µs forward until free.
     """
     now = datetime.now()
-    while any(base.parent.glob(f"{base.name}*{_BAK_MARKER}{now:%Y%m%d-%H%M%S-%f}")):
+    while any(base.parent.glob(f"{base.name}*{marker}{now:%Y%m%d-%H%M%S-%f}")):
         now += timedelta(microseconds=1)
     return f"{now:%Y%m%d-%H%M%S-%f}"
 
 
-def backup_master_db(db_path: str) -> list[str]:
-    """Copy `db_path` (+ its -wal) to timestamped `.phrasebak-*` files."""
-    timestamp = _unique_stamp(Path(db_path))
+def _snapshot_sources(db_path: str) -> list[Path]:
+    """Files one snapshot set copies: the db, its -wal, and the playlist XML.
+
+    The XML only belongs to a db named `master.db` — a decrypted copy elsewhere
+    must never pull the real library's XML into its set (and restore over it).
+    """
+    base = Path(db_path)
+    sources = [Path(db_path), Path(db_path + "-wal")]
+    if base.name == "master.db":
+        sources.append(base.with_name(PLAYLIST_XML))
+    return sources
+
+
+def backup_master_db(db_path: str, *, marker: str = _BAK_MARKER) -> list[str]:
+    """Copy `db_path` (+ its -wal + `masterPlaylists6.xml`) to timestamped backups.
+
+    Each copy is `<file><marker><stamp>` beside its original; every file of one
+    call shares the stamp, which is what makes it one restorable set.
+    """
+    timestamp = _unique_stamp(Path(db_path), marker)
     created: list[str] = []
-    for suffix in ("", "-wal"):
-        src = Path(db_path + suffix)
+    for src in _snapshot_sources(db_path):
         if src.exists():
-            dst = f"{src}{_BAK_MARKER}{timestamp}"
+            dst = f"{src}{marker}{timestamp}"
             shutil.copy2(str(src), dst)
             created.append(dst)
-    logger.info("backup_master_db: backed up %d file(s)", len(created))
+    logger.info("backup_master_db: backed up %d file(s) marker=%s", len(created), marker)
     return created
 
 
-def _backup_target(backup: str | Path) -> Path:
+def _backup_target(backup: str | Path, marker: str = _BAK_MARKER) -> Path:
     """`…/master.db-wal.phrasebak-<stamp>` → `…/master.db-wal`."""
     path = Path(backup)
-    base, marker, _stamp = path.name.rpartition(_BAK_MARKER)
-    if not marker:
+    base, found, _stamp = path.name.rpartition(marker)
+    if not found:
         raise ValueError(f"not a phrase backup file: {path.name}")
     return path.parent / base
 
 
-def _newest_backup_set(db_path: str) -> list[Path]:
-    """The `.phrasebak-*` files sharing the newest timestamp, or []."""
-    base = Path(db_path)
+def _backup_sets(db_path: str, marker: str = _BAK_MARKER) -> dict[str, list[Path]]:
+    """Every `marker` backup of this db's snapshot sources, grouped by stamp."""
+    names = {src.name for src in _snapshot_sources(db_path)}
+    parent = Path(db_path).parent
     sets: dict[str, list[Path]] = {}
-    for candidate in base.parent.glob(f"{base.name}*{_BAK_MARKER}*"):
-        stamp = candidate.name.rpartition(_BAK_MARKER)[2]
-        sets.setdefault(stamp, []).append(candidate)
+    for candidate in parent.glob(f"*{marker}*"):
+        base, _found, stamp = candidate.name.rpartition(marker)
+        if base in names:
+            sets.setdefault(stamp, []).append(candidate)
+    return sets
+
+
+def _newest_backup_set(db_path: str, marker: str = _BAK_MARKER) -> list[Path]:
+    """The backup files sharing the newest timestamp, or []."""
+    sets = _backup_sets(db_path, marker)
     if not sets:
         return []
     return sets[max(sets)]
 
 
-def restore_master_db(db_path: str, backups: list[str] | None = None) -> int:
+def prune_backup_sets(db_path: str, *, marker: str, keep: int) -> int:
+    """Delete all but the newest `keep` sets of one backup family. Returns files removed.
+
+    Callers hold `db_lock()`, the same lock a restore reads a set under.
+    """
+    sets = _backup_sets(db_path, marker)
+    removed = 0
+    for stamp in sorted(sets)[: max(0, len(sets) - max(1, keep))]:
+        for member in sets[stamp]:
+            try:
+                member.unlink()
+                removed += 1
+            except OSError as e:
+                logger.warning("prune_backup_sets: could not remove a backup err=%s", e.strerror)
+    if removed:
+        logger.info("prune_backup_sets: removed %d file(s) marker=%s", removed, marker)
+    return removed
+
+
+def restore_master_db(
+    db_path: str, backups: list[str] | None = None, *, marker: str = _BAK_MARKER
+) -> int:
     """Roll master.db back from ONE backup set (all files, one timestamp).
+
+    `masterPlaylists6.xml` comes back with the db when the set holds it; an XML
+    the set does not hold is left as it is.
 
     Args:
         db_path: master.db path.
         backups: exact backup files to restore. Defaults to the newest set.
+        marker:  backup family (`.phrasebak-` default, `.mergebak-` for a merge).
 
     Returns:
         Number of files copied back (0 when there is nothing to restore).
 
     Raises:
-        ValueError:            an entry in `backups` is not a `.phrasebak-*` file.
+        ValueError:            an entry in `backups` is not a `<marker>*` file.
         RuntimeError:          Rekordbox is running, or the set has no main-db member.
         RekordboxLockedError:  a sidecar could not be removed (file held).
     """
     if _rekordbox_running():
         raise RuntimeError("Rekordbox is running — close it before restoring master.db.")
 
-    members = [Path(b) for b in backups] if backups is not None else _newest_backup_set(db_path)
+    members = (
+        [Path(b) for b in backups] if backups is not None else _newest_backup_set(db_path, marker)
+    )
     if not members:
         logger.info("restore_master_db: no backup found — nothing restored")
         return 0
 
-    targets = {_backup_target(m): m for m in members}
+    targets = {_backup_target(m, marker): m for m in members}
     main = Path(db_path)
     if main not in targets:
         raise RuntimeError(f"incomplete backup set — no snapshot of {main.name}: {sorted(targets)}")

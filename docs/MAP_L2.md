@@ -671,6 +671,7 @@ Library artwork path -> image file on disk.
 
 - `ArtworkPathError` — An artwork path the resolver refuses; `status` is what `/api/artwork` answers.
 - `rekordbox_share_dir()` — Rekordbox 6/7 share folder (root of ImagePath), or None without APPDATA.
+- `legacy_covers_dirs()` — Folders older builds wrote imported covers to; read, never written.
 - `resolve_artwork_path()` — The image file a library artwork path points at.
 - `library_artwork_file()` — `resolve_artwork_path`, or None where the route would answer an error.
 
@@ -1125,7 +1126,8 @@ pairing_store — in-memory one-shot pairing codes (Phase-2 auth, T2).
 phrase_db_writer.py — write phrase memory cues into Rekordbox master.db (djmdCue).
 
 - `RekordboxLockedError` — master.db is locked — Rekordbox is probably running.
-- `backup_master_db()` — Copy `db_path` (+ its -wal) to timestamped `.phrasebak-*` files.
+- `backup_master_db()` — Copy `db_path` (+ its -wal + `masterPlaylists6.xml`) to timestamped backups.
+- `prune_backup_sets()` — Delete all but the newest `keep` sets of one backup family.
 - `restore_master_db()` — Roll master.db back from ONE backup set (all files, one timestamp).
 - `write_phrase_memory_cues()` — Write phrase memory cues (Kind=0) into djmdCue for one track.
 
@@ -1355,6 +1357,19 @@ SoundCloud Downloader — Dedup-aware download pipeline with two acquisition pat
 - `  SoundCloudDownloader.get_task_status()`
 - `  SoundCloudDownloader.note_names()` — Every task of one SoundCloud track shows the names the track carries now.
 - `  SoundCloudDownloader.cleanup_processes()` — No-op: kept for API compatibility.
+
+### `app/tag_backups.py`
+
+tag_backups — exact copy of an audio file before the app first rewrites its tags.
+
+- `BackupEntry` — One generation: the exact copy and its manifest.
+- `backup_root()` — ``%APPDATA%/MusicLibraryManager/tag-write-backups`` (format-swap's convention).
+- `file_key()` — Store key of one audio file: stable across spellings of the same path.
+- `generations()` — Every intact generation of one file, oldest first.
+- `ensure_backup()` — The generation holding this file's state before the app's writes; copy if none.
+- `record_written()` — Remember the app's own write, so the next one is not mistaken for a foreign edit.
+- `atomic_rewrite()` — Run ``mutate`` on a temp copy beside ``path``, then swap it in with ``os.replace``.
+- `restore()` — Put a generation (default: the newest) back over ``path``, byte for byte.
 
 ### `app/templates/build_template.py`
 
@@ -3415,6 +3430,12 @@ Artist-Hub merge apply/revert tests (T-6 + T-11a — app/artist_store/merge.py).
 - `test_apply_refuses_a_group_with_nothing_to_absorb()`
 - `test_apply_refuses_a_bare_artist_name_where_a_group_id_belongs()`
 - `test_tag_updates_only_ever_carries_the_allowlisted_field()`
+- `test_apply_snapshots_db_and_playlist_xml_before_the_first_write()`
+- `test_snapshot_comes_before_the_canonical_artist_is_created()`
+- `test_a_failed_snapshot_refuses_the_merge_before_any_write()`
+- `test_revert_takes_its_own_snapshot()`
+- `test_merge_keeps_only_the_newest_snapshot_sets()`
+- `test_a_fake_backend_takes_no_snapshot()`
 
 ### `tests/test_artist_merge_preview.py`
 
@@ -4271,10 +4292,13 @@ One artwork resolver for the app and the stick (`app/library_artwork.py`).
 - `share()` — APPDATA -> tmp; returns the Rekordbox share folder (with one cover in it).
 - `test_imagepath_resolves_inside_the_share()`
 - `test_absolute_path_in_the_covers_folder_passes()`
+- `test_covers_dir_is_the_per_user_data_folder_not_the_code_tree()`
+- `test_legacy_covers_folders_stay_readable()`
 - `test_refusals_carry_the_routes_status()`
 - `test_without_appdata_a_share_path_is_refused()`
 - `test_library_artwork_file_is_none_where_the_route_refuses()`
 - `test_route_serves_and_refuses_through_the_resolver()`
+- `test_imported_cover_is_served_and_picked_for_the_stick()`
 
 ### `tests/test_library_format_swap.py`
 
@@ -4831,6 +4855,12 @@ Unit tests for app/phrase_db_writer.py (djmdCue memory-cue writer).
 - `test_restore_refuses_a_set_without_the_main_db()`
 - `test_restore_returns_zero_when_no_backups()`
 - `test_restore_refuses_while_rekordbox_runs()`
+- `test_backup_set_includes_the_playlist_xml()`
+- `test_restore_puts_the_playlist_xml_back_with_the_db()`
+- `test_restore_leaves_an_xml_the_set_does_not_hold()`
+- `test_a_decrypted_copy_never_pulls_in_the_playlist_xml()` — The XML belongs to master.db; a copy's set must not carry (and restore) it.
+- `test_backup_families_never_mix()`
+- `test_prune_keeps_the_newest_sets_of_one_family()`
 - `TestMasterDbWriteLock` — Snapshot and restore are master.db writers — they hold the global lock.
 - `  TestMasterDbWriteLock.test_db_lock_is_the_global_write_lock()`
 - `  TestMasterDbWriteLock.test_snapshot_is_taken_under_the_lock()` — Outside it, another writer can commit between copy and write.
@@ -5470,6 +5500,31 @@ Contract tests for ``GET /api/system/health`` -- unauth'd liveness probe.
 - `  TestHealthLeaksNothing.test_response_model_filters_undeclared_fields()` — ``response_model`` pins the schema so future edits can't leak.
 - `TestHealthHasNoSideEffects`
 - `  TestHealthHasNoSideEffects.test_does_not_lazily_build_live_db()` — ``db.active_db`` constructs ``LiveRekordboxDB`` on first touch.
+
+### `tests/test_tag_backups.py`
+
+Tag writes keep an exact copy first, rewrite atomically and respect the size cap.
+
+- `store()`
+- `test_first_write_keeps_an_exact_copy_and_later_writes_do_not()`
+- `test_every_spelling_of_one_path_shares_the_copy()`
+- `test_an_outside_edit_gets_its_own_generation()`
+- `test_a_restored_file_reuses_its_generation()`
+- `test_backup_false_takes_no_copy()`
+- `test_cap_prunes_the_oldest_copies_first()`
+- `test_a_copy_larger_than_the_cap_is_still_kept()`
+- `test_crash_leftovers_are_swept_but_an_unreadable_manifest_keeps_its_copy()`
+- `test_a_writer_failing_mid_save_leaves_the_original_byte_identical()`
+- `test_a_file_held_open_by_another_process_is_not_replaced()`
+- `test_a_file_changed_while_its_copy_was_edited_is_not_replaced()`
+- `test_a_track_streaming_to_the_player_does_not_block_the_write()` — The stream reader holds no handle between chunks (Windows refuses os.replace then).
+- `test_a_killed_process_leaves_the_original_untouched()` — A hard kill mid-save (no finally, no except) — the strongest crash we can stage.
+- `test_no_copy_means_no_write()`
+- `test_a_read_only_file_is_refused_without_a_copy()`
+- `test_log_lines_carry_no_path()`
+- `test_tags_land_audio_and_cover_stay_and_restore_is_byte_exact()`
+- `test_restore_refuses_a_damaged_copy()`
+- `test_restore_without_a_copy_is_a_no_op()`
 
 ### `tests/test_track_batch_tags.py`
 
