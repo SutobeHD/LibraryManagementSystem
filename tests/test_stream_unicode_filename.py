@@ -20,7 +20,9 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import httpx
+import numpy as np
 import pytest
+import soundfile as sf
 
 from app.main import ALLOWED_AUDIO_ROOTS, _content_disposition_inline, app
 
@@ -106,9 +108,13 @@ def test_content_disposition_strips_control_chars() -> None:
 # --- integration: the real endpoint no longer 500s on a non-latin-1 file ---
 
 
-def test_stream_non_latin1_filename(sandbox_root: Path) -> None:
-    f = sandbox_root / NON_LATIN1_NAME
-    f.write_bytes(b"FORM\x00\x00\x00\x10AIFF" + b"\x00" * 64)
+@pytest.mark.parametrize("suffix", [".aiff", ".mp3"])  # AIFF as WAV view, MP3 as raw bytes
+def test_stream_non_latin1_filename(sandbox_root: Path, suffix: str) -> None:
+    f = sandbox_root / NON_LATIN1_NAME.replace(".aiff", suffix)
+    if suffix == ".aiff":
+        sf.write(f, np.zeros((64, 2), dtype="int16"), 44100, format="AIFF", subtype="PCM_16")
+    else:
+        f.write_bytes(b"\xff\xfb" + b"\x00" * 64)
 
     # Build the query with proper percent-encoding of the unicode path.
     from urllib.parse import quote

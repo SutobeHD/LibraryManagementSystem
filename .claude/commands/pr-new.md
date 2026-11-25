@@ -49,7 +49,7 @@ Open a pull request for the current work. Args: $ARGUMENTS
      ```
    - Read `git diff origin/main..HEAD --stat` to figure out which test commands are relevant (pytest? cargo test? frontend? e2e?).
 
-6. **Create the PR** via `gh pr create` (in `ask` list — confirm with user):
+6. **Create the PR** via `gh pr create` (autonomous — no confirm):
    ```bash
    gh pr create --base main --head <branch-name> --title "<title>" --body "$(cat <<'EOF'
    <body>

@@ -11,19 +11,23 @@ id = "live-master-db"
 group = "Datenbank"
 name = "Live master.db (rbox)"
 status = "shipped"
+test = "getestet"
+tested = "2026-11-14"
 desc = "Direkter Zugriff auf Rekordbox master.db, laden/entladen, Modus live/xml."
 paths = ["app/live_database.py", "app/database.py", "frontend/src/components/settings/SettingsLibrary.jsx", "tests/test_database.py"]
 routes = ["/api/library/status", "/api/library/mode", "/api/library/load", "/api/system/select_db"]
 depends_on = ["db-write-lock", "anlz-safe-reader"]
-notes = "Zentrale DB-Schicht - fast jedes Feature hängt daran. FILE_MAP verspricht Backup-Management, das es nicht gibt."
+notes = "Zentrale DB-Schicht - fast jedes Feature hängt daran. FILE_MAP verspricht Backup-Management, das es nicht gibt. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): ok."
 
 [[feature]]
 id = "db-write-lock"
 group = "Datenbank"
 name = "DB-Write-Lock"
 status = "partial"
+test = "getestet"
+tested = "2026-11-14"
 desc = "db_lock() / _serialised serialisieren alle rbox-Schreiber (in app/database.py)."
-notes = "Lücke: AnalysisDBWriter schreibt rbox direkt ohne Lock."
+notes = "Lücke: AnalysisDBWriter schreibt rbox direkt ohne Lock. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): ok."
 
 [[feature]]
 id = "db-write-lock-retrofit"
@@ -43,16 +47,22 @@ id = "rekordbox-running-guard"
 group = "Datenbank"
 name = "Rekordbox-läuft-Sperre"
 status = "shipped"
-desc = "Erkennt laufendes Rekordbox, blockt Writes (Format-Swap, Merge, Projektion, analyze-full)."
-notes = "Lebt in app/services.py."
+test = "getestet"
+tested = "2026-11-22"
+desc = "Erkennt laufendes Rekordbox, blockt Live-master.db-Writes mit 409: Track-Edits, MyTags, Track-Löschen, alle Playlist-Änderungen, Importe, Duplikat-Merges, SC-Sync/-Merge, Format-Swap, Artist-Merge/Projektion, analyze-full, Playcount-Resolve."
+paths = ["tests/test_rekordbox_running_guard.py"]
+todo = ["/api/track/delete validiert den Body vor der Sperre (422 statt 409 bei falschem Body) - harmlos"]
+notes = "Fix 2026-11-23 (fix/api-route-hygiene, am PC noch nicht geprüft): /api/usb/playcount/resolve sperrt jetzt als erste Anweisung, schreibt den Live-master.db-Pfad (_live_master_db_path) unter db_lock; im XML-Modus nur das USB-XML (pc_db_skipped). Frontend PlayCountSync zeigt jetzt den detail-Text statt 'status code 409'. PC-Test 2026-11-22 (Stick-Ordner statt Stick, Kopie der Library): Ersatzprozess rekordbox.exe: 12 geschützte Schreibrouten (Playlists, Tracks, Batch, Delete, analyze-full, import-paths, clean-titles) -> 409, Kopie byte-gleich; danach Schreiben wieder 200. Routen: app/main.py _reject_while_rekordbox_runs(action) als erste Anweisung im Handler (nur Live-Modus scannt, fail-open). Format-Swap nutzt services.is_rekordbox_running. Offen: Downloads/Folder-Watcher/Render importieren später im Hintergrund ohne Check; 409-Text kommt im Frontend nur als generischer Fehler-Toast an."
 
 [[feature]]
 id = "rekordbox-write-backups"
 group = "Datenbank"
 name = "Backups vor Writes"
 status = "shipped"
+test = "getestet"
+tested = "2026-11-14"
 desc = "ANLZ-.bak mit Prune, master.db-Snapshot vor Format-Swap plus Rollback, Undo-Journale."
-notes = "Kein allgemeines master.db-Backup - jedes Feature sichert nur für sich."
+notes = "Kein allgemeines master.db-Backup - jedes Feature sichert nur für sich. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): ok."
 
 # ── Standalone & XML ──────────────────────────────────────────────────────
 
@@ -61,11 +71,13 @@ id = "standalone-library-mode"
 group = "Standalone & XML"
 name = "Standalone-XML-Modus"
 status = "shipped"
+test = "getestet"
+tested = "2026-11-14"
 desc = "Library ohne Rekordbox als rekordbox.xml: neu/laden/speichern, eigene master.db anlegen."
 paths = ["app/library_source.py"]
 routes = ["/api/library/new", "/api/library/sync", "/api/debug/load_xml"]
 related = ["live-master-db"]
-notes = "Eigene master.db nutzt rbox OneLibrary.create (in 0.1.7 kaputt)."
+notes = "Eigene master.db nutzt rbox OneLibrary.create (in 0.1.7 kaputt). Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): ok."
 
 [[feature]]
 id = "xml-standalone-leftovers"
@@ -82,10 +94,13 @@ id = "rekordbox-xml-bridge"
 group = "Standalone & XML"
 name = "Rekordbox-XML Export/Import"
 status = "shipped"
+test = "testen"
 desc = "Auswahl als DJ_PLAYLISTS-XML exportieren, XML importieren (add/update)."
-paths = ["app/rekordbox_bridge.py", "app/xml_generator.py", "frontend/src/components/settings/SettingsExport.jsx"]
+paths = ["app/rekordbox_bridge.py", "app/xml_generator.py", "frontend/src/components/settings/SettingsExport.jsx", "tests/test_xml_generator.py"]
 routes = ["/api/rekordbox/export", "/api/rekordbox/import"]
 depends_on = ["standalone-library-mode"]
+todo = ["Import der XML in echtes Rekordbox (Nutzer, später)", "Export während des Beatgrid-Ladens (~28 s nach Library-Laden/Moduswechsel) schreibt Tracks ohne TEMPO - 5041-Track-Export 2,2 MB statt 265 MB; Route wartet nicht auf den Loader"]
+notes = "UI 2026-11-25 (feat/xml-playlist-export-ui): Rechtsklick auf Playlist/Smart-Playlist/Ordner -> 'Export as Rekordbox XML' + Settings > Export Auswahl 'XML export scope' (Standard 'Whole library'); beide über exportRekordboxXml (api.js), Datei exports/<Name>.xml (unzulässige Zeichen -> _), Toast mit Track-Zahl + übersprungenen Streaming-Tracks, Request-Timeout 5 min (ganze Library 12-20 s, 10-s-Default meldete Fehler). PC-Test 2026-11-25 Library-Kopie (5041 Tracks): Test 12/12, SC_Trance remixee pp 31 + 3 Streaming übersprungen, Hardtrancy 125 Reihenfolge = Playlist-Ansicht, Ordner Bounce (2 Kinder, 4 Tracks) und Friends (3 Kinder, 125 Einträge, 112 eindeutig) als Unterbaum, Smart-Playlist Kein Genre 4929, ganze Library 4929 + ROOT allein, leerer Ordner -> Fehlertoast 'No tracks found'. Fix 2026-11-23 (fix/xml-export): Route nimmt playlist_id (Playlist oder Ordner samt Unterbaum, Reihenfolge wie Playlist-Ansicht) oder track_ids + playlist_name; schreibt NODE Type 1 / KeyType 0 / Entries bzw. Ordner Type 0 / Count unter ROOT. Ohne Name bleibt ROOT allein (Count 0). Streaming-Tracks (soundcloud:/spotify:/tidal:/beatport:/http) fliegen aus COLLECTION und Playlist, Antwort meldet skipped_streaming - kein Rekordbox-Location-Format für Streaming im Repo dokumentiert. PC-Test 2026-11-22: 37-Track-Export Felder = Library, Location inkl. Sonderzeichen korrekt, B14 hält; TEMPO pro Beat, erster Inizio = erster Rekordbox-Beat (kein 0,0 auf diesem Pfad). B14 (2026-11-21): Export schrieb Kind immer WAV, Location unkodiert, DateAdded = heute, TrackID 1..N, Beat als Battuta; Dateiname ungeprüft (../ und absolut verließen exports/). Jetzt echte Werte + Tonality/Rating/Comments/BitRate, Name -> Basisname.xml in exports/. Rekordbox-Import der Datei im echten Rekordbox noch ungetestet."
 
 [[feature]]
 id = "xml-cleaner"
@@ -103,8 +118,11 @@ id = "anlz-safe-reader"
 group = "ANLZ"
 name = "ANLZ sicher lesen"
 status = "shipped"
+test = "getestet"
+tested = "2026-11-14"
 desc = "Beatgrid PQTZ im isolierten Prozess, bei rbox-Panic bisektieren, Hintergrund-Laden."
 paths = ["app/anlz_safe.py", "app/pyrekordbox_compat.py"]
+notes = "Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): ok."
 
 [[feature]]
 id = "anlz-parser-simplify"
@@ -121,8 +139,11 @@ id = "anlz-writer"
 group = "ANLZ"
 name = "ANLZ-Writer (.DAT/.EXT/.2EX)"
 status = "shipped"
+test = "getestet"
+tested = "2026-11-14"
 desc = "Rekordbox-kompatible ANLZ-Dateien (Beatgrid, Waveforms, Cues, PSSI) + Companion-ANLZ beim Import."
 paths = ["app/anlz_writer.py", "app/anlz_sidecar.py"]
+notes = "Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): ok."
 
 [[feature]]
 id = "anlz-memory-cue-patch"
@@ -160,11 +181,12 @@ id = "hot-cue-16-limits"
 group = "Cues & Phrasen"
 name = "16 Hot-Cues + Limits anheben"
 status = "unmerged"
+test = "testen"
 branch = "claude/investigate-track-data-F8dNm"
 pr = 22
 desc = "Hot-Cues 8 -> 16 (A..P), Memory-Cues 16 -> 40, BPM-Fold 60-200, phrase_bars respektieren."
-related = ["auto-cues-phrases", "phrase-cue-generator"]
-todo = ["auf aktuellem main neu portieren", "CDJ-3000-Test Banks A..P"]
+related = ["auto-cues-phrases", "phrase-cue-generator", "cdj-hardware-validation"]
+todo = ["auf aktuellem main neu portieren"]
 notes = "PR #22 veraltet (316 hinter main, Konflikte, CI rot) - schließen und neu bauen. main hat cue_max_hot=8."
 
 [[feature]]
@@ -183,9 +205,8 @@ id = "phrase-db-writer"
 group = "Cues & Phrasen"
 parent = "phrase-cue-generator"
 name = "Phrase-Cues in djmdCue"
-status = "unmerged"
-branch = "claude/dreamy-planck-w7771v"
-pr = 60
+status = "partial"
+test = "testen"
 desc = "Memory-Cues direkt in master.db djmdCue via pyrekordbox, mit Backup/Restore."
 paths = ["app/phrase_db_writer.py", "tests/test_phrase_db_writer.py"]
 depends_on = ["pyrekordbox-upgrade"]
@@ -214,6 +235,16 @@ pr = 26
 desc = "Bump könnte anlz_safe-Quarantäne und OneLibrary-Template-Hack überflüssig machen und verschlüsselte master.db öffnen."
 related = ["anlz-parser-simplify", "phrase-db-writer", "usb-onelibrary-track-limit"]
 notes = "User-Entscheidung. requirements.txt ist heute schon unerfüllbar (pyrekordbox 0.1.7 vs sqlalchemy 2.0.49)."
+
+[[feature]]
+id = "rbox-upgrade"
+group = "Abhängigkeiten"
+name = "rbox 0.1.7 -> 0.3.1"
+status = "idea"
+desc = "rbox-Bump: OneLibrary-Zeilen per insert_content statt Halbzeilen-Trick, evtl. export.pdb über rbox DeviceLibrary."
+related = ["pyrekordbox-upgrade", "usb-onelibrary-track-limit", "usb-legacy-pdb"]
+todo = ["OneLibrary(path) nimmt in 0.3.1 ein Verzeichnis -> OneLibrary.from_path()", "_new_slot auf NewContent + insert_content umstellen (Halbzeilen-Trick geht in 0.3.1 nicht mehr)", "rbox.one_library -> rbox.onelib", "Live-Modus gegen echte master.db testen", "Schicht-A-Check + PyInstaller-Bundle"]
+notes = "Probe 2026-11-22 (Wegwerf-venv): insert_content geht, create_content weiter kaputt; volle Suite mit 0.3.1 nur 3 OneLibrary-Pfad-Tests rot. User: erst nach dem 16-Track-Fix, eigener PR (gemeinsames .venv der Parallel-Sitzungen)."
 
 [[feature]]
 id = "track-lock-flag"

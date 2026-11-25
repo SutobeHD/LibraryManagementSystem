@@ -41,6 +41,21 @@ def test_normalize_fields_drops_none_and_unknown():
     assert all(v is not None for v in out.values())
 
 
+def test_tag_fields_drop_what_no_file_tag_stores():
+    assert audio_tags.tag_fields({"ColorID": 3}) == {}
+    assert audio_tags.tag_fields({"ColorID": 3, "Rating": 4}) == {"rating": 4}
+
+
+def test_one_lock_per_file_whatever_the_spelling(tmp_path):
+    (tmp_path / "sub").mkdir()
+    a = tmp_path / "a.mp3"
+    assert audio_tags._file_key(a) == audio_tags._file_key(tmp_path / "sub" / ".." / "a.mp3")
+    locks = audio_tags.FileWriteLocks([a, str(a), tmp_path / "sub" / ".." / "a.mp3", ""])
+    assert len(locks._locks) == 1
+    with locks, locks:  # re-entrant: a route holds it while write_tags takes it again
+        pass
+
+
 def test_write_tags_unsupported_and_missing(tmp_path):
     # unsupported extension → False (not a crash)
     p = tmp_path / "x.xyz"

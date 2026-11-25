@@ -75,7 +75,8 @@ def test_io_degrades_without_pyrekordbox(tmp_path, monkeypatch):
     assert ms.get_schema()["available"] is False
     assert ms.read_settings(tmp_path) == {}
     assert ms.write_settings(tmp_path, {"MYSETTING": {"auto_cue": "off"}}) == {}
-    assert ms.write_defaults(tmp_path) == {}
+    # DEVSETTING.DAT is plain bytes, no pyrekordbox needed; the other three are skipped.
+    assert set(ms.write_defaults(tmp_path)) == {"DEVSETTING"}
 
 
 def test_enum_options_empty_without_pyrekordbox(monkeypatch):

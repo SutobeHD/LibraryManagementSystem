@@ -36,7 +36,16 @@ LibraryManagementSystem -- Analysis Result Cache
 
 LibraryManagementSystem -- Analysis-to-Database Writer
 
+- `AnalysisDbUpdateError` — master.db refused the analysis write (row missing, rbox error, bad value).
+- `rekordbox_key_name()` — Rekordbox key name for an ``analysis_engine`` key id (1-12 major, 13-24 minor).
+- `KeyNotation` — How a Rekordbox library spells the key names in ``djmdKey``.
+- `library_key_notation()` — The notation most keyed tracks of a library use; tie or no keyed track = classic.
+- `library_key_name()` — The ``djmdKey`` name to write for a detected key, in the library's own notation.
+- `detect_library_key_notation()` — ``library_key_notation`` over every content row of an open ``rbox.MasterDb``.
+- `rekordbox_anlz_rel_path()` — The ``AnalysisDataPath`` Rekordbox records for a content row, from its uuid.
 - `AnalysisDBWriter` — Writes analysis results into the Rekordbox live database.
+- `  AnalysisDBWriter.key_notation()` — The notation the library's keys are in, detected once per writer and cached.
+- `  AnalysisDBWriter.forget_key_notation()` — Drop the cached notation: the library was reloaded and may have changed.
 - `  AnalysisDBWriter.shutdown()`
 - `  AnalysisDBWriter.analyze_and_save()` — Full pipeline: analyze a track and write results to Rekordbox DB + ANLZ files.
 - `  AnalysisDBWriter.analyze_batch()` — Analyze multiple tracks sequentially, yielding progress after each.
@@ -52,6 +61,7 @@ LibraryManagementSystem -- High-Accuracy Analysis Engine (v2.0)
 - `detect_beats_madmom()` — RNN-based beat tracking using madmom.
 - `detect_beats()` — High-accuracy BPM and beat grid detection.
 - `find_first_signal_onset()` — Find the time (in seconds) of the first non-silent audio.
+- `mp3_lead_in_s()` — Seconds Rekordbox's MP3 decode runs ahead of ours: waveform columns get
 - `generate_waveform_data()` — Generate ALL waveform data required for Rekordbox ANLZ files:
 - `detect_phrases()` — Adaptive song-structure detection (Energy + MFCC timbre changes).
 - `generate_hot_cues()`
@@ -96,6 +106,7 @@ Safe wrapper around `rbox.MasterDb` + `rbox.Anlz` for PQTZ beatgrid loading.
 
 - `resolve_anlz_paths()` — Map track id -> {"DAT", "EXT", "EX2"} absolute ANLZ paths.
 - `resolve_anlz_dir()` — Directory holding a track's ANLZ files, or None if it has none.
+- `resolve_anlz_dat()` — Absolute ``.DAT`` path master.db records for a track, or None.
 - `SafeAnlzParser` — Process-isolated PQTZ extractor with crash recovery.
 - `  SafeAnlzParser.load_all_beatgrids()` — Load PQTZ beatgrids for every track id in one efficient pass.
 - `  SafeAnlzParser.parse_pqtz()` — Parse PQTZ entries from one ANLZ DAT file.
@@ -104,10 +115,12 @@ Safe wrapper around `rbox.MasterDb` + `rbox.Anlz` for PQTZ beatgrid loading.
 
 ### `app/anlz_sidecar.py`
 
-ANLZ-Sidecar writer — shared helper used by every track-import path
+LMS ANLZ cache — DAT/EXT/2EX files LMS generated for a track that has no
 
-- `sidecar_dir_for()` — Stable, collision-resistant per-track sidecar directory.
-- `write_companion_anlz()` — Write DAT/EXT/2EX next to file_path.
+- `anlz_cache_root()` — Root of the LMS ANLZ cache: the per-user cache dir, outside every music folder.
+- `sidecar_dir_for()` — Stable, collision-resistant per-track ANLZ cache directory (keyed on the path).
+- `legacy_sidecar_dir_for()` — Where builds before 0.1 wrote the sidecar, next to the audio.
+- `write_companion_anlz()` — Write DAT/EXT/2EX for file_path into the LMS ANLZ cache.
 
 ### `app/anlz_usb_export.py`
 
@@ -401,6 +414,8 @@ LibraryManagementSystem -- Audio Analyzer (Unified Wrapper)
 
 audio_tags — write metadata back to the source audio file.
 
+- `tag_fields()` — The part of a library update the file's tags store (``ColorID`` is not one).
+- `FileWriteLocks` — Context manager holding the tag-write lock of every file in ``paths``.
 - `write_tags()` — Mirror updates into the audio file's native tag format.
 - `load_artwork()` — Read an artwork file from disk into bytes, or None on any failure.
 - `read_tags()` — Read metadata tags from any supported audio file.
@@ -499,6 +514,7 @@ Batch comment edits over the live library (``POST /api/tools/batch-comment``).
 - `  RekordboxDB.get_playlist_tracks()`
 - `  RekordboxDB.get_track_details()`
 - `  RekordboxDB.add_track()`
+- `  RekordboxDB.attach_import_anlz()` — Live mode: ANLZ into Rekordbox's share + ``AnalysisDataPath``.
 - `  RekordboxDB.delete_track()`
 - `  RekordboxDB.rename_playlist()`
 - `  RekordboxDB.move_playlist()`
@@ -603,6 +619,8 @@ Per-encoder FFmpeg binary resolution with cached ``-encoders`` probing.
 - `candidate_binaries()` — Ordered ``(path, source_label)`` candidates.
 - `probe_audio_encoders()` — Audio encoder names of ``path``, or ``None`` when the probe fails.
 - `resolve_for_encoder()` — First candidate whose probe carries ``encoder`` wins.
+- `probe_input_protocols()` — Input protocol names of ``path`` (``ffmpeg -protocols``), or ``None`` when the probe fails.
+- `resolve_for_protocols()` — First candidate whose input protocols include every name in ``required`` wins.
 - `resolve_ffprobe()` — ffprobe path, independent of discovery-candidate ffmpeg binaries.
 
 ### `app/folder_watcher.py`
@@ -646,10 +664,20 @@ Per-file import-progress tracker — gives the frontend a live transparent
 - `get()`
 - `clear_finished()` — Remove all Completed/Failed/Skipped rows.
 
+### `app/library_artwork.py`
+
+Library artwork path -> image file on disk.
+
+- `ArtworkPathError` — An artwork path the resolver refuses; `status` is what `/api/artwork` answers.
+- `rekordbox_share_dir()` — Rekordbox 6/7 share folder (root of ImagePath), or None without APPDATA.
+- `resolve_artwork_path()` — The image file a library artwork path points at.
+- `library_artwork_file()` — `resolve_artwork_path`, or None where the route would answer an error.
+
 ### `app/library_format_swap.py`
 
 Library-wide audio format conversion engine.
 
+- `file_type_for()` — The Pioneer FileType code for an audio file's extension; 0 when unknown.
 - `TrackPlan`
 - `DryRunResult`
 - `ExecuteResult`
@@ -673,7 +701,8 @@ LibrarySource — uniform abstraction over Live (master.db) and XML modes.
 - `  LibrarySource.iter_playlists()` — yields {id, name, parent_id, type ('0'|'1'|'4'), track_ids: list}
 - `  LibrarySource.get_track()`
 - `  LibrarySource.get_playlist_track_ids()`
-- `  LibrarySource.get_anlz_sidecar_dir()` — Returns directory containing prebuilt ANLZ files (from import-time analysis), if any.
+- `  LibrarySource.get_rekordbox_anlz_dat()` — The ``.DAT`` Rekordbox's own analysis wrote for this track, if the mode has one.
+- `  LibrarySource.get_anlz_sidecar_dir()` — Directory with LMS-generated ANLZ files for the track (cache, then legacy).
 - `XmlLibrarySource` — Reads from RekordboxXMLDB.
 - `  XmlLibrarySource.iter_tracks()`
 - `  XmlLibrarySource.get_track()`
@@ -684,6 +713,7 @@ LibrarySource — uniform abstraction over Live (master.db) and XML modes.
 - `  LiveLibrarySource.get_track()`
 - `  LiveLibrarySource.iter_playlists()`
 - `  LiveLibrarySource.get_playlist_track_ids()`
+- `  LiveLibrarySource.get_rekordbox_anlz_dat()` — The ``.DAT`` at the AnalysisDataPath master.db records, when it is on disk.
 - `from_db()` — Factory: pick correct source from DBWrapper.
 
 ### `app/live_database.py`
@@ -703,9 +733,11 @@ LibrarySource — uniform abstraction over Live (master.db) and XML modes.
 - `  LiveRekordboxDB.get_playlist_tracks()`
 - `  LiveRekordboxDB.get_track_details()`
 - `  LiveRekordboxDB.add_track()`
-- `  LiveRekordboxDB.delete_track()`
+- `  LiveRekordboxDB.attach_import_anlz()` — Write a new track's ANLZ trio into Rekordbox's share and record it in master.db.
+- `  LiveRekordboxDB.delete_track()` — Always False: rbox 0.1.7 cannot delete a djmdContent row.
 - `  LiveRekordboxDB.update_track_comment()`
 - `  LiveRekordboxDB.update_track_metadata()` — Write ``updates`` to one master.db row.
+- `  LiveRekordboxDB.update_tracks_metadata()` — Write ``updates`` to every row in ``track_ids``, all or nothing.
 - `  LiveRekordboxDB.list_mytags()` — Return all defined MyTag entries as [{id, name}, …].
 - `  LiveRekordboxDB.get_track_mytags()` — Return MyTag IDs assigned to the given track.
 - `  LiveRekordboxDB.create_mytag()` — Create a new MyTag definition.
@@ -714,7 +746,7 @@ LibrarySource — uniform abstraction over Live (master.db) and XML modes.
 - `  LiveRekordboxDB.get_analysis_writer()` — Returns an AnalysisDBWriter instance bound to this database.
 - `  LiveRekordboxDB.get_unanalyzed_track_ids()` — Returns list of track IDs that have BPM=0 or no beatgrid.
 - `  LiveRekordboxDB.rename_playlist()`
-- `  LiveRekordboxDB.move_playlist()`
+- `  LiveRekordboxDB.move_playlist()` — Move a playlist / folder into a parent, optionally right before/after a sibling.
 - `  LiveRekordboxDB.delete_playlist()`
 - `  LiveRekordboxDB.create_playlist()`
 - `  LiveRekordboxDB.add_track_to_playlist()`
@@ -724,7 +756,7 @@ LibrarySource — uniform abstraction over Live (master.db) and XML modes.
 - `  LiveRekordboxDB.get_playlist_track_ids()` — Content ids currently linked to a playlist, read fresh (not from the cache).
 - `  LiveRekordboxDB.playlist_xml_path()` — Path to Rekordbox's masterPlaylists6.xml, or None when rbox found none.
 - `  LiveRekordboxDB.get_playlist_by_path()` — Resolve a folder/playlist path like ["Artists", "Boys Noize"].
-- `  LiveRekordboxDB.reorder_playlist_track()` — Reorders a track in a playlist.
+- `  LiveRekordboxDB.reorder_playlist_track()` — Move a track to 0-based position ``new_index`` of the playlist (clamped).
 
 ### `app/logging_utils.py`
 
@@ -733,6 +765,7 @@ Log redaction helpers — scrub absolute paths from log lines + tracebacks.
 - `safe_error_message_str()` — Strip absolute paths from a rendered log/error string.
 - `RedactingFormatter` — `logging.Formatter` that scrubs paths from message + cached traceback.
 - `  RedactingFormatter.format()`
+- `uvicorn_log_config()` — uvicorn's own logging config with scrubbing formatters.
 
 ### `app/main.py`
 
@@ -765,7 +798,7 @@ Log redaction helpers — scrub absolute paths from log lines + tracebacks.
 - `AnalyzeFullReq`
 - `AnalyzeBatchReq`
 - `MergeReq`
-- `RbxSyncReq`
+- `RbxSyncReq` — Tracks by id (``playlist_name`` makes them one playlist) or one library playlist/folder.
 - `RbxImportReq`
 - `PlCreateReq`
 - `PlRenameReq`
@@ -790,7 +823,7 @@ Log redaction helpers — scrub absolute paths from log lines + tracebacks.
 - `ArtistMusicBrainzReq` — The MusicBrainz artist the user picked out of the refresh's candidates.
 - `ArtistTrackAssignReq` — One manual correction to an artist's local tracks.
 - `DownloadNamesReq` — Artist/Title for a downloaded track: a taken suggestion, or the raw names an undo restores.
-- `stream_audio()` — Streams audio file with HTTP Range support — required for browser seeking.
+- `stream_audio()` — Streams an audio file with HTTP Range support — required for browser seeking.
 - `get_multiband_waveform()` — Returns 3-band waveform data for professional visualization.
 - `FileRevealReq`
 - `file_reveal()` — Open the OS file explorer pointing at the given audio file path.
@@ -849,7 +882,7 @@ Log redaction helpers — scrub absolute paths from log lines + tracebacks.
 - `get_cues()`
 - `get_beatgrid()`
 - `analyze_track()` — Analyzes a track to detect BPM and beat grid if missing from XML
-- `stream_audio_file()` — Streams an audio file from the local filesystem
+- `stream_audio_file()` — Same response as ``/api/stream``, under the URL DawEngine uses.
 - `MyTagCreateReq`
 - `TrackMyTagsReq`
 - `list_mytags()`
@@ -859,8 +892,8 @@ Log redaction helpers — scrub absolute paths from log lines + tracebacks.
 - `set_track_mytags()`
 - `save_cues()`
 - `save_grid()`
-- `update_track()`
-- `batch_up()`
+- `update_track()` — Edit one track.
+- `batch_up()` — Write the same fields to many tracks, all or nothing.
 - `system_heartbeat()` — Lightweight keep-alive ping.
 - `HealthResponse` — Liveness/readiness payload.
 - `system_health()` — Unauthenticated liveness probe.
@@ -868,7 +901,7 @@ Log redaction helpers — scrub absolute paths from log lines + tracebacks.
 - `move_t()`
 - `ren_t()` — Bulk smart-rename audio files on disk using a token pattern.
 - `get_tree()`
-- `create_pl()`
+- `create_pl()` — Create a playlist (``type`` "1") or folder ("0").
 - `rename_pl()`
 - `move_pl()`
 - `delete_pl()`
@@ -904,12 +937,13 @@ Log redaction helpers — scrub absolute paths from log lines + tracebacks.
 - `format_swap_picker_mytags()` — MyTag list with track counts.
 - `format_swap_picker_subset_counts()` — Cheap pre-dry-run count + total source MB for a library subset.
 - `get_lib_status()`
+- `get_library_quality_stats()` — Lossless/lossy track counts of the loaded library, by file extension.
 - `set_lib_mode()`
 - `sync_lib()` — Persist the in-memory library.
 - `LoadLibReq`
 - `load_lib()`
 - `unload_lib()`
-- `rbx_export()` — Exports specified tracks to a Rekordbox XML file.
+- `rbx_export()` — Write tracks, or one playlist/folder with its NODE tree, as Rekordbox XML into ``EXPORT_DIR``.
 - `rbx_import()` — Imports tracks and metadata from a Rekordbox XML file.
 - `gen_smart()` — Rebuild the "By Label" auto-playlists.
 - `PathRequest` — Generic single-path body used by every endpoint that needs to point at
@@ -1106,6 +1140,22 @@ phrase_generator.py — Phrase & Auto-Cue Generator
 - `resolve_anlz_dirs()` — Resolve the ANLZ directory of many tracks with ONE master.db open.
 - `commit_phrase_cues()` — Write phrase markers as Rekordbox MEMORY cues into the track's existing
 
+### `app/playable_audio.py`
+
+Browser-playable view of AIFF files: a virtual WAV computed from the source.
+
+- `WavViewError` — Source cannot be presented as WAV (unreadable, unsupported or too large).
+- `WavView`
+- `  WavView.frame_bytes()`
+- `  WavView.data_bytes()`
+- `  WavView.size()`
+- `  WavView.header()`
+- `needs_wav_view()` — True for files the browser cannot decode and the stream routes serve as WAV.
+- `wav_filename()` — ``Track.aiff`` -> ``Track.wav`` for the response's Content-Disposition.
+- `describe()` — Read the source header and lay out the WAV view.
+- `parse_range()` — ``Range`` header -> inclusive ``(start, end)``, per RFC 7233.
+- `iter_range()` — Bytes ``start..end`` (inclusive) of the WAV view, in ~1 MiB chunks.
+
 ### `app/playcount_sync.py`
 
 playcount_sync.py — USB Play-Count Sync Engine
@@ -1158,8 +1208,11 @@ RBEP Parser — Parses Rekordbox Editor Project (.rbep) files.
 
 *(no module docstring)*
 
+- `PlaylistNotFoundError`
+- `RbxExportResult`
 - `RekordboxBridge`
-- `  RekordboxBridge.export_collection()` — Exports selected tracks to a Rekordbox-compatible XML.
+- `  RekordboxBridge.export_collection()` — Selected tracks as Rekordbox XML.
+- `  RekordboxBridge.export_playlist()` — One library playlist, or a folder with its subtree, as Rekordbox XML.
 - `  RekordboxBridge.import_library()` — Imports data from a Rekordbox XML and updates the local database.
 
 ### `app/rekordbox_export.py`
@@ -1314,6 +1367,8 @@ Track-metadata field policy: which keys a library backend stores, and their valu
 - `TrackFieldError` — A track update the backend refuses as a whole.
 - `UnsupportedTrackFields` — The update names field keys this backend cannot write.
 - `InvalidTrackFieldValue` — A known field carries a value the backend cannot store.
+- `UnknownTrackIds` — The update names track ids the library does not hold.
+- `TrackWriteFailed` — A library write failed partway through an update.
 - `writable_fields()` — Field keys ``backend`` (``"live"`` / ``"xml"``) persists.
 - `normalise_track_updates()` — Allowlist the keys and type-check every value.
 
@@ -1321,8 +1376,12 @@ Track-metadata field policy: which keys a library backend stores, and their valu
 
 USB artwork extraction + bucketed write to PIONEER/Artwork/.
 
-- `get_artwork_bytes()` — Public single-shot extractor — embedded → sidecar → None.
+- `get_artwork_bytes()` — Public single-shot extractor — library cover → embedded → sidecar → None.
+- `source_digest()` — Identity of one source image under the current resize recipe.
+- `load_manifest()` — {image id: source digest} of the artwork on the stick; empty when unreadable.
+- `save_manifest()`
 - `write_artwork_pair()` — Extract+write small/medium artwork JPEGs to the bucketed CDJ layout.
+- `prune_artwork()` — Delete artwork files no image row of the new database points at.
 - `usb_relative_path()` — Return the relative path string used inside the OneLibrary `image` row.
 
 ### `app/usb_manager.py`
@@ -1345,7 +1404,7 @@ USB Device Manager for Rekordbox Editor Pro.
 - `  UsbProfileManager.save_settings()`
 - `  UsbProfileManager.get_usb_contents()` — Fetches tracks from both Library One (DeviceSQL) and Library Legacy (Legacy PDB/XML).
 - `UsbSyncEngine` — Smart sync engine that performs diff-based synchronization
-- `  UsbSyncEngine.calculate_diff()`
+- `  UsbSyncEngine.calculate_diff()` — What a sync would change on the stick.
 - `  UsbSyncEngine.sync_collection()`
 - `  UsbSyncEngine.sync_playlists()`
 - `  UsbSyncEngine.sync_metadata()`
@@ -1363,12 +1422,17 @@ USB MYSETTING / DJMMYSETTING file read/write + schema for frontend.
 - `get_schema()` — Return the full editable-field schema, plus the current default value
 - `read_settings()` — Read all four MYSETTING files from a stick (use defaults where missing).
 - `write_settings()` — Write MYSETTING files to <USB>/PIONEER/.
-- `write_defaults()` — Convenience: write all-defaults MYSETTING files (used at sync time
+- `build_devsetting()` — A valid 140-byte DEVSETTING.DAT with rekordbox's device defaults.
+- `write_devsetting()` — Seed PIONEER/DEVSETTING.DAT when missing or blank.
+- `write_defaults()` — Seed all four settings files with defaults where missing or blank.
 
 ### `app/usb_one_library.py`
 
 USB OneLibrary writer — uses rbox.OneLibrary to build PIONEER/rekordbox/exportLibrary.db
 
+- `FolderNames` — One spelling per case-folded folder under `Contents/`, for one stick and one sync.
+- `  FolderNames.settle()`
+- `  FolderNames.apply()`
 - `relocate_audio_files()` — Move audio already on the stick to its new destination instead of re-copying it.
 - `OneLibraryUsbWriter` — Writes the modern Library One DB (exportLibrary.db) plus ANLZ sidecars
 - `  OneLibraryUsbWriter.ensure_structure()`
@@ -1430,10 +1494,17 @@ variant_schema — DDL + idempotent migration runner for the variants sidecar.
 
 ### `app/xml_generator.py`
 
-*(no module docstring)*
+Rekordbox collection XML (DJ_PLAYLISTS) writer for the /api/rekordbox/export bridge.
 
+- `is_streaming_path()` — True for a streaming-service URI (``soundcloud:tracks:123``): no local file exists.
+- `XmlPlaylist` — Playlist ``NODE`` (Type 1).
+- `XmlFolder` — Folder ``NODE`` (Type 0) of playlists and further folders.
+- `kind_for_path()` — Rekordbox ``Kind`` for the file's real extension ("MP3 File", "AIFF File"), or None.
+- `location_for_path()` — ``file://localhost/...`` URL, percent-encoded the way Rekordbox writes it.
+- `date_added()` — ``YYYY-MM-DD`` from the track's ``StockDate``; today only when it has none.
+- `xml_rating()` — Rekordbox XML rating (0/51/102/153/204/255) or None when unusable.
 - `RekordboxXML`
-- `  RekordboxXML.generate()` — Generates a Rekordbox-compatible XML collection.
+- `  RekordboxXML.generate()` — Write ``tracks_data`` (info, beatGrid, cues) as DJ_PLAYLISTS XML; return its path.
 - `  RekordboxXML.generate_for_track()` — Legacy wrapper for single track generation.
 
 
@@ -1449,6 +1520,7 @@ variant_schema — DDL + idempotent migration runner for the variants sidecar.
 - `cancellableGet()` — ─── AbortController helpers ────────────────────────────────────────────────── export function crea…
 - `fetchLibraryTracks()` — export function cancellablePost(url, data, config = {}) { const controller = new AbortController();…
 - `fetchTrackBeatGrid()` — Rekordbox beat grid of one track, `[{ time (s), bpm, beat }]` — a saved editor grid wins over the l…
+- `exportRekordboxXml()` — Write Rekordbox XML into the backend's `exports/` folder (`POST /api/rekordbox/export`).
 
 ### `frontend/src/api/scRefreshClassification.js`
 
@@ -2038,6 +2110,34 @@ theme — UI skin selection (per device, localStorage).
 - `applyTheme()`
 - `setTheme()`
 
+### `frontend/src/utils/trackSearch.js`
+
+Token search for the Collection / playlist views.
+
+- `SEARCH_SYNTAX_HINT()` — Tooltip for the search box.
+- `tokenizeQuery()` — Split a lower-cased query into `{ field, value, quoted }` tokens on whitespace.
+- `compileToken()` — One token -> predicate `(track, hay) => boolean`, or null for a token that filters nothing yet (emp…
+- `compileQuery()` — Whole query -> one predicate `(track, hay) => boolean`; all tokens must match.
+- `filterTracks()` — Tracks of `list` matching `query`; the list itself when the query is empty.
+
+### `frontend/src/utils/trackSearch.test.js`
+
+*(no module docstring)*
+
+### `frontend/src/utils/trackSort.js`
+
+Sort helpers for TrackTable.
+
+- `keySortValue()` — export function camelotOf(key) { const raw = text(key); if (!raw) return null; const s = raw .repla…
+- `formatOf()` — export function mytagList(raw) { const seen = new Set(); for (const part of String(raw || '').split…
+- `dateAdded()` — "YYYY-MM-DD" a track was added, else null.
+- `SORT_VALUES()`
+- `sortTracks()` — New array sorted by one column; ties keep their incoming order.
+
+### `frontend/src/utils/trackSort.test.js`
+
+*(no module docstring)*
+
 ### `frontend/src/components/ArtistHubView.jsx`
 
 *(no module docstring)*
@@ -2077,7 +2177,7 @@ Sticky progress banner — visible on every screen while local-file or SoundClou
 
 ### `frontend/src/components/ImportView.jsx`
 
-Recursively walk a DataTransferItemList, returning every File inside any dropped folder.
+*(no module docstring)*
 
 ### `frontend/src/components/InsightsView.jsx`
 
@@ -2567,6 +2667,7 @@ soundcloud_client.rs
 Pytest fixtures shared across the suite.
 
 - `auth_token()` — Pin ``app.auth.SESSION_TOKEN`` to ``TEST_SESSION_TOKEN`` for the test.
+- `anlz_cache_sandbox()` — Point the LMS ANLZ cache at the session's temp dir, never the user's cache.
 - `empty_library()` — Swap ``app.main.db`` for a library that knows no tracks.
 - `pytest_configure()` — Register the ``no_auth`` marker so ``--strict-markers`` is happy.
 
@@ -2616,6 +2717,20 @@ Regression tests for the analysis pipeline.
 - `test_cue_toggles_kwarg_overrides_settings()` — Per-call kwarg overrides the global setting.
 - `test_e2e_anlz_write_roundtrip()`
 
+### `tests/test_analysis_api_hygiene.py`
+
+POST /api/audio/analyze sandbox + path-free analyze-batch / analyze-full bodies.
+
+- `sandbox_root()`
+- `submitted()`
+- `test_analyze_inside_the_sandbox_is_queued()`
+- `test_analyze_outside_the_sandbox_is_403()`
+- `test_analyze_non_audio_extension_is_400()`
+- `test_analyze_missing_file_stays_404()`
+- `live()`
+- `test_batch_lines_carry_no_paths()`
+- `test_analyze_full_ok_body_carries_no_paths()`
+
 ### `tests/test_analysis_cache.py`
 
 Tests for app/analysis_cache.py — persistent analysis-result cache.
@@ -2632,8 +2747,10 @@ Tests for app/analysis_cache.py — persistent analysis-result cache.
 
 Unit tests for AnalysisDBWriter — the values it writes into Rekordbox master.db.
 
-- `test_key_id_to_name_inverts_engine_map()` — The master.db key write must invert analysis_engine's key_id map exactly.
+- `test_key_id_to_name_inverts_engine_map_in_rekordbox_spelling()` — The master.db key write must invert analysis_engine's key_id map exactly, and
+- `test_key_names_match_the_minor_set_of_a_real_library()`
 - `test_key_id_to_name_unknown()`
+- `test_anlz_rel_path_follows_rekordbox_uuid_layout()`
 - `test_update_cache_bpm_key_beatgrid_shape()` — _update_cache mirrors the master.db write: BPM float, Camelot key, and a
 - `test_master_db_bpm_is_centi_bpm_int()` — master.db stores BPM as int(round(bpm*100)) — guard the scaling contract.
 - `test_update_db_writes_master_db_inside_db_write_lock()` — The analysis write is a full-row ``update_content``: re-read and write must both
@@ -2644,8 +2761,26 @@ Unit tests for AnalysisDBWriter — the values it writes into Rekordbox master.d
 - `test_track_without_an_analysis_data_path_is_refused_before_any_dsp()`
 - `test_failed_dat_write_leaves_master_db_untouched()`
 - `test_writes_into_the_recorded_dir_then_flags_the_row()`
+- `test_analysed_flag_fits_rbox_c_long_column()` — The old 0xFFFFFFFF raised OverflowError inside rbox, so BPM and key never landed
+- `test_refused_db_write_is_an_error_result_and_leaves_the_cache()`
+- `test_update_db_raises_for_a_missing_row()`
+- `test_failed_key_write_is_not_swallowed()`
 - `test_analysis_runs_in_the_worker_pool_not_the_sidecar()` — librosa/madmom in the sidecar process held the GIL for minutes per batch.
 - `test_a_crashed_worker_drops_the_pool_for_the_next_track()`
+- `test_rewrites_a_rekordbox_reanalysis_under_its_recorded_file_name()`
+- `test_key_failure_after_the_row_write_keeps_the_cache_on_the_new_bpm()`
+- `test_camelot_codes_match_the_engine_for_every_key_id()` — The code written is checked against the writer's own key-id table, so that table
+- `test_library_key_notation_is_the_majority_of_the_keyed_tracks()`
+- `test_library_key_name_falls_back_to_classic_without_a_usable_camelot_code()` — Key id 15 is D minor = "7A".
+- `test_library_key_name_follows_the_notation()`
+- `test_update_db_writes_the_key_in_the_notation_of_the_library()`
+- `test_camelot_library_gets_the_classic_name_when_the_code_is_unusable()`
+- `test_camelot_library_gets_the_classic_name_when_the_code_is_missing()`
+- `test_unknown_key_writes_no_key_in_either_notation()`
+- `test_notation_is_detected_once_for_a_batch_of_writes()` — One ``get_contents`` per track would read 5000 rows 5000 times in a full re-analysis.
+- `test_failed_notation_read_writes_classic_and_is_retried()`
+- `test_forgetting_the_notation_reads_the_library_again()`
+- `test_notation_does_not_come_from_the_partial_track_cache()` — The cache may hold only the tracks being written, and its ``Key`` is the Camelot
 
 ### `tests/test_analysis_edge.py`
 
@@ -2772,6 +2907,10 @@ ANLZ trio -> USB stick transform (`app.anlz_usb_export`) and its wiring in
 - `test_sidecar_ships_with_the_stick_path()`
 - `test_invalid_sidecar_falls_back_to_a_fresh_analysis()`
 - `test_no_source_and_no_audio_returns_none()`
+- `test_rekordbox_anlz_wins_over_sidecar_and_analysis()`
+- `test_invalid_rekordbox_anlz_falls_back_to_the_lms_sidecar()`
+- `test_fresh_analysis_fallback_never_writes_into_the_music_folder()`
+- `test_a_failing_rekordbox_lookup_falls_back_to_the_lms_sidecar()`
 
 ### `tests/test_anlz_usb_export_sync.py`
 
@@ -2780,13 +2919,35 @@ Full `OneLibraryUsbWriter.sync()` with copy_anlz=True against the real template.
 - `no_analysis()`
 - `test_sync_ships_the_sidecar_with_stick_ppth_and_masked_pssi()`
 
+### `tests/test_anlz_waveform_values.py`
+
+Value model of the ANLZ waveform tags (app/analysis_engine.py generate_waveform_data).
+
+- `test_tag_ranges_and_entry_counts()`
+- `test_silence_keeps_preview_floors()` — A 0 height in PWAV/PWV2 reads as 'unanalysed' on players.
+- `three_band_wf()` — Low tone, then mid tone, then high tone.
+- `test_three_band_channel_order()`
+- `test_pwv4_colour_bytes_follow_bands()`
+- `test_pwv5_strongest_band_is_full_scale()`
+- `test_pwv5_bass_is_red_not_blue()`
+- `test_detail_height_is_squared_sample_peak()`
+- `test_pool_columns_reduces_every_column()`
+- `test_preview_keeps_a_short_transient()` — Old np.interp point sampling skipped most columns: a click between two
+- `test_mp3_lead_in_rules()`
+- `test_mp3_lead_in_reads_past_id3()`
+- `test_lead_in_shifts_columns()`
+
 ### `tests/test_anlz_writer_guards.py`
 
-Tests for app/anlz_writer.py logic-safety guards (NOT byte-layout).
+Tests for app/anlz_writer.py logic-safety guards + waveform tag headers.
 
 - `test_pwav_valid_values_byte_identical()`
 - `test_pwav_out_of_range_does_not_crash()` — Regression: bytes([300]) / bytes([-1]) would raise ValueError; the
-- `test_pwv2_out_of_range_clamped()`
+- `test_pwv2_clamped_to_4_bit()` — PWV2 is height-only 1..15: one byte > 15 makes Nexus-era firmware reject
+- `test_pwv4_header_and_7_bit_clamp()`
+- `test_pwv6_header_and_7_bit_clamp()`
+- `test_pwv7_header_and_7_bit_clamp()`
+- `test_pwv5_header_and_bit_layout()`
 - `test_pwv3_out_of_range_clamped_preserves_count()`
 
 ### `tests/test_artist_attribution.py`
@@ -3633,6 +3794,8 @@ Tests for app/audio_tags.py — native tag write-back (mutates user files → HI
 
 - `test_rating_to_popm_scale()`
 - `test_normalize_fields_drops_none_and_unknown()`
+- `test_tag_fields_drop_what_no_file_tag_stores()`
+- `test_one_lock_per_file_whatever_the_spelling()`
 - `test_write_tags_unsupported_and_missing()`
 - `test_flac_tag_roundtrip()`
 
@@ -3672,6 +3835,13 @@ Tests for ``app/auth.py`` -- Bearer-token session authentication.
 - `  TestCaseL_WrongScheme.test_non_bearer_scheme_is_401()`
 - `TestCaseM_OptionsPreflight`
 - `  TestCaseM_OptionsPreflight.test_options_preflight_short_circuits_before_auth()`
+- `TestCaseM2_RealAppCorsAllowlist` — CORS allowlist of the real ``app/main.py`` app, not a stand-in.
+- `  TestCaseM2_RealAppCorsAllowlist.test_tauri_origin_in_allowlist()`
+- `  TestCaseM2_RealAppCorsAllowlist.test_preflight_from_allowed_origin_is_200()`
+- `  TestCaseM2_RealAppCorsAllowlist.test_preflight_for_mutation_from_windows_tauri_origin()`
+- `  TestCaseM2_RealAppCorsAllowlist.test_simple_get_from_windows_tauri_origin_echoes_origin()`
+- `  TestCaseM2_RealAppCorsAllowlist.test_preflight_from_foreign_origin_is_rejected()`
+- `  TestCaseM2_RealAppCorsAllowlist.test_credentials_stay_disabled()`
 - `TestCaseN_UngatedAcceptsAuthHeader`
 - `  TestCaseN_UngatedAcceptsAuthHeader.test_heartbeat_with_bearer_header_still_2xx()`
 
@@ -3707,6 +3877,38 @@ Tests for app/batch_worker.py — the comment transform and the batch loop.
 - `test_batch_skips_rows_whose_comment_does_not_change()`
 - `test_each_row_is_reread_and_written_inside_db_write_lock()` — update_content writes the whole row: a read outside the lock clobbers a
 
+### `tests/test_bpm_regression_grid.py`
+
+BPM from a regression line through all beats, uniform grid for steady tracks (B5).
+
+- `test_fit_recovers_the_exact_tempo_from_quantised_beats()`
+- `test_fit_survives_dropped_and_stray_beats()`
+- `test_tempo_change_is_not_steady()`
+- `test_slow_tempo_drift_is_not_steady()`
+- `test_too_few_beats()`
+- `test_anchor_lies_on_a_tracked_beat()`
+- `test_integer_snap_only_within_tolerance()`
+- `test_snap_is_refused_when_it_would_drift_the_grid()`
+- `test_uniform_beats_cover_the_tracked_span()`
+- `test_comb_fit_recovers_the_tempo_across_a_tracker_slip()`
+- `test_comb_fit_keeps_the_main_phase_when_the_outro_flips_half_a_beat()`
+- `test_comb_fit_gives_the_tempo_but_no_uniform_grid_when_a_quarter_is_off_phase()`
+- `test_comb_fit_tempo_change_is_not_steady()`
+- `test_comb_fit_tempo_drift_is_not_on_one_line()`
+- `test_comb_fit_wandering_tempo_is_not_on_one_line()`
+- `test_comb_fit_too_few_beats()`
+- `dsp()`
+- `test_slipped_tracker_still_gets_exact_tempo_and_uniform_grid()`
+- `offbeat_audio()`
+- `test_grid_on_the_hats_is_seen_as_off_beat()`
+- `test_off_beat_needs_the_first_sound_between_the_beats_too()`
+- `test_off_beat_needs_a_clear_margin()`
+- `test_tracker_on_the_off_beat_still_gets_a_grid_on_the_kicks()`
+- `test_tracker_on_the_kicks_keeps_its_phase()`
+- `engine()`
+- `test_steady_128_bpm_track_gets_exact_tempo_and_uniform_grid()`
+- `test_tempo_change_keeps_the_tracked_beats()`
+
 ### `tests/test_compare_rekordbox.py`
 
 Unit tests for the pure comparison helpers in scripts/compare_rekordbox.py.
@@ -3727,7 +3929,15 @@ Unit tests for the pure comparison helpers in scripts/compare_rekordbox.py.
 - `test_bpm_relation_zero()`
 - `test_beatgrid_metrics_aligned()`
 - `test_beatgrid_metrics_offset()`
+- `test_beatgrid_metrics_signed_early()`
 - `test_beatgrid_metrics_empty()`
+- `test_rb_key_name_camelot_passes_through()`
+- `test_rb_key_name_musical_notation()`
+- `test_rb_key_name_unknown_is_empty()`
+- `test_rb_key_names_maps_row_id_to_name()`
+- `test_rb_beats_read_through_pyrekordbox()`
+- `test_default_master_db_found_under_appdata()`
+- `test_default_master_db_missing()`
 
 ### `tests/test_cue_beatgrid_persistence.py`
 
@@ -3951,6 +4161,19 @@ external_track_match unit tests (external-track-match-unified-module T-3..T-9).
 - `test_fingerprint_rejects_path_outside_roots()`
 - `test_module_has_no_db_writer_imports()`
 
+### `tests/test_ffmpeg_protocols.py`
+
+Protocol-aware ffmpeg resolution and its use in the SoundCloud downloader (B18).
+
+- `test_probe_reads_only_input_protocols()`
+- `test_probe_failure_is_none_and_cached()`
+- `test_resolve_skips_a_decode_only_build()`
+- `test_resolve_reports_when_nothing_qualifies()`
+- `test_hls_download_runs_the_resolved_binary()`
+- `test_hls_download_stops_without_a_network_ffmpeg()`
+- `test_aiff_conversion_uses_the_resolved_binary()`
+- `test_aiff_conversion_keeps_the_source_without_ffmpeg()`
+
 ### `tests/test_folder_watcher.py`
 
 Tests for app/folder_watcher.py — auto-import folder watcher.
@@ -4038,6 +4261,18 @@ Tests for app/import_tracker.py — live import-progress tracker.
 - `test_prune_drops_oldest_finished_first()`
 - `test_prune_keeps_inflight_over_cap()` — Soft cap by design: active (non-terminal) tasks are never dropped, even
 
+### `tests/test_library_artwork.py`
+
+One artwork resolver for the app and the stick (`app/library_artwork.py`).
+
+- `share()` — APPDATA -> tmp; returns the Rekordbox share folder (with one cover in it).
+- `test_imagepath_resolves_inside_the_share()`
+- `test_absolute_path_in_the_covers_folder_passes()`
+- `test_refusals_carry_the_routes_status()`
+- `test_without_appdata_a_share_path_is_refused()`
+- `test_library_artwork_file_is_none_where_the_route_refuses()`
+- `test_route_serves_and_refuses_through_the_resolver()`
+
 ### `tests/test_library_format_swap.py`
 
 Tests for app.library_format_swap.
@@ -4119,6 +4354,14 @@ Tests for app.library_format_swap.
 - `  TestMasterDbWriteLock.test_every_master_db_mutation_holds_the_lock()`
 - `  TestMasterDbWriteLock.test_rollback_db_restore_holds_the_lock()` — rollback() overwrites master.db wholesale via shutil.copy2.
 
+### `tests/test_library_quality_stats.py`
+
+GET /api/library/quality-stats — lossless/lossy counts by file extension (B16).
+
+- `facade()`
+- `test_counts_by_extension_without_auth()`
+- `test_no_library_loaded_returns_zeros()`
+
 ### `tests/test_library_source.py`
 
 Tests for app/library_source.py — the Live/XML normalization layer.
@@ -4133,6 +4376,11 @@ Tests for app/library_source.py — the Live/XML normalization layer.
 - `test_live_normalize_garbage_does_not_crash()`
 - `test_sidecar_lookup_uses_the_writers_resolved_path_key()` — The writer hashes str(path.resolve()); a stored path with `..` must still hit.
 - `test_sidecar_lookup_misses_cleanly()`
+- `test_sidecar_dir_is_in_the_anlz_cache_never_next_to_the_audio()`
+- `test_write_companion_anlz_leaves_the_music_folder_untouched()`
+- `test_legacy_sidecar_next_to_the_audio_is_still_read()`
+- `test_cache_wins_over_the_legacy_sidecar()`
+- `test_live_source_finds_rekordbox_anlz_from_master_db()`
 
 ### `tests/test_library_tracks_light.py`
 
@@ -4146,6 +4394,9 @@ GET /api/library/tracks — the optional ``light`` projection (app/main.py).
 - `test_hide_streaming_applies_light_or_not()`
 - `test_usb_source_and_rekordbox_xml_keep_grids_after_a_light_fetch()` — The CDJ-facing readers of the cached dicts, after a light fetch.
 - `test_light_survives_the_beatgrid_loader_writing_meanwhile()` — A writer keeps removing and re-inserting beatGrid on every cached dict
+- `test_full_list_is_encoded_in_the_threadpool_not_on_the_event_loop()`
+- `test_encoding_matches_starlette_json_response()`
+- `test_a_nan_value_is_an_empty_list_not_invalid_json()`
 
 ### `tests/test_librosa_lazy_import.py`
 
@@ -4176,6 +4427,50 @@ Cue loading in `app.live_database`.
 - `test_unparsable_mirror_row_does_not_abort_the_rest()`
 - `test_both_sources_failing_is_logged_not_raised()`
 
+### `tests/test_live_import_analysis.py`
+
+An imported track's analysis must reach master.db (B4, 0.1 core-loop test).
+
+- `master()`
+- `live()`
+- `test_add_track_writes_bpm_length_and_key()`
+- `test_import_key_is_stored_in_rekordbox_spelling()`
+- `test_import_into_a_camelot_library_stores_the_camelot_code()`
+- `test_import_into_a_classic_library_keeps_the_classic_name()`
+- `test_import_without_a_usable_camelot_code_stores_the_classic_name()`
+- `test_import_key_read_from_the_text_follows_the_notation_too()`
+- `test_imports_and_a_reanalysis_read_the_library_notation_once()`
+- `test_library_reload_reads_the_notation_again()`
+- `test_refused_analysis_write_leaves_the_cache_at_what_master_db_holds()`
+- `test_import_sets_file_type_in_the_same_write_as_bpm_and_length()`
+- `test_import_without_analysis_still_writes_the_file_type()`
+- `test_import_of_an_unknown_format_leaves_file_type_alone()`
+- `test_import_file_type_never_follows_old_library_rows()`
+- `test_attach_import_anlz_uses_rekordbox_share_layout()`
+- `test_attach_import_anlz_records_nothing_without_a_dat()`
+- `test_attach_import_anlz_removes_its_files_when_master_db_refuses()`
+- `test_attach_import_anlz_never_replaces_a_recorded_path()`
+- `test_attach_import_anlz_refuses_a_uuid_that_escapes_the_share()`
+- `test_import_puts_anlz_in_the_share_in_live_mode_never_next_to_the_audio()`
+- `test_import_never_attaches_anlz_from_an_unusable_analysis()`
+
+### `tests/test_live_playlist_b11.py`
+
+Live playlist operations end to end against an rbox stand-in (B11, 0.1 core-loop test).
+
+- `rb()`
+- `live()`
+- `test_added_track_shows_up_without_a_reload()`
+- `test_removed_track_disappears_without_a_reload()`
+- `test_reorder_puts_the_track_at_the_target_index()`
+- `test_reorder_of_a_track_not_in_the_playlist_is_refused()`
+- `test_move_into_an_empty_folder()`
+- `test_move_back_to_root()`
+- `test_move_back_to_root_by_dropping_onto_root()`
+- `test_move_next_to_a_sibling_with_gappy_seqs()`
+- `test_move_from_a_folder_next_to_a_root_sibling()`
+- `test_moving_a_folder_into_itself_is_refused()`
+
 ### `tests/test_live_playlist_ops.py`
 
 Tests for the live-mode playlist primitives in `app/live_database.py`.
@@ -4187,7 +4482,8 @@ Tests for the live-mode playlist primitives in `app/live_database.py`.
 - `  TestRemoveTrackFromPlaylist.test_returns_false_when_track_not_in_playlist()`
 - `  TestRemoveTrackFromPlaylist.test_coerces_ids_to_str_before_comparing()`
 - `  TestRemoveTrackFromPlaylist.test_backend_error_is_contained()`
-- `  TestRemoveTrackFromPlaylist.test_reorder_round_trips_through_the_fixed_primitive()`
+- `  TestRemoveTrackFromPlaylist.test_reorder_moves_the_row_instead_of_remove_and_re_add()`
+- `  TestRemoveTrackFromPlaylist.test_reorder_onto_its_own_place_writes_nothing()`
 - `TestPlaylistNode`
 - `  TestPlaylistNode.test_exposes_uuid()`
 - `  TestPlaylistNode.test_missing_uuid_is_none_not_an_error()`
@@ -4211,6 +4507,14 @@ Tests for the live-mode playlist primitives in `app/live_database.py`.
 - `  TestCreatePlaylistCaching.test_caller_intent_wins_when_rbox_omits_the_attribute()`
 - `  TestCreatePlaylistCaching.test_root_parent_is_passed_to_rbox_as_none()`
 
+### `tests/test_live_stock_date.py`
+
+Live StockDate: never the text "None" (B17); a NULL date falls back to created_at's day.
+
+- `test_stock_date_passes_through_and_null_is_empty()`
+- `test_missing_stock_date_falls_back_to_created_at_day()`
+- `test_stock_date_wins_over_created_at()`
+
 ### `tests/test_logging_redaction.py`
 
 Unit tests for `app.logging_utils.RedactingFormatter`.
@@ -4222,6 +4526,14 @@ Unit tests for `app.logging_utils.RedactingFormatter`.
 - `test_data_dir_prefixes_scrubbed()` — EXPORT/MUSIC/TEMP dirs (resolved once at import) must also be scrubbed,
 - `test_safe_error_message_str_noop_on_clean_input()`
 - `test_non_exception_log_format_unchanged()` — A path-free `logger.info("hello")` must be byte-identical via
+- `test_allowed_roots_boot_line_hides_user_paths()` — The boot line used to log the list repr: doubled backslashes beat the scrub.
+- `test_every_spelling_of_the_home_path_is_scrubbed()`
+- `test_a_longer_name_sharing_the_prefix_is_left_alone()`
+- `test_text_after_the_prefix_survives()`
+- `test_uvicorn_access_line_is_scrubbed()`
+- `test_uvicorn_error_traceback_is_scrubbed()`
+- `test_uvicorn_log_config_is_a_valid_dict_config()`
+- `test_sidecar_entry_point_passes_the_log_config()`
 
 ### `tests/test_main_route_table.py`
 
@@ -4267,6 +4579,9 @@ metadata-fixer apply/revert tests (T5 — app/metadata_fixer/applier.py).
 - `test_apply_revert_file_sha1_round_trip()`
 - `test_write_tags_disabled_skips_tag_mirror()`
 - `test_apply_skips_failed_db_write()`
+- `RaisingFakeDB` — The real facade's answer to an id the library lacks: ``UnknownTrackIds``.
+- `  RaisingFakeDB.update_tracks_metadata()`
+- `test_apply_skips_a_track_the_library_no_longer_holds()`
 - `EntityDB` — FakeDB that can also resurrect a journalled entity row (artist-merge undo).
 - `  EntityDB.restore_entity()`
 - `test_skips_sha1_when_not_writing_tags()`
@@ -4332,6 +4647,25 @@ MusicBrainz client tests (T-22, Threat T14 — app/musicbrainz_client.py).
 - `test_search_escapes_lucene_syntax_and_sorts_by_score()`
 - `test_blank_search_costs_nothing()`
 
+### `tests/test_onelibrary_template_refs.py`
+
+Template reference rows do not survive a stick export (PC test 2026-11-22).
+
+- `no_analysis()`
+- `test_no_template_rows_and_no_dangling_refs()`
+- `test_export_pdb_has_only_the_libraries_rows()`
+- `test_resync_over_a_cleaned_stick()`
+
+### `tests/test_onelibrary_track_limit.py`
+
+B9 regression: a USB sync writes EVERY selected track, not just the 16 template slots.
+
+- `no_analysis()`
+- `test_sync_writes_every_track()`
+- `test_small_sync_uses_template_slots_only()`
+- `test_failed_slot_repair_leaves_no_broken_row()` — A half-written row left behind makes every later content read fail.
+- `test_failed_growth_falls_back_to_template_cap()`
+
 ### `tests/test_onelibrary_wal_flush.py`
 
 End-to-end regression test for OneLibraryUsbWriter — runs the FULL
@@ -4394,6 +4728,7 @@ PDB writer structural test against F: drive Pioneer reference.
 - `make_synthetic_input()` — Mimic the data shape that OneLibraryUsbWriter._write_pdb_from_db
 - `main()`
 - `test_export_pdb_invariants()` — pytest entry point — all export.pdb byte invariants must hold.
+- `test_playlist_entry_pages_hold_at_most_255_rows()` — 12-byte entries would fit ~284 per page; the >255-row header shape is
 
 ### `tests/test_phrase_anlz_dirs.py`
 
@@ -4499,6 +4834,35 @@ Unit tests for app/phrase_db_writer.py (djmdCue memory-cue writer).
 - `  TestMasterDbWriteLock.test_restore_mutations_are_under_the_lock()`
 - `test_pyrekordbox_is_imported_quietly()` — A bare import drops the root logger to NOTSET — see pyrekordbox_compat.
 
+### `tests/test_playable_audio.py`
+
+AIFF served as a virtual WAV (app/playable_audio.py + both stream routes).
+
+- `test_wav_view_is_bit_exact()`
+- `test_header_parses_with_stdlib_wave()`
+- `test_aifc_sowt_little_endian()`
+- `test_rare_encodings_widen_to_pcm16()`
+- `test_double_narrows_to_float32()`
+- `test_every_range_matches_the_full_wav()`
+- `test_short_source_is_padded_to_the_announced_size()`
+- `test_range_past_the_shrunk_source_is_silence()`
+- `test_vanished_source_is_silence()`
+- `test_no_file_handle_outlives_a_chunk()`
+- `test_unreadable_source_raises()`
+- `test_unsupported_encoding_raises()`
+- `test_parse_range()`
+- `test_parse_range_unsatisfiable()`
+- `test_parse_range_ignores_malformed()`
+- `test_suffix_and_filename_helpers()`
+- `sandbox_root()`
+- `test_route_serves_aiff_as_wav()`
+- `test_route_range_on_converted_file()`
+- `test_route_unsupported_encoding_is_415()`
+- `test_route_unreadable_aiff_is_415()`
+- `test_route_keeps_sandbox_for_aiff()`
+- `test_route_other_formats_unchanged()`
+- `test_route_reads_aiff_off_the_event_loop()`
+
 ### `tests/test_playcount_sync.py`
 
 Tests for app/playcount_sync.py — USB <-> PC play-count sync engine.
@@ -4522,6 +4886,8 @@ Tests for app/playcount_sync.py — USB <-> PC play-count sync engine.
 - `test_resolve_rejects_non_list()`
 - `test_save_meta_invalid_inputs_raise()`
 - `test_roundtrip_meta_is_json_serializable()`
+- `test_pc_db_write_holds_db_lock()` — Every master.db writer serialises on ``app.database._db_write_lock``.
+- `test_no_pc_db_skips_the_pc_side_and_patches_the_usb_xml()` — XML library (``pc_db_path=None``): rbox is never touched, the USB XML still is.
 
 ### `tests/test_popularity_engine.py`
 
@@ -4570,6 +4936,28 @@ Tests for app/rekordbox_bridge.py — Rekordbox XML <-> local DB import.
 - `test_import_updates_existing_and_adds_new()`
 - `test_import_no_collection_raises()`
 - `test_import_parses_beatgrid()`
+
+### `tests/test_rekordbox_running_guard.py`
+
+Live master.db writers refuse while Rekordbox runs (B13); playlist create + XML export.
+
+- `tripwires()` — Entry points that reach a library through their own ``db`` import, not ``main.db``.
+- `test_live_write_refused_while_rekordbox_runs()`
+- `test_live_audio_upload_refused_before_the_file_is_saved()`
+- `test_xml_mode_never_scans_for_rekordbox()`
+- `test_live_write_goes_through_while_rekordbox_is_closed()`
+- `test_scan_failure_fails_open()`
+- `resolved()` — ``resolve_playcounts`` stub: records the master.db path the route hands it.
+- `test_playcount_resolve_writes_the_live_master_db()`
+- `test_playcount_resolve_refused_while_rekordbox_runs()`
+- `test_playcount_resolve_in_xml_mode_patches_only_the_usb_xml()` — XML library: no master.db to write, but the USB half of the sync still runs.
+- `test_create_playlist_answers_the_id_string()`
+- `test_create_playlist_failure_is_500()`
+- `test_create_playlist_xml_library_answers_the_new_id()`
+- `exports()`
+- `test_export_stays_inside_exports()`
+- `test_export_refuses_unusable_names()`
+- `test_export_with_no_known_track_is_400()`
 
 ### `tests/test_require_session.py`
 
@@ -5033,6 +5421,23 @@ GET /api/stream: file reads happen off the event loop, in 1 MiB chunks.
 - `test_open_ended_range_to_eof()`
 - `test_invalid_range_is_416()`
 
+### `tests/test_stream_ranges.py`
+
+RFC 7233 Range + HEAD on both stream routes, raw files and the AIFF WAV view alike.
+
+- `sandbox_root()`
+- `source()`
+- `test_suffix_range_returns_the_tail()`
+- `test_suffix_longer_than_the_file_is_the_whole_file()`
+- `test_closed_and_open_ranges()`
+- `test_unsatisfiable_range_is_416()`
+- `test_multi_range_and_malformed_serve_the_whole_file()`
+- `test_raw_formats_range_and_content_type()`
+- `test_head_reports_size_without_a_body()`
+- `test_head_with_range_mirrors_get()`
+- `test_head_reads_no_audio()`
+- `test_head_keeps_the_sandbox()`
+
 ### `tests/test_stream_unicode_filename.py`
 
 Regression: GET /api/stream 500 on non-latin-1 filenames.
@@ -5063,6 +5468,60 @@ Contract tests for ``GET /api/system/health`` -- unauth'd liveness probe.
 - `TestHealthHasNoSideEffects`
 - `  TestHealthHasNoSideEffects.test_does_not_lazily_build_live_db()` — ``db.active_db`` constructs ``LiveRekordboxDB`` on first touch.
 
+### `tests/test_track_batch_tags.py`
+
+PATCH /api/tracks/batch writes the audio-file tags like the single-track edit.
+
+- `files()`
+- `settings()`
+- `lib()`
+- `test_batch_writes_title_artist_album_into_every_file()`
+- `test_batch_writes_the_same_tags_as_the_single_track_edit()`
+- `test_setting_off_leaves_every_file_alone()`
+- `test_setting_missing_means_on()`
+- `test_per_track_status_for_missing_path_and_missing_file()`
+- `test_a_crashing_tag_write_is_reported_for_that_track_only()`
+- `test_unreadable_settings_report_error_and_keep_the_library_write()`
+- `test_existing_pictures_survive_a_rating_write()`
+- `test_a_colour_only_edit_leaves_the_file_byte_identical()`
+- `test_a_streaming_track_is_skipped()`
+- `test_two_quick_edits_of_one_file_end_with_the_later_value()`
+- `test_a_refused_batch_touches_no_file()`
+- `test_an_empty_batch_touches_no_file()`
+
+### `tests/test_track_batch_writes.py`
+
+Track edits are all or nothing and name an unknown id (PC test 2026-11-22).
+
+- `master()`
+- `live()`
+- `facade()`
+- `test_live_batch_with_an_unknown_id_writes_nothing()`
+- `test_batch_route_unknown_id_is_404_naming_it()`
+- `test_batch_route_404_lists_at_most_ten_ids()`
+- `test_batch_route_refuses_a_bad_value_before_reading_any_row()`
+- `test_track_route_unknown_id_is_404()`
+- `test_track_route_unknown_id_is_404_in_xml_mode()`
+- `test_batch_route_writes_every_row()`
+- `test_batch_route_writes_a_repeated_id_once()`
+- `test_rbox_failure_midway_restores_the_rows_already_written()`
+- `test_rbox_failure_on_the_first_row_restores_it()`
+- `test_failed_restore_is_named_in_the_error()`
+- `test_live_backend_raises_track_write_failed()`
+- `test_track_route_rbox_failure_restores_the_row()`
+- `test_restore_drops_a_cache_field_the_track_did_not_have()`
+
+### `tests/test_track_delete_routes.py`
+
+Deleting a track (PC test 2026-11-22).
+
+- `recorder()`
+- `test_live_mode_refuses_with_409_and_deletes_nothing()`
+- `test_xml_mode_still_deletes()`
+- `test_post_track_delete_is_shadowed_by_the_edit_route()`
+- `test_running_rekordbox_still_wins_over_the_mode_check()`
+- `test_live_backend_delete_leaves_the_cache_alone()`
+
 ### `tests/test_track_metadata_fields.py`
 
 Track-metadata writes refuse fields and values the backend cannot store (issue K8).
@@ -5077,7 +5536,7 @@ Track-metadata writes refuse fields and values the backend cannot store (issue K
 - `test_live_bad_artist_does_not_leave_the_title_half_written()`
 - `test_live_accepts_the_range_edges()`
 - `test_live_writes_every_allowed_field()`
-- `test_live_add_track_does_not_send_bpm()`
+- `test_live_add_track_sends_bpm_and_key_outside_the_metadata_update()`
 - `test_live_add_track_skips_missing_tags()`
 - `test_writable_fields_follow_the_mode()`
 - `test_facade_live_refuses_before_the_first_track()`
@@ -5093,6 +5552,66 @@ Track-metadata writes refuse fields and values the backend cannot store (issue K
 - `test_xml_swap_retries_a_transient_lock()`
 - `test_xml_write_that_dies_halfway_leaves_the_library_whole()`
 - `test_xml_unserialisable_nested_value_is_false_and_the_next_save_works()`
+- `no_tag_writes()`
+- `live_main()`
+- `xml_main()`
+- `test_batch_route_400_names_the_refused_fields()`
+- `test_batch_route_400_on_a_bad_value()`
+- `test_batch_route_success()`
+- `test_batch_route_xml_value_that_would_corrupt_the_file_is_400()`
+- `test_batch_route_unknown_track_is_404()`
+- `test_batch_route_failed_xml_save_is_500()`
+- `test_batch_route_xml_writes_bpm_and_key()`
+- `test_track_route_rejects_an_unknown_body_key()`
+- `test_track_route_400_on_an_out_of_range_value()`
+- `test_track_route_writes_the_ranking_view_fields()`
+
+### `tests/test_usb_artwork.py`
+
+Cover art for the USB stick, with the real Pillow (B8, 0.1 core-loop test).
+
+- `test_resize_turns_any_image_into_a_bounded_rgb_jpeg()`
+- `test_transparent_pixels_become_white_not_black()`
+- `test_garbage_bytes_are_refused_without_raising()`
+- `test_write_artwork_pair_writes_both_cdj_variants()`
+- `test_artwork_folders_hold_twenty_images_from_00001()`
+- `test_pillow_is_pinned_and_bundled()`
+- `three_covers()` — An MP3 with an embedded GREEN cover, a BLUE cover.jpg, a RED library cover.
+- `test_the_library_cover_wins()`
+- `test_without_a_library_cover_embedded_then_sidecar()`
+- `test_an_undecodable_library_cover_falls_through()`
+- `test_a_matching_library_cover_is_not_reencoded()`
+
+### `tests/test_usb_artwork_resync.py`
+
+Cover files follow their slot across re-syncs (PC test 2026-11-22).
+
+- `no_analysis()`
+- `test_a_reused_slot_shows_its_new_tracks_cover()`
+- `test_a_track_without_cover_does_not_inherit_one()`
+- `test_a_changed_cover_is_rewritten()`
+- `test_an_unchanged_cover_is_not_rewritten()`
+- `share()`
+- `test_the_library_cover_goes_on_the_stick()`
+- `test_library_cover_resync_rewrites_only_what_changed()`
+- `test_files_without_a_manifest_entry_are_rewritten_once()` — A stick from before the manifest: its files say nothing about their source.
+- `test_prune_touches_only_dead_artwork()`
+- `test_manifest_roundtrip_and_garbage()`
+
+### `tests/test_usb_case_folders.py`
+
+Folders that differ only in case get one spelling per stick (PC test 2026-11-22).
+
+- `env()`
+- `test_both_writers_agree_on_one_spelling()`
+- `test_resync_keeps_the_spelling_and_moves_nothing()`
+- `test_a_stick_left_in_the_other_spelling_is_kept()` — A stick an older sync left as STENOZ/ keeps it — STENOZ is one of the asked spellings.
+- `test_first_spelling_wins_on_an_empty_stick()`
+- `test_on_disk_spelling_wins_when_asked_for()`
+- `test_a_restyle_nobody_still_asks_against_renames()` — All tracks now say "Boys Noize": the old "boys noize/" folder is not kept.
+- `test_unplanned_folder_takes_the_disk_spelling()`
+- `test_title_folders_settle_under_the_settled_artist()`
+- `test_paths_outside_contents_and_flat_files_pass_through()`
 
 ### `tests/test_usb_copy_atomic.py`
 
@@ -5112,6 +5631,33 @@ USB audio copies must not leave a truncated file that never self-heals.
 - `TestEndToEndHealing`
 - `  TestEndToEndHealing.test_a_truncated_track_is_repaired_on_the_next_sync()`
 
+### `tests/test_usb_device_scan.py`
+
+GET /api/usb/devices without a stick took 4.2-4.9 s per call (PC test 2026-11-22).
+
+- `fake_drives()` — Kernel32 stub: every drive is FIXED (3) — the case that needs the bus check.
+- `test_no_stick_scan_never_asks_for_bus_types()`
+- `test_fixed_usb_drive_with_rekordbox_is_listed()`
+- `test_fixed_internal_disk_with_pioneer_folder_is_skipped()`
+- `test_powershell_is_the_fallback_when_the_ioctl_fails()`
+- `test_removable_drive_needs_no_bus_lookup()`
+- `test_ioctl_refuses_anything_but_a_drive_letter()`
+- `test_ioctl_reads_the_system_drive()`
+- `counted_scan()` — `_scan_uncached` replaced by a counter; the cache starts empty.
+- `test_a_slow_scan_is_not_stale_on_arrival()`
+- `test_parallel_callers_share_one_scan()`
+- `test_profiles_read_scans_once_and_flags_connected()`
+
+### `tests/test_usb_export_fields.py`
+
+Per-track fields of a stick export (PC test 2026-11-22).
+
+- `no_analysis()`
+- `test_rows_carry_the_files_own_format_size_and_album()`
+- `test_export_pdb_rows_carry_the_same_fields()`
+- `test_file_type_codes()`
+- `test_audio_format_of_an_unreadable_file()`
+
 ### `tests/test_usb_lookup_batching.py`
 
 Batched master.db lookups in the USB scan / diff / legacy-export paths.
@@ -5125,7 +5671,7 @@ Batched master.db lookups in the USB scan / diff / legacy-export paths.
 - `  FakeMasterDb.get_playlists()`
 - `  FakeMasterDb.get_playlist_by_id()`
 - `  FakeMasterDb.get_playlist_contents()`
-- `fake_rbox()` — Install a fake `rbox` module whose `MasterDb(...)` returns `state["db"]`.
+- `fake_rbox()` — Install a fake `rbox` module: `MasterDb(...)` returns `state["db"]`,
 - `TestNameLookup`
 - `  TestNameLookup.test_one_bulk_call_for_many_lookups()`
 - `  TestNameLookup.test_unknown_and_falsy_ids_are_empty()`
@@ -5148,6 +5694,10 @@ Batched master.db lookups in the USB scan / diff / legacy-export paths.
 - `  TestLegacyExportBatching.test_playlist_filter_still_resolves()`
 - `TestLegacyExportGolden`
 - `  TestLegacyExportGolden.test_output_matches_pre_batching_export()`
+- `FakeStickDb` — The read surface of rbox `OneLibrary` that `_usb_library` uses.
+- `  FakeStickDb.get_artists()`
+- `  FakeStickDb.get_contents()`
+- `  FakeStickDb.get_playlists()`
 - `TestCalculateDiffEndToEnd`
 - `  TestCalculateDiffEndToEnd.test_same_artist_on_both_sides_is_unchanged()`
 
@@ -5211,6 +5761,16 @@ Tests for app/usb_mysettings.py — Pioneer MYSETTING file schema + I/O.
 - `test_every_field_has_required_keys_and_unique()`
 - `test_io_degrades_without_pyrekordbox()`
 - `test_enum_options_empty_without_pyrekordbox()`
+
+### `tests/test_usb_profile_route.py`
+
+POST /api/usb/profiles merges a partial body into the stored profile (PC test 2026-11-22).
+
+- `store()`
+- `test_partial_post_keeps_the_stored_fields()`
+- `test_new_profile_still_gets_the_defaults()`
+- `test_full_object_from_the_ui_overwrites_everything()`
+- `test_partial_post_fills_defaults_an_old_profile_lacks()`
 
 ### `tests/test_usb_relocate.py`
 
@@ -5281,6 +5841,75 @@ Tests for the USB relocation pass (`app/usb_one_library.py`).
 - `TestSlotPruning` — Stage 3 deletes the placeholder slots nothing was written into.
 - `  TestSlotPruning.test_a_failed_slot_does_not_delete_a_populated_row()`
 
+### `tests/test_usb_resync.py`
+
+Re-syncing a stick that already holds an export (PC test 2026-11-22).
+
+- `no_analysis()`
+- `test_ensure_structure_leaves_an_existing_stick_db_alone()`
+- `test_resync_replaces_the_stick_db_with_the_new_selection()`
+- `test_stick_reader_skips_template_placeholders()`
+- `test_bpm_is_rounded_not_cut()`
+- `test_a_locked_stick_db_is_an_error_not_an_exception()`
+- `test_failed_onelibrary_stage_makes_the_sync_fail()`
+- `test_clean_sync_still_ends_on_complete()`
+- `test_diff_after_a_playlist_sync_is_empty_for_that_selection()`
+- `test_files_already_on_the_stick_are_not_counted_as_copied()`
+- `test_diff_counts_the_folders_above_the_selection()`
+
+### `tests/test_usb_settings_seed.py`
+
+Settings files on an initialized stick (PC test 2026-11-22).
+
+- `no_sleep()`
+- `test_crc16_xmodem_check_value()`
+- `test_devsetting_layout()`
+- `test_initialize_route_writes_valid_settings()`
+- `test_initialize_keeps_real_settings()`
+- `test_seed_replaces_zero_filled_files()`
+- `test_seed_never_overwrites_real_files()`
+- `test_seed_keeps_a_file_it_cannot_judge()` — Non-zero bytes are somebody's settings, even when we cannot parse them.
+- `test_sync_structure_repairs_a_stick_initialized_by_the_old_code()`
+
+### `tests/test_validate_real_world.py`
+
+Unit tests for the pure helpers in scripts/validate_real_world.py.
+
+- `row()`
+- `test_split_chunks_deals_round_robin()`
+- `test_split_chunks_never_returns_empty_chunks()`
+- `test_percentile_interpolates()`
+- `test_drift_is_relative_tempo_error_over_the_window()`
+- `test_bpm_exact_compares_at_two_decimals()`
+- `test_summarise_counts_and_grid_stats()`
+- `test_summarise_without_comparable_rows()`
+- `test_thresholds_pass_on_a_clean_run()`
+- `test_thresholds_name_every_missed_floor()`
+- `test_thresholds_flag_the_grid_median()`
+- `test_thresholds_fail_when_nothing_compared()`
+- `test_picks_are_disjoint_and_ordered()`
+- `test_picks_handle_an_empty_report()`
+- `content()`
+- `test_is_within()`
+- `test_diff_table_reports_added_removed_and_changed_columns()`
+- `test_db_diff_passes_when_only_written_rows_change_writer_columns()`
+- `test_db_diff_flags_a_row_nobody_wrote()`
+- `test_db_diff_flags_columns_beyond_the_writer()`
+- `test_db_diff_flags_lost_rows_and_foreign_tables()`
+- `test_written_row_passes_when_db_and_dat_match_the_writer()`
+- `test_written_row_reports_each_mismatch()`
+- `test_written_row_reports_writer_errors_and_missing_grid()`
+- `test_copy_library_takes_wal_files_and_adds_share()`
+- `test_db_write_refuses_a_work_dir_inside_the_library()`
+- `test_db_write_refuses_while_rekordbox_runs()`
+- `test_checklist_command_reads_a_report()`
+- `test_usable_ids_skips_streaming_and_missing_files()`
+- `test_table_getters_keeps_only_whole_table_listings()`
+- `test_library_key_notation_follows_the_majority()`
+- `test_snapshot_tables_reports_unreadable_tables_instead_of_dropping_them()`
+- `test_snapshot_tables_walks_membership_tables_per_parent()`
+- `test_db_diff_accepts_only_the_usn_counter_in_the_registry()`
+
 ### `tests/test_variant_detector.py`
 
 variant_schema + variant_detector tests (analysis-remix-detector T-2, T-3).
@@ -5350,6 +5979,30 @@ Tests for app/xml_generator.py — Rekordbox collection XML export.
 - `test_beatgrid_and_cues_exported()`
 - `test_generate_does_not_mutate_input_positionmarks()` — Regression: DROP append must copy, not mutate the caller's list.
 - `test_missing_path_does_not_crash()` — A track dict without 'path' must not raise KeyError.
+- `test_kind_follows_the_real_file_extension()`
+- `test_location_is_percent_encoded_and_round_trips()`
+- `test_date_added_comes_from_stock_date()`
+- `test_tonality_rating_comments_bitrate_exported_when_present()`
+- `test_rating_scale()`
+- `test_track_ids_stay_stable_and_unique()`
+- `test_xml_library_track_with_none_fields_exports()`
+- `test_control_characters_do_not_break_the_file()`
+- `test_tempo_uses_rekordbox_battito_attribute()`
+- `test_export_round_trips_through_the_xml_library_loader()`
+- `test_without_playlists_root_stays_alone_with_count_zero()`
+- `test_playlist_node_keeps_order_and_repeats()`
+- `test_folders_nest_with_child_count()`
+- `test_is_streaming_path()`
+- `test_streaming_tracks_left_out_of_collection_and_playlist()`
+- `test_playlist_export_round_trips_through_the_xml_library_loader()`
+- `export_dir()`
+- `test_route_exports_a_library_playlist_in_order()`
+- `test_route_playlist_export_keeps_the_verified_track_fields()`
+- `test_route_exports_a_folder_as_nested_nodes()`
+- `test_route_playlist_name_overrides_the_library_name()`
+- `test_route_track_ids_with_a_name_form_one_playlist()`
+- `test_route_track_ids_without_a_name_keep_root_alone()`
+- `test_route_refuses_without_writing()`
 
 
 ## scripts/ — Dev/Build Utilities
@@ -5368,6 +6021,8 @@ compare_rekordbox.py — A/B accuracy harness: our engine vs Rekordbox.
 - `key_relation()` — Classify the harmonic relation between two Camelot codes.
 - `bpm_relation()` — Classify our BPM vs Rekordbox's, accounting for octave (half/double) errors.
 - `beatgrid_metrics()` — Compare two beat-grids (lists of beat times in ms).
+- `rb_key_name_to_camelot()` — Rekordbox key name ('11A', 'Am', 'Dbm', 'F#') -> Camelot code, '' when unknown.
+- `default_master_db()` — Rekordbox's own master.db path, or None.
 - `compare_track()` — Read RB analysis for one track and re-run ours; return a comparison row.
 - `main()`
 
@@ -5418,10 +6073,17 @@ Scan an audio library with ffprobe, aggregate codec/bitrate/sample-rate.
 
 Feature registry plus a live overlay of which branch or worktree touches which feature.
 
+- `phase_of()`
 - `Feature`
 - `Area`
+- `Release`
+- `  Release.label()`
 - `Registry`
+- `  Registry.release()`
+- `  Registry.unplanned()`
 - `load_registry()`
+- `release_summary()` — Progress of one release: phase counts, merge blockers, unbuilt features, state.
+- `current_release()` — First non-'later' release that is not reached yet.
 - `path_matches()`
 - `Mapper` — Maps repo file paths onto feature ids.
 - `  Mapper.is_hub()`
@@ -5435,9 +6097,12 @@ Feature registry plus a live overlay of which branch or worktree touches which f
 - `tracked_files()`
 - `cmd_brief()`
 - `cmd_active()`
+- `cmd_roadmap()`
 - `cmd_who()`
 - `cmd_list()`
 - `cmd_check()`
+- `set_test_tag()` — Rewrite the `test`/`tested` lines of one `[[feature]]` block.
+- `cmd_mark()`
 - `cmd_coverage()`
 - `build_model()`
 - `cmd_html()`
@@ -5514,6 +6179,37 @@ Vendor a slim snapshot of the genre-atlas repo into app/data/genre_atlas.json.
 Add app to path
 
 - `test_xml_generation()`
+
+### `scripts/validate_real_world.py`
+
+validate_real_world.py — real-library validation run for the analysis engine.
+
+- `split_chunks()` — Deal ids round-robin into at most `workers` non-empty chunks.
+- `percentile()` — Linear-interpolated percentile, q in 0..100.
+- `drift_ms()` — How far two decks run apart over `window_s` if one plays at our BPM and
+- `bpm_exact()` — Same BPM as Rekordbox at the two decimals Rekordbox stores.
+- `summarise()` — Aggregate compare_rekordbox rows into one report block.
+- `check_thresholds()` — Return one line per missed floor; empty list = pass.
+- `pick_cdj_tracks()` — Choose the tracks a CDJ check should load.
+- `is_within()` — True when `path` resolves to `root` or something below it.
+- `diff_table()` — Row-level diff of two {row id: column dict} snapshots.
+- `judge_db_diff()` — Turn table diffs into failures.
+- `table_getters()` — Table names behind rbox's no-argument listing getters (`get_playlists` -> `playlists`).
+- `library_key_notation()` — 'camelot' or 'classic': the notation most keyed tracks carry.
+- `judge_written_row()` — Check one written track: what the writer reported is what master.db and the .DAT hold.
+- `usable_ids()` — First n candidates whose audio file is on disk (streaming tracks have none).
+- `run_ab()` — Run compare_rekordbox.py over `ids` in parallel worker processes.
+- `print_summary()`
+- `print_checklist()`
+- `cmd_ab()`
+- `rekordbox_running()` — rbox refuses every write while Rekordbox runs — on a copy too.
+- `file_fingerprint()` — (size, sha256) of a file, None when it does not exist.
+- `copy_library()` — Copy master.db with its WAL files into `work` next to an empty share/.
+- `snapshot_tables()` — Every table rbox can list: ({table: {row id: column dict}}, {table: why it was skipped}).
+- `run_db_write()` — Write analysis results for a few tracks into a copy of master.db and audit the copy.
+- `cmd_db_write()`
+- `cmd_checklist()`
+- `main()`
 
 ### `scripts/validate_research_docs.py`
 

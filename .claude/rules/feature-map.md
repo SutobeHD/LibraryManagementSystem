@@ -24,6 +24,11 @@ SessionStart hook prints `feature_map.py --brief`: status counts, active constru
 - Branch finished but not merged → `unmerged` + `branch` (+ `pr`).
 - User mentions an idea in chat → `idea` entry right away. Ideas never live only in chat.
 - Decided against → `dropped` + reason in `notes` (keeps it from being re-proposed).
+- Code done, user must check it (every `unmerged`, or `shipped` with an untested main path) → `--mark testen <id>`.
+- User confirms it works / real end-to-end proof (real app, real library, real stick — not unit tests, not mocked preview) → `--mark getestet <id>` (sets `tested` = today). Unknown → leave untagged (= Fertig). Never `getestet` on a green type-check.
+- Check needs external hardware (CDJ, mixer, controller) → not a `todo` on the feature and no reason to hold back `getestet`: add the item to `cdj-hardware-validation` (0.5). A feature counts as `getestet` once it is proven on the PC — real app, real library, stick folder read back (user decision 2026-11-22).
+- Feature reworked (status back to `in_progress`) → `--mark fertig <id>` once done again; a stale `test` on unfinished status is a `--check` warning.
+- New feature entry → also put its id into a version in `docs/features/_roadmap.toml` (see Roadmap). Unsure which → `later`, never leave it silently ungeplant.
 - Before commit: `python scripts/feature_map.py --check` (CI runs it; fails on bad ids/refs or `shipped`/`partial` paths that match nothing).
 
 ## Status values
@@ -39,6 +44,39 @@ SessionStart hook prints `feature_map.py --brief`: status counts, active constru
 | `idea` | backlog only |
 | `dropped` | deliberately not doing — reason in `notes` |
 
+## Tag (phase) — shown per feature, derived
+
+One lifecycle tag per feature. Mindmap colours/filters by it (switch "Farbe nach Tag / Status"), `--list` + `--who` print it.
+
+| Tag | From |
+|---|---|
+| Idee | `status = idea` |
+| Geplant | `research`, `planned` |
+| Angefangen | `in_progress` |
+| Fertig | `shipped` / `partial` / `unmerged` without `test` — test state unknown |
+| Testen | finished + `test = "testen"` — test pending, user's to-do |
+| Getestet | finished + `test = "getestet"` (+ `tested` date) |
+| Verworfen | `dropped` |
+
+Only `test` / `tested` are stored; never write a phase into the TOML.
+
+## Roadmap — versions (`docs/features/_roadmap.toml`)
+
+One file maps feature ids to versions: `[[release]]` blocks in order (`id`, `stage`, `name`, `goal`, `features`). Central on purpose — planning never conflicts with the area TOMLs open branches edit.
+
+| Stage | Meaning |
+|---|---|
+| `alpha` | features still arrive, may wobble (0.1 Kern-Loop … 0.4) |
+| `beta` | feature freeze: speed, stability, security, polish only |
+| `rc` / `release` | release candidate / public version (1.0 = milestone, no own features) |
+| `later` | after 1.0, deliberately parked |
+
+- Version **testbar** = all its features on `main`. **Erreicht** = all `getestet`. **Aktuell** = first version not erreicht.
+- Each feature in at most one version. `dropped` never. `unversioned_areas` (devtools) need none.
+- `--check` errors on unknown/duplicate ids; warns when a feature `depends_on` something planned in a later version or in none.
+- Version plan is the user's call: propose moves, don't reshuffle versions unasked. Pulling a `later` item into a version = user decision.
+- Session digest prints the current version's progress (`Roadmap:` line).
+
 ## Entry schema (`[[feature]]` in `docs/features/<area>.toml`)
 
 | Key | Req | Notes |
@@ -47,6 +85,8 @@ SessionStart hook prints `feature_map.py --brief`: status counts, active constru
 | `group` | ✓ | sub-category inside the area file; reuse existing group names |
 | `name` | ✓ | short German label (the map is the user's view) |
 | `status` | ✓ | see table |
+| `test` | | `testen` / `getestet`, finished statuses only — set via `--mark` |
+| `tested` | | `YYYY-MM-DD` (or `YYYY-MM`) of the getestet evidence |
 | `desc` | | one sentence, what it does for the user |
 | `paths` | | owned files/globs; `dir/` = everything below. Never hub files |
 | `routes` | | API prefixes |
@@ -58,14 +98,17 @@ SessionStart hook prints `feature_map.py --brief`: status counts, active constru
 | `todo` | | open points, short |
 | `notes` | | gaps, bugs, reasons, warnings |
 
-Area files carry `[area]` (`id`, `name`, `order`, `desc`). Global settings (hubs, ignore, parked branches, stale days): `docs/features/_meta.toml`.
+Area files carry `[area]` (`id`, `name`, `order`, `desc`). Global settings (hubs, ignore, parked branches, stale days): `docs/features/_meta.toml`. Versions: `docs/features/_roadmap.toml`.
 
 ## Commands
 
 ```bash
 python scripts/feature_map.py --who <id|path|text>   # before touching X
 python scripts/feature_map.py --active               # all construction sites + overlaps
-python scripts/feature_map.py --list [--status S] [--area A]
+python scripts/feature_map.py --list [--status S] [--phase P] [--area A]
+python scripts/feature_map.py --list --phase testen  # what the user still has to test
+python scripts/feature_map.py --roadmap [--release <id|ungeplant>]   # versions + progress, one version in detail
+python scripts/feature_map.py --mark <testen|getestet|fertig> <id> [<id> ...]   # set test tag (edits TOML)
 python scripts/feature_map.py --html --open          # interactive mindmap -> tmp/feature-map.html
 python scripts/feature_map.py --check                # validate (CI)
 python scripts/feature_map.py --coverage             # source files no feature owns

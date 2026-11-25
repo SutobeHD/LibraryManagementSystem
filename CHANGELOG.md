@@ -2,6 +2,192 @@
 
 ## [Unreleased]
 
+- Rekordbox XML export:
+  - Added: right-click a playlist, smart playlist or folder -> "Export as
+    Rekordbox XML" writes `exports/<name>.xml` (a folder with its whole
+    subtree). Settings > Export gained an "XML export scope" picker, default
+    "Whole library". The toast reports the exported track count and
+    how many streaming tracks were skipped.
+  - Fixed: exporting the whole library (5041 tracks, 265 MB) took 12-20 s
+    and hit the 10 s request timeout, so the toast said "Export failed" while
+    the file was still being written. The export request now waits up to
+    5 minutes.
+  - Fixed: the playlist right-click menu could run up to 55 px past the
+    bottom of the window; it is now clamped by its measured size.
+- USB covers:
+  - Fixed: the stick got its covers from the audio file's embedded tags, else
+    a `cover.jpg` / `folder.jpg` next to it, not from the library. It now takes
+    the cover Rekordbox and the app show (master.db ImagePath, same resolver as
+    `GET /api/artwork`) and uses embedded, then sidecar art only for tracks the
+    library has no cover for. On a copy of the real library (4909 local
+    tracks) the old order put another image than the library's on 899 tracks
+    (all from a folder cover) and none on 39 that have one. A 40-track export
+    went from 8 of 29 library covers right to 29 of 29; `export.pdb` carries
+    the same artwork rows. A re-sync leaves unchanged covers alone.
+  - Changed: `/api/artwork` checks its folder jail with `Path.is_relative_to`
+    instead of a string prefix, so a sibling folder like `share_evil` no
+    longer passes.
+- Beat grid (MP3):
+  - Fixed: MP3 beat grids sat about 25 ms away from Rekordbox's. The grid was
+    shifted by a fixed 22.5 ms because the LAME header was never actually read.
+    It now moves by the same per-file decoder lead-in as the waveform: 0 ms
+    without a Xing/Info frame, 25.1 ms with one, 51.2 ms with a LAME tag.
+    Measured against Rekordbox on 18 MP3s (6 per header type), the median grid
+    error went from 24.3 ms to 5.2 ms (no Info frame 26.3 -> 3.9 ms, LAME tag
+    24.6 -> 4.0 ms, Info frame unchanged at about 12 ms).
+  - Changed: cached analyses are re-run once (analysis cache version 7).
+  - Added: `scripts/compare_rekordbox.py` reports `median_signed_ms` per track
+    (our beat minus Rekordbox's), so a grid that sits early or late shows up
+    as a sign instead of only a distance.
+- Waveforms (ANLZ):
+  - Fixed: the waveforms written to `.DAT` / `.EXT` / `.2EX` looked unlike
+    Rekordbox's (about twice as tall and flat, colours swapped, values out of
+    range). Heights now follow the squared sample peak per 1/150 s column,
+    previews pool every column of a bucket instead of sampling single points,
+    the 3-band tags follow a peak envelope with per-track band gain, and the
+    band split is 200 Hz / 2 kHz. Measured against Rekordbox's own files for
+    the same audio, amplitude correlation (median, 5 tracks) went from
+    0.45-0.77 to 0.89-1.00 per tag, and 0.92-1.00 on 5 held-out tracks.
+  - Fixed: value ranges and channel order now match Rekordbox: PWV5 red =
+    bass and blue = highs (were swapped), PWV4 `[level, 0, 0, low, mid, high]`
+    7-bit, PWV6/PWV7 0-127, PWV2 1-15 without whiteness bits (players reject
+    the preview on any byte above 15), PWAV 2-25 (a 0 column reads as
+    "unanalysed").
+  - Fixed: MP3 waveforms ran 25-51 ms ahead of Rekordbox. The decoder lead-in
+    Rekordbox keeps (LAME delay and the Xing/Info frame) is now prepended.
+  - Changed: cached analyses are re-run once (analysis cache version 6).
+- Logging:
+  - Fixed: user paths reached the logs with the account name whenever they were
+    not spelled exactly like the home folder — forward slashes (a third of the
+    library), other case, URL-encoded query strings in uvicorn access lines,
+    doubled backslashes from a list repr, UNC paths. The scrub now matches every
+    spelling, and uvicorn's own access and error loggers (which do not propagate
+    to the root logger) get scrubbing formatters via `log_config`.
+
+- Library:
+  - Added: every track column sorts, Date Added and Colour included; Key sorts
+    on the Camelot wheel (Camelot and musical spellings mixed), missing values
+    stay at the bottom. New optional columns: Genre, Label, Year, My Tags,
+    Format (right-click the table header).
+  - Fixed: text columns sorted by code point, so titles with umlauts or accents
+    landed after Z. They now sort in the language's order, numbers inside
+    names by value ("Track 2" before "Track 10").
+  - Fixed: 23 tracks without a Rekordbox stock date showed "-" under Date
+    Added; they now show the day they were added to the library.
+  - Fixed: the Collection search found nothing for `rating:>=4` or
+    `genre:"deep house"`. Ratings, BPM and year take `>`, `>=`, `<`, `<=`
+    and `=`, BPM ranges like `bpm:138-142` still work, quoted values may
+    contain spaces, `key:8A` and `key:Am` find the same tracks (`key:A`
+    finds A and Am), and `artist:` / `title:` / `album:` filter their field.
+    A token the search cannot read is searched as plain text instead of
+    hiding every track; `12" mix` and `4:44` still find those titles.
+  - Fixed: "Delete from Collection" in the live Rekordbox library only hid the
+    track until the next restart (and answered 500) while the dialog promised a
+    permanent delete. rbox 0.1.7 cannot delete a track row, so the live mode no
+    longer offers it: the menu item is hidden and `DELETE /api/track/{id}`
+    answers 409 with a hint to remove the track in Rekordbox. XML mode still
+    removes tracks, now with one confirmation instead of two.
+  - Fixed: editing several tracks at once is all or nothing. A batch naming a
+    track the library does not hold answers 404 with that id and writes nothing
+    (the live library had already written the valid tracks and answered 500); a
+    write the live database refuses partway puts the tracks already written back.
+    Editing an unknown track answers 404 instead of 500.
+  - Fixed: Title / Artist / Album edits from the track table and the batch bar
+    now reach the audio file's tags too (setting `write_tags_to_files`, on by
+    default), as single-track edits already did; the answer reports each file.
+  - Fixed: a track edit no longer replaces the file's own cover art with the
+    library thumbnail (a back cover was deleted, a PNG relabelled JPEG), a
+    colour-only edit leaves the file untouched, and two quick edits of one track
+    write the file in the order they reached the library.
+  - Fixed: imported MP3s got FileType 0 in master.db instead of Rekordbox's 1.
+    Every import now gets the code of its format (MP3 1, M4A 4, FLAC 5, WAV 11,
+    AIFF 12).
+
+- Rekordbox XML export:
+  - Fixed: the export held no playlist (PLAYLISTS was an empty ROOT), so an
+    imported file lost the playlist and its order. `POST /api/rekordbox/export`
+    now takes `playlist_id` (a playlist, or a folder with its subfolders) or
+    `track_ids` + `playlist_name` and writes the playlist nodes in playlist
+    order. A plain track list (the whole-library push) still has no playlist.
+  - Fixed: SoundCloud and other streaming tracks got a made-up local
+    Location (`<backend folder>/soundcloud:tracks:…`). They are now left out,
+    and the response says how many were skipped.
+
+- API route hygiene:
+  - Fixed: a suffix range (`Range: bytes=-500`) on `/api/stream` returned the
+    first 501 bytes of a non-AIFF file instead of the last 500. Both stream
+    routes now share one RFC 7233 range
+    handler (single range -> 206, multi-range or malformed -> whole file,
+    unsatisfiable -> 416).
+  - Fixed: `/api/audio/stream` (DAW editor) ignored Range for MP3/FLAC/M4A/WAV
+    and sent FLAC/M4A with the wrong Content-Type. It now answers exactly like
+    `/api/stream`. Both routes answer `HEAD`.
+  - Fixed: `POST /api/audio/analyze` analysed any existing file; it now has the
+    same folder sandbox as playback (403 outside the library folders).
+  - Fixed: analysis responses (`analyze-batch` progress lines, `analyze-full`)
+    no longer contain absolute file paths.
+  - Fixed: play-count sync (`/api/usb/playcount/resolve`) wrote a fixed
+    `%APPDATA%` master.db in every mode, even while Rekordbox was running. With
+    the live library it now refuses while Rekordbox runs, writes the library's
+    own master.db and holds the database write lock; with an XML library it
+    updates only the USB stick and says so. Errors show the backend's reason
+    instead of "Request failed with status code 409".
+
+- USB export:
+  - Fixed: "Initialize" wrote the four settings files (DEVSETTING, MYSETTING,
+    MYSETTING2, DJMMYSETTING) as zero bytes, and later syncs never replaced them.
+    Initialize now writes valid defaults; a sync repairs a blank file but never
+    touches real settings. DEVSETTING.DAT is the 140-byte file rekordbox writes.
+  - Fixed: saving a USB profile with only some fields (e.g. a new label) reset
+    drive, type, sync mode and the playlist selection to defaults.
+  - Fixed: after a re-sync a cover slot could show the previous track's artwork,
+    also for a track without a cover. Covers are rewritten when their source
+    image changes and left alone when it does not; covers no track uses any more
+    are removed from the stick.
+  - Fixed: artist or title folders that differ only in case (Stenoz / STENOZ)
+    now get one spelling per stick, so the paths in `exportLibrary.db`,
+    `export.pdb` and `rekordbox.xml` match the case on disk.
+  - Fixed: the USB view took 4-8 s to list sticks and profiles even with no
+    stick plugged in (two PowerShell calls per scan, scanned twice per profiles
+    read). Device scan and profiles read now answer in milliseconds, and stored
+    profiles show without waiting for the device scan.
+  - Fixed: the OneLibrary template's empty artists, albums, genre and keys no
+    longer stay in `exportLibrary.db` / `export.pdb`; a track without a key or
+    genre now has none instead of an empty one.
+  - Fixed: every exported track lost its album and kept the OneLibrary
+    template's file type (M4A), sample rate (48 kHz), bit depth and file size,
+    in `exportLibrary.db` and `export.pdb`. They now come from the file itself.
+  - Fixed: ratings are stored as 0-5 stars instead of x51 (CDJ-3000X / XDJ-AZ
+    showed no stars).
+  - Fixed: artwork landed in folder `00000`; folders now hold 20 images each and
+    start at `00001`, and every image is also written as the `b` copy Rekordbox
+    writes.
+  - Fixed: re-syncing a stick never updated `exportLibrary.db` / `export.pdb`
+    on Windows while the app reported success. A plain sqlite3 probe of the
+    SQLCipher file failed and kept it locked, so the writer could not replace
+    it. The probe is gone, a still-locked file now ends the sync with an error,
+    and any failed stage makes the whole sync report "Sync incomplete".
+  - Fixed: the sync preview compared the stick with the whole library and read
+    the stick with plain sqlite3 (always empty). It now reads it through rbox and
+    compares the profile's selected playlists (plus their folders).
+  - Fixed: BPM on the stick was cut instead of rounded (127.96 became 127.95)
+    in `exportLibrary.db` and `export.pdb`.
+  - Changed: the sync message counts files that were already on the stick
+    separately instead of as "copied".
+  - Fixed: a stick sync wrote at most 16 tracks into `exportLibrary.db` and
+    `export.pdb` (B9) — the cap was the row count of the bundled OneLibrary
+    template. The writer now adds the missing content slots before it writes
+    (rbox 0.1.7 workaround) and falls back to the old cap with a warning only
+    if that fails. Verified on fake sticks with 17 / 100 / 1000 tracks; real
+    CDJ-3000 check pending.
+  - Fixed: one track missing on the stick (skipped, failed, filtered out) left
+    every later track of its playlist unlinked in `exportLibrary.db` — playlist
+    links are now numbered without gaps.
+  - Fixed: `property.numberOfContents` in `exportLibrary.db` always said 16; it
+    now matches the tracks on the stick.
+  - Changed: `export.pdb` data pages hold at most 255 rows, so big playlists
+    never produce the >255-row page header that crashes rekordbox 6.8.6.
+
 - Analysis accuracy + engine fixes:
   - Improved: exact-octave BPM accuracy (Acc-1). `detect_beats_madmom` now
     constrains the madmom DBN tempo window to the octave of a robust coarse
@@ -40,6 +226,26 @@
   - Added: `scripts/compare_rekordbox.py` (A/B accuracy vs a real library) +
     `scripts/selftest_analysis.py` (autonomous synthetic-ground-truth accuracy,
     MIREX Acc-1/Acc-2). Self-test with RNN: BPM Acc-2 100%, KEY exact 100%.
+  - Fixed: BPM on constant-tempo tracks where the beat tracker slips in a
+    break, intro or outro. The single regression line failed there and the BPM
+    fell back to a value quantised to 1.25 ms per beat (135.0 → 135.21,
+    170.0 → 170.21). A second "comb" fit now takes the beats that share one
+    phase: exact BPM, and a uniform grid when at least 85 % of the beats sit on
+    that line. A/B against Rekordbox on 60 real tracks: BPM identical 40 → 56,
+    median grid error 11.3 → 6.0 ms. Analysis cache version 5 — tracks are
+    re-analysed once.
+  - Fixed: a uniform beat grid that sat on the off-beat (tracker locked onto
+    open hi-hat + off-beat bass) moves half a beat onto the kicks — only when
+    the kick band (150–2000 Hz) is at least twice as strong between the beats
+    as on them, on most beats, and the track's first sound sits between the
+    beats too. 1 of 50 real uniform grids moved (210 → 20 ms against
+    Rekordbox); two more at a 1.4× margin stay put because Rekordbox agrees
+    with the shift for one and not for the other.
+  - Fixed: beat grids of `.m4a` / `.mp4` files sat about 48 ms late. The
+    47.9 ms AAC encoder-delay shift was applied although the decoder already
+    drops the priming samples; 8 of 8 real `.m4a` tracks went from 49–56 ms
+    to 1–8 ms against Rekordbox. Raw `.aac` and files with an iTunSMPB tag
+    keep their shift (no such file measured).
 - Reliability hardening (codebase-wide bug-hunt — 16 fixes + 15 new test files,
   full pytest suite 658 passing):
   - Fixed: Rekordbox XML import called a non-existent `db.update_track`, so every
@@ -191,6 +397,33 @@
   - Fixed: every XML save dropped all track ratings, and colours set in the
     app; both are now kept. Fields an XML library cannot store (Remixer, Year,
     a misspelt key) are refused instead of vanishing on the next reload.
+  - Fixed: the track-edit endpoints answered 200 for an edit that failed or
+    was silently dropped, so the app showed success. A refused field or value
+    is now a 400 that names it (shown in the error toast, e.g. "Edit BPM/Key"
+    in a live library), an unknown key in the single-track edit a 422, and a
+    failed save a 500.
+  - Fixed: the Rekordbox XML export marked every file "WAV File", wrote
+    un-encoded file locations (a space, `&` or `#` made Rekordbox miss the
+    file), stamped today's date as Date Added, numbered tracks 1..N and wrote
+    the beat number as `Battuta`. It now writes the real file type, a
+    percent-encoded location, the track's own date added and track id, the
+    beat number as `Battito`, plus key, rating, comment and bit rate. An XML
+    library track with an empty field no longer crashes the export, and
+    importing an XML now decodes encoded locations.
+  - Fixed: the Rekordbox XML export wrote the file name as sent: `../x.xml`
+    or an absolute path landed outside `exports/` (e.g. over the XML
+    library), and no name was a server error. The name is now reduced to a
+    plain `.xml` file inside `exports/`; an unusable name is refused.
+  - Fixed: in a live library, track edits, MyTags, track delete, every
+    playlist change, imports (folder scan, drag-drop, upload, Rekordbox XML),
+    duplicate merges, title cleaning, label playlists and SoundCloud
+    sync/merge wrote master.db while Rekordbox was open, which overwrites or
+    corrupts those rows. They now answer "Rekordbox is running. Close it
+    before ..." (409) and write nothing. XML libraries are unaffected.
+  - Fixed: creating a playlist answered success even when nothing was
+    created, and returned the whole playlist instead of its id, so
+    "Duplicate playlist" made an empty copy. It now returns the id and
+    reports a failed create as an error.
 - Performance (backend):
   - Perf: artist/label lists and drill-downs no longer re-read
     `metadata_mappings.json` once per track — the mappings are cached; a hand

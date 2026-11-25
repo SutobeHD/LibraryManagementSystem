@@ -21,7 +21,7 @@
 | `app/analysis_settings.py` | LibraryManagementSystem -- Analysis Settings |
 | `app/anlz_cue_patch.py` | anlz_cue_patch.py — non-destructive memory-cue injection into existing ANLZ files. |
 | `app/anlz_safe.py` | Safe wrapper around `rbox.MasterDb` + `rbox.Anlz` for PQTZ beatgrid loading. |
-| `app/anlz_sidecar.py` | ANLZ-Sidecar writer — shared helper used by every track-import path |
+| `app/anlz_sidecar.py` | LMS ANLZ cache — DAT/EXT/2EX files LMS generated for a track that has no |
 | `app/anlz_usb_export.py` | Ready one track's ANLZ trio for a USB stick: the transform Rekordbox applies on export. |
 | `app/anlz_writer.py` | LibraryManagementSystem -- ANLZ Binary File Writer |
 | `app/artist_store/__init__.py` | artist_store — Artist-Hub sidecar package (``artists.db``). |
@@ -50,6 +50,7 @@
 | `app/folder_watcher.py` | FolderWatcher — auto-import audio files from user-configured folders. |
 | `app/genre_atlas.py` | Genre suggestions from the genre-atlas snapshot (read-only, explainable). |
 | `app/import_tracker.py` | Per-file import-progress tracker — gives the frontend a live transparent |
+| `app/library_artwork.py` | Library artwork path -> image file on disk. |
 | `app/library_format_swap.py` | Library-wide audio format conversion engine. |
 | `app/library_source.py` | LibrarySource — uniform abstraction over Live (master.db) and XML modes. |
 | `app/live_database.py` | *(no module docstring)* |
@@ -63,6 +64,7 @@
 | `app/pairing_store.py` | pairing_store — in-memory one-shot pairing codes (Phase-2 auth, T2). |
 | `app/phrase_db_writer.py` | phrase_db_writer.py — write phrase memory cues into Rekordbox master.db (djmdCue). |
 | `app/phrase_generator.py` | phrase_generator.py — Phrase & Auto-Cue Generator |
+| `app/playable_audio.py` | Browser-playable view of AIFF files: a virtual WAV computed from the source. |
 | `app/playcount_sync.py` | playcount_sync.py — USB Play-Count Sync Engine |
 | `app/popularity_engine.py` | Popularity sidecar engine — SoundCloud-only at M1 (underground-mainstream T1-T3). |
 | `app/pyrekordbox_compat.py` | Importing pyrekordbox without letting it reconfigure our logging. |
@@ -86,7 +88,7 @@
 | `app/usb_pdb.py` | USB export.pdb writer — legacy CDJ DeviceLibrary format. |
 | `app/variant_detector.py` | variant_detector — title-only variant classifier + clusterer (M1). |
 | `app/variant_schema.py` | variant_schema — DDL + idempotent migration runner for the variants sidecar. |
-| `app/xml_generator.py` | *(no module docstring)* |
+| `app/xml_generator.py` | Rekordbox collection XML (DJ_PLAYLISTS) writer for the /api/rekordbox/export bridge. |
 
 ## frontend/src/ — React Frontend
 
@@ -164,6 +166,10 @@
 | `frontend/src/utils/openExternal.js` | Open a web link outside the app: the system browser in Tauri, a new tab in the browser. |
 | `frontend/src/utils/openExternal.test.js` | node:test — `node --test frontend/src/utils/openExternal.test.js` |
 | `frontend/src/utils/theme.js` | theme — UI skin selection (per device, localStorage). |
+| `frontend/src/utils/trackSearch.js` | Token search for the Collection / playlist views. |
+| `frontend/src/utils/trackSearch.test.js` | *(no module docstring)* |
+| `frontend/src/utils/trackSort.js` | Sort helpers for TrackTable. |
+| `frontend/src/utils/trackSort.test.js` | *(no module docstring)* |
 | `frontend/src/components/ArtistHubView.jsx` | *(no module docstring)* |
 | `frontend/src/components/BatchEditBar.jsx` | *(no module docstring)* |
 | `frontend/src/components/ConfirmModal.jsx` | Module-level subscriber registry so a single mounted <ConfirmModalRoot /> |
@@ -172,7 +178,7 @@
 | `frontend/src/components/FormatConverterView.jsx` | FormatConverterView — Library-wide audio format converter UI. |
 | `frontend/src/components/GenreSuggestions.jsx` | Genre suggestions from the genre atlas for one library track. |
 | `frontend/src/components/ImportProgressBanner.jsx` | Sticky progress banner — visible on every screen while local-file or SoundCloud imports are running. |
-| `frontend/src/components/ImportView.jsx` | Recursively walk a DataTransferItemList, returning every File inside any dropped folder. |
+| `frontend/src/components/ImportView.jsx` | *(no module docstring)* |
 | `frontend/src/components/InsightsView.jsx` | InsightsView — DJ-Style Analytics Dashboard Datenbasierte Einblicke in den eigenen DJ-Stil und die Library: •… |
 | `frontend/src/components/LibraryView.jsx` | *(no module docstring)* |
 | `frontend/src/components/MatchInspectorModal.jsx` | *(no module docstring)* |
@@ -274,6 +280,7 @@
 | `tests/__init__.py` | *(no module docstring)* |
 | `tests/conftest.py` | Pytest fixtures shared across the suite. |
 | `tests/test_analysis.py` | Regression tests for the analysis pipeline. |
+| `tests/test_analysis_api_hygiene.py` | POST /api/audio/analyze sandbox + path-free analyze-batch / analyze-full bodies. |
 | `tests/test_analysis_cache.py` | Tests for app/analysis_cache.py — persistent analysis-result cache. |
 | `tests/test_analysis_db_writer.py` | Unit tests for AnalysisDBWriter — the values it writes into Rekordbox master.db. |
 | `tests/test_analysis_edge.py` | Edge-case robustness for the analysis engine entry points. |
@@ -285,7 +292,8 @@
 | `tests/test_anlz_safe_pqtz.py` | Beat-grid extraction in `app.anlz_safe`. |
 | `tests/test_anlz_usb_export.py` | ANLZ trio -> USB stick transform (`app.anlz_usb_export`) and its wiring in |
 | `tests/test_anlz_usb_export_sync.py` | Full `OneLibraryUsbWriter.sync()` with copy_anlz=True against the real template. |
-| `tests/test_anlz_writer_guards.py` | Tests for app/anlz_writer.py logic-safety guards (NOT byte-layout). |
+| `tests/test_anlz_waveform_values.py` | Value model of the ANLZ waveform tags (app/analysis_engine.py generate_waveform_data). |
+| `tests/test_anlz_writer_guards.py` | Tests for app/anlz_writer.py logic-safety guards + waveform tag headers. |
 | `tests/test_artist_attribution.py` | Local attribution tests (T-24 — app/artist_store/attribution.py). |
 | `tests/test_artist_catalogue.py` | Artist-Hub catalogue tests (T-14 — app/artist_store/catalogue.py). |
 | `tests/test_artist_catalogue_routes.py` | Artist-Hub SoundCloud route tests — binding, catalogue, batch download (T-13/T-15). |
@@ -310,6 +318,7 @@
 | `tests/test_auth.py` | Tests for ``app/auth.py`` -- Bearer-token session authentication. |
 | `tests/test_batch_comment_route.py` | POST /api/tools/batch-comment. |
 | `tests/test_batch_worker.py` | Tests for app/batch_worker.py — the comment transform and the batch loop. |
+| `tests/test_bpm_regression_grid.py` | BPM from a regression line through all beats, uniform grid for steady tracks (B5). |
 | `tests/test_compare_rekordbox.py` | Unit tests for the pure comparison helpers in scripts/compare_rekordbox.py. |
 | `tests/test_cue_beatgrid_persistence.py` | Round-trip tests for the cue / beatgrid sidecar persistence. |
 | `tests/test_database.py` | Tests for `app/database.py`. |
@@ -319,17 +328,23 @@
 | `tests/test_download_registry.py` | Tests for app/download_registry.py — SoundCloud download dedup/history DB. |
 | `tests/test_duplicate_grouping.py` | Duplicate finder: O(n) digest grouping, parallel fingerprinting, location index. |
 | `tests/test_external_track_match.py` | external_track_match unit tests (external-track-match-unified-module T-3..T-9). |
+| `tests/test_ffmpeg_protocols.py` | Protocol-aware ffmpeg resolution and its use in the SoundCloud downloader (B18). |
 | `tests/test_folder_watcher.py` | Tests for app/folder_watcher.py — auto-import folder watcher. |
 | `tests/test_genre_atlas.py` | Tests for app.genre_atlas: matching logic on a synthetic atlas + integrity of the snapshot. |
 | `tests/test_genre_atlas_routes.py` | Route tests for the genre-atlas hints (app/main.py). |
 | `tests/test_import_dedup.py` | Import dedup — ``/api/library/import-paths``, ``/api/library/scan-folder`` and |
 | `tests/test_import_tracker.py` | Tests for app/import_tracker.py — live import-progress tracker. |
+| `tests/test_library_artwork.py` | One artwork resolver for the app and the stick (`app/library_artwork.py`). |
 | `tests/test_library_format_swap.py` | Tests for app.library_format_swap. |
+| `tests/test_library_quality_stats.py` | GET /api/library/quality-stats — lossless/lossy counts by file extension (B16). |
 | `tests/test_library_source.py` | Tests for app/library_source.py — the Live/XML normalization layer. |
 | `tests/test_library_tracks_light.py` | GET /api/library/tracks — the optional ``light`` projection (app/main.py). |
 | `tests/test_librosa_lazy_import.py` | Booting the sidecar (``import app.main``) must not import librosa / numpy. |
 | `tests/test_live_cue_loading.py` | Cue loading in `app.live_database`. |
+| `tests/test_live_import_analysis.py` | An imported track's analysis must reach master.db (B4, 0.1 core-loop test). |
+| `tests/test_live_playlist_b11.py` | Live playlist operations end to end against an rbox stand-in (B11, 0.1 core-loop test). |
 | `tests/test_live_playlist_ops.py` | Tests for the live-mode playlist primitives in `app/live_database.py`. |
+| `tests/test_live_stock_date.py` | Live StockDate: never the text "None" (B17); a NULL date falls back to created_at's day. |
 | `tests/test_logging_redaction.py` | Unit tests for `app.logging_utils.RedactingFormatter`. |
 | `tests/test_main_route_table.py` | app/main.py defines each top-level name once, so no request model or handler is shadowed. |
 | `tests/test_main_security.py` | Regression tests for ``POST /api/file/reveal`` sandbox. |
@@ -337,6 +352,8 @@
 | `tests/test_metadata_fixer_detector.py` | M0 detector tests — read-only malformation detection. |
 | `tests/test_metadata_fixer_schema.py` | metadata-fixer undo-log schema tests (T4 — app/metadata_fixer/schema.py). |
 | `tests/test_musicbrainz_client.py` | MusicBrainz client tests (T-22, Threat T14 — app/musicbrainz_client.py). |
+| `tests/test_onelibrary_template_refs.py` | Template reference rows do not survive a stick export (PC test 2026-11-22). |
+| `tests/test_onelibrary_track_limit.py` | B9 regression: a USB sync writes EVERY selected track, not just the 16 template slots. |
 | `tests/test_onelibrary_wal_flush.py` | End-to-end regression test for OneLibraryUsbWriter — runs the FULL |
 | `tests/test_pairing.py` | Phase-2 paired-token store tests (T1 — app/auth_db.py). |
 | `tests/test_pairing_store.py` | Phase-2 pairing-code store tests (T2 — app/pairing_store.py). |
@@ -345,11 +362,13 @@
 | `tests/test_phrase_anlz_dirs.py` | One master.db open per phrase batch via `resolve_anlz_dirs`. |
 | `tests/test_phrase_batch.py` | Tests for the phrase-batch backend (app/main.py): |
 | `tests/test_phrase_db_writer.py` | Unit tests for app/phrase_db_writer.py (djmdCue memory-cue writer). |
+| `tests/test_playable_audio.py` | AIFF served as a virtual WAV (app/playable_audio.py + both stream routes). |
 | `tests/test_playcount_sync.py` | Tests for app/playcount_sync.py — USB <-> PC play-count sync engine. |
 | `tests/test_popularity_engine.py` | PopularityStore tests (underground-mainstream-classifier T1-T3). |
 | `tests/test_rate_limit.py` | Tests for ``app/rate_limit.py`` -- in-process token-bucket limiter. |
 | `tests/test_rbep_parser.py` | Tests for app/rbep_parser.py — Rekordbox Editor Project (.rbep) XML parser. |
 | `tests/test_rekordbox_bridge.py` | Tests for app/rekordbox_bridge.py — Rekordbox XML <-> local DB import. |
+| `tests/test_rekordbox_running_guard.py` | Live master.db writers refuse while Rekordbox runs (B13); playlist create + XML export. |
 | `tests/test_require_session.py` | Phase-2 require_session dual-acceptance tests (T3 — app/auth.py). |
 | `tests/test_route_uniqueness.py` | Routing-table invariant: no duplicate (method, path) registrations. |
 | `tests/test_sc_fuzzy_index.py` | SoundCloud sync matcher: the indexed matcher answers exactly like the old brute force. |
@@ -369,14 +388,27 @@
 | `tests/test_soundcloud_log_redaction.py` | Regression guard: no SoundCloud log record may carry a `client_id`. |
 | `tests/test_soundcloud_refresh_route.py` | Route tests for the persistent SoundCloud login (T-19). |
 | `tests/test_stream_chunking.py` | GET /api/stream: file reads happen off the event loop, in 1 MiB chunks. |
+| `tests/test_stream_ranges.py` | RFC 7233 Range + HEAD on both stream routes, raw files and the AIFF WAV view alike. |
 | `tests/test_stream_unicode_filename.py` | Regression: GET /api/stream 500 on non-latin-1 filenames. |
 | `tests/test_system_health.py` | Contract tests for ``GET /api/system/health`` -- unauth'd liveness probe. |
+| `tests/test_track_batch_tags.py` | PATCH /api/tracks/batch writes the audio-file tags like the single-track edit. |
+| `tests/test_track_batch_writes.py` | Track edits are all or nothing and name an unknown id (PC test 2026-11-22). |
+| `tests/test_track_delete_routes.py` | Deleting a track (PC test 2026-11-22). |
 | `tests/test_track_metadata_fields.py` | Track-metadata writes refuse fields and values the backend cannot store (issue K8). |
+| `tests/test_usb_artwork.py` | Cover art for the USB stick, with the real Pillow (B8, 0.1 core-loop test). |
+| `tests/test_usb_artwork_resync.py` | Cover files follow their slot across re-syncs (PC test 2026-11-22). |
+| `tests/test_usb_case_folders.py` | Folders that differ only in case get one spelling per stick (PC test 2026-11-22). |
 | `tests/test_usb_copy_atomic.py` | USB audio copies must not leave a truncated file that never self-heals. |
+| `tests/test_usb_device_scan.py` | GET /api/usb/devices without a stick took 4.2-4.9 s per call (PC test 2026-11-22). |
+| `tests/test_usb_export_fields.py` | Per-track fields of a stick export (PC test 2026-11-22). |
 | `tests/test_usb_lookup_batching.py` | Batched master.db lookups in the USB scan / diff / legacy-export paths. |
 | `tests/test_usb_manager.py` | Tests for `app/usb_manager.py`. |
 | `tests/test_usb_mysettings.py` | Tests for app/usb_mysettings.py — Pioneer MYSETTING file schema + I/O. |
+| `tests/test_usb_profile_route.py` | POST /api/usb/profiles merges a partial body into the stored profile (PC test 2026-11-22). |
 | `tests/test_usb_relocate.py` | Tests for the USB relocation pass (`app/usb_one_library.py`). |
+| `tests/test_usb_resync.py` | Re-syncing a stick that already holds an export (PC test 2026-11-22). |
+| `tests/test_usb_settings_seed.py` | Settings files on an initialized stick (PC test 2026-11-22). |
+| `tests/test_validate_real_world.py` | Unit tests for the pure helpers in scripts/validate_real_world.py. |
 | `tests/test_variant_detector.py` | variant_schema + variant_detector tests (analysis-remix-detector T-2, T-3). |
 | `tests/test_variant_schema.py` | Tests for app/variant_schema.py — variants.db DDL + migration runner. |
 | `tests/test_waveform_cache.py` | GET /api/audio/waveform: off-loop compute, disk cache, in-flight dedup. |
@@ -403,4 +435,5 @@
 | `scripts/selftest_analysis.py` | selftest_analysis.py — autonomous accuracy self-test (no Rekordbox needed). |
 | `scripts/sync_genre_atlas.py` | Vendor a slim snapshot of the genre-atlas repo into app/data/genre_atlas.json. |
 | `scripts/test_xml_sync.py` | Add app to path |
+| `scripts/validate_real_world.py` | validate_real_world.py — real-library validation run for the analysis engine. |
 | `scripts/validate_research_docs.py` | Validate every doc under docs/research/{research,implement,archived}/. |

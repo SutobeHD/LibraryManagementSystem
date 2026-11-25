@@ -11,20 +11,25 @@ id = "browser-audio-player"
 group = "Playback"
 name = "Mini-Player (HTML5)"
 status = "shipped"
+test = "getestet"
+tested = "2026-11-22"
 desc = "<audio>-Player: Play/Pause/Volume, Drag-Seek, amber Mirror-Scrubber."
 paths = ["frontend/src/components/Player.jsx", "frontend/src/components/shared/seededWaveform.js"]
 depends_on = ["audio-stream-route"]
-notes = "Scrubber-Waveform ist eine seeded Pseudo-Kurve, keine echte Analyse."
+todo = ["Abspielen in WebView2 (Tauri) nicht geprüft"]
+notes = "PC-Test 2026-11-22 (Kopie der Library, main f3ce85d): MP3/AIFF/FLAC/M4A/WAV spielen im Browser; Pause, Sprung per Waveform, Lautstärke. Scrubber-Waveform ist eine seeded Pseudo-Kurve, keine echte Analyse."
 
 [[feature]]
 id = "audio-stream-route"
 group = "Playback"
 name = "Audio-Streaming-Route"
 status = "shipped"
-desc = "Range-Request-Streaming, sandboxed via validate_audio_path, MIME pro Endung."
-paths = ["tests/test_stream_unicode_filename.py"]
+test = "testen"
+desc = "Range-Request-Streaming, sandboxed via validate_audio_path, MIME pro Endung; AIFF geht als on-the-fly-WAV raus (Chromium/WebView2 dekodiert kein AIFF)."
+paths = ["app/playable_audio.py", "tests/test_playable_audio.py", "tests/test_stream_unicode_filename.py", "tests/test_stream_ranges.py"]
 routes = ["/api/stream", "/api/audio/stream"]
 depends_on = ["audio-path-sandbox"]
+notes = "Fix 2026-11-23 (fix/api-route-hygiene, am PC noch nicht geprüft): beide Routen teilen einen RFC-7233-Range-Pfad (main.py _byte_range_response) - Suffix bytes=-n liefert das Ende, Multi-Range/kaputter Header -> 200 ganze Datei, unerfüllbar -> 416 bytes */size; /api/audio/stream liefert 206 statt FileResponse-200, flac=audio/flac, m4a=audio/mp4; HEAD auf beiden Routen. PC-Test 2026-11-22: /api/stream Range 206 korrekt für mp3/flac/m4a/wav/aiff + Nicht-ASCII, AIFF kommt als RIFF/WAVE und ist seekbar (B10); Sperren 403/400/404 korrekt. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): ok."
 
 # ── Waveform ──────────────────────────────────────────────────────────────
 
@@ -33,11 +38,13 @@ id = "multiband-waveform-data"
 group = "Waveform"
 name = "3-Band-Waveform-Daten"
 status = "shipped"
+test = "getestet"
+tested = "2026-11-14"
 desc = "Backend low/mid/high-Waveform + Client-Bandsplit."
 paths = ["frontend/src/utils/AudioBandAnalyzer.js"]
 routes = ["/api/audio/waveform"]
 related = ["waveform-generation"]
-notes = "Backend-Teil: AudioEngine.generate_multiband_waveform in services.py (Hub). Decode blockiert den Event-Loop."
+notes = "Backend-Teil: AudioEngine.generate_multiband_waveform in services.py (Hub). Decode blockiert den Event-Loop. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): ok."
 
 [[feature]]
 id = "wavesurfer-waveform-editor"
@@ -155,6 +162,7 @@ id = "track-editor-panels"
 group = "Track-Editor"
 name = "Cue/Loop/Beatgrid/Meta-Panels"
 status = "unmerged"
+test = "testen"
 research = "waveform-editor-extensions"
 branch = "backup/gallant-lumiere-2026-09-25"
 desc = "Cue-, Loop-, Beatgrid- und Metadaten-Panels, 3-Schritt-Undo, Cue-Vorhören."
@@ -220,6 +228,7 @@ id = "rust-audio-wip-stash"
 group = "Rust-Audio (ungenutzt)"
 name = "Rust-Audio-WIP (Stash 06-16)"
 status = "unmerged"
+test = "testen"
 branch = "backup/stash-pre-rewrite-wip-2026-06-16"
 desc = "Getrackter Teil eines Stashes: 8 audio/*.rs + soundcloud_client.rs (+172/-120)."
 notes = "Triage nötig: portieren oder verwerfen. stash@{0} noch lokal."

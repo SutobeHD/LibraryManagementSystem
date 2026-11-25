@@ -8,8 +8,14 @@ import {
     useDeferredValue,
 } from 'react';
 import { createPortal } from 'react-dom';
-import api, { getScAuthMode, fetchLibraryTracks } from '../api/api';
+import api, {
+    getScAuthMode,
+    fetchLibraryTracks,
+    exportRekordboxXml,
+    rekordboxXmlExportSummary,
+} from '../api/api';
 import { log } from '../utils/log';
+import { SEARCH_SYNTAX_HINT, filterTracks } from '../utils/trackSearch';
 import { useToast } from './ToastContext';
 import {
     Folder,
@@ -34,6 +40,7 @@ import {
     GripVertical,
     Library,
     Disc,
+    FileOutput,
 } from 'lucide-react';
 import TrackTable from './TrackTable';
 import SoundCloudProgressModal from './SoundCloudProgressModal';
@@ -212,100 +219,6 @@ const PlaylistNode = ({
     );
 };
 
-const trackHay = (t) =>
-    [t.Title, t.Artist, t.Album, t.Comment, t.Genre, t.Label]
-        .filter(Boolean)
-        .join(' ')
-        .toLowerCase();
-
-// Lowercase free-text haystacks, one per track, built lazily on the first
-// search of a list and reused until the list is replaced (every reload sets a
-// new array). Index-aligned with the list: ~4x faster than a per-track lookup.
-const haysByList = new WeakMap();
-const haysFor = (list) => {
-    let hays = haysByList.get(list);
-    if (!hays) {
-        hays = list.map(trackHay);
-        haysByList.set(list, hays);
-    }
-    return hays;
-};
-
-const TEXT_FIELD_PROPS = new Map([
-    ['key', 'Key'],
-    ['genre', 'Genre'],
-    ['label', 'Label'],
-]);
-
-// One token -> track predicate, or null for a token that filters nothing ("bpm:").
-const compileToken = (tok) => {
-    const colon = tok.indexOf(':');
-    if (colon !== -1) {
-        const field = tok.slice(0, colon);
-        const val = tok.slice(colon + 1);
-        if (!val) return null;
-        if (field === 'bpm') {
-            const bpmOf = (t) => parseFloat(t.BPM || 0);
-            if (val.startsWith('>')) {
-                const min = parseFloat(val.slice(1));
-                return (t) => bpmOf(t) > min;
-            }
-            if (val.startsWith('<')) {
-                const max = parseFloat(val.slice(1));
-                return (t) => bpmOf(t) < max;
-            }
-            if (val.includes('-')) {
-                const [lo, hi] = val.split('-').map(parseFloat);
-                return (t) => {
-                    const bpm = bpmOf(t);
-                    return bpm >= lo && bpm <= hi;
-                };
-            }
-            const target = Math.round(parseFloat(val));
-            return (t) => Math.round(bpmOf(t)) === target;
-        }
-        const prop = TEXT_FIELD_PROPS.get(field);
-        if (prop)
-            return (t) =>
-                String(t[prop] || '')
-                    .toLowerCase()
-                    .includes(val);
-        if (field === 'year') return (t) => String(t.ReleaseYear || '') === val;
-        if (field === 'rating') {
-            const ratingOf = (t) => parseInt(t.Rating || 0);
-            if (val.startsWith('>')) {
-                const min = parseInt(val.slice(1));
-                return (t) => ratingOf(t) > min;
-            }
-            if (val.startsWith('<')) {
-                const max = parseInt(val.slice(1));
-                return (t) => ratingOf(t) < max;
-            }
-            const target = parseInt(val);
-            return (t) => ratingOf(t) === target;
-        }
-        // Unknown field -> treat token as plain
-    }
-    return (t, hay) => hay.includes(tok);
-};
-
-// Tokenized search, parsed once per query (not once per track) with operators:
-//   bpm:120-130   bpm:>120   bpm:<128   rating:>3
-//   key:Am   key:8A
-//   genre:techno   label:exfunk   year:2024
-//   plain text -> free-text Title/Artist/Album/Comment/Genre/Label
-const compileQuery = (q) => {
-    const preds = q.toLowerCase().split(/\s+/).filter(Boolean).map(compileToken).filter(Boolean);
-    return (t, hay) => preds.every((pred) => pred(t, hay));
-};
-
-const filterTracks = (list, q) => {
-    if (!q) return list;
-    const match = compileQuery(q);
-    const hays = haysFor(list);
-    return list.filter((t, i) => match(t, hays[i]));
-};
-
 // Non-folder, non-intelligent playlists for the "Add to Playlist" submenu.
 const flattenPlaylists = (nodes) => {
     let result = [];
@@ -329,6 +242,8 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
     const [dbLoaded, setDbLoaded] = useState(true);
     const [isProcessing, setIsProcessing] = useState(false);
     const [contextMenu, setContextMenu] = useState(null);
+    const contextMenuRef = useRef(null);
+    const [contextMenuSize, setContextMenuSize] = useState(null);
     const [showSmartEditor, setShowSmartEditor] = useState(false);
     const [smartEditorParent, setSmartEditorParent] = useState('ROOT');
     const [smartEditorEditing, setSmartEditorEditing] = useState(null);
@@ -568,6 +483,19 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
         setContextMenu(null);
     };
 
+    const handleExportXml = async (node) => {
+        setContextMenu(null);
+        try {
+            toast.success(rekordboxXmlExportSummary(await exportRekordboxXml(node)));
+        } catch (err) {
+            console.error('[PlaylistBrowser] Rekordbox XML export failed', err);
+            const detail = err.response?.data?.detail;
+            toast.error(
+                `Rekordbox XML export of "${node.Name}" failed${detail ? `: ${detail}` : ''}`
+            );
+        }
+    };
+
     const handleRemoveTrack = async (trackId) => {
         if (!selectedPlaylist) return;
         try {
@@ -582,24 +510,17 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
         }
     };
 
+    // TrackTable asks for confirmation (with the track title) before calling this.
     const handleDeleteFromCollection = async (trackId) => {
-        if (
-            !(await confirmModal({
-                title: 'Delete track from collection?',
-                message: 'Delete this track from the entire collection? This cannot be undone.',
-                confirmLabel: 'Delete',
-                danger: true,
-            }))
-        )
-            return;
         try {
             await api.delete(`/api/track/${trackId}`);
-            toast.success('Track deleted from library.');
+            toast.success('Track removed from the library.');
             if (selectedPlaylist) handleSelect(selectedPlaylist);
             loadAllTracks();
             loadTree();
         } catch (err) {
-            toast.error('Failed to delete track.');
+            console.error('[PlaylistBrowser] delete track failed', err);
+            toast.error(err.response?.data?.detail || 'Failed to remove the track.');
         }
     };
 
@@ -702,6 +623,16 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
         }
     };
 
+    // Clamp to the viewport with the measured size: rows differ per node type,
+    // and the old fixed 320 px estimate pushed the last rows off-screen.
+    useLayoutEffect(() => {
+        const el = contextMenuRef.current;
+        if (!contextMenu || !el) return;
+        const w = el.offsetWidth;
+        const h = el.offsetHeight;
+        setContextMenuSize((prev) => (prev?.w === w && prev?.h === h ? prev : { w, h }));
+    }, [contextMenu]);
+
     useEffect(() => {
         // Close context menu only on LEFT-click (button 0) outside the menu.
         const handleMouseDown = (e) => {
@@ -764,6 +695,7 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
     const currentViewTracks = showCollection ? filteredCollectionTracks : filteredPlaylistTracks;
     const isIntelligentSelected = selectedPlaylist?.Type === '4';
     const canEditPlaylist = !!selectedPlaylist && !isIntelligentSelected;
+    const canDeleteTracks = libraryStatus?.mode !== 'live';
     const tablePlaylistId = showCollection ? 'COLLECTION' : selectedPlaylist?.ID;
 
     const handleReorderTrack = (trackId, newIndex) => {
@@ -816,7 +748,8 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
                 onSortedTracksChange={handleSortedTracksChange}
                 onReorder={canEditPlaylist ? tableHandlers.reorder : undefined}
                 onRemove={canEditPlaylist ? tableHandlers.remove : undefined}
-                onDelete={tableHandlers.deleteFromCollection}
+                // The live Rekordbox library cannot delete tracks (rbox 0.1.7): no menu item there.
+                onDelete={canDeleteTracks ? tableHandlers.deleteFromCollection : undefined}
                 onAddToPlaylist={tableHandlers.addToPlaylist}
                 availablePlaylists={allPlaylists}
                 playlistId={tablePlaylistId}
@@ -829,6 +762,7 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
             onPlayTrack,
             handleSortedTracksChange,
             canEditPlaylist,
+            canDeleteTracks,
             tableHandlers,
             allPlaylists,
             tablePlaylistId,
@@ -989,12 +923,25 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
                 {contextMenu &&
                     createPortal(
                         <div
+                            ref={contextMenuRef}
                             data-context-menu="true"
                             className="bg-mx-shell border border-white/20 rounded-xl shadow-2xl py-1.5 min-w-[220px] animate-fade-in"
                             style={{
                                 position: 'fixed',
-                                top: Math.min(contextMenu.y, window.innerHeight - 320),
-                                left: Math.min(contextMenu.x, window.innerWidth - 230),
+                                top: Math.max(
+                                    0,
+                                    Math.min(
+                                        contextMenu.y,
+                                        window.innerHeight - (contextMenuSize?.h ?? 0)
+                                    )
+                                ),
+                                left: Math.max(
+                                    0,
+                                    Math.min(
+                                        contextMenu.x,
+                                        window.innerWidth - (contextMenuSize?.w ?? 0)
+                                    )
+                                ),
                                 zIndex: 99999,
                                 backdropFilter: 'blur(12px)',
                             }}
@@ -1046,6 +993,13 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
                                 className="w-full flex items-center gap-3 px-4 py-2 hover:bg-white/5 text-sm transition-colors text-cyan-300"
                             >
                                 <Plus size={14} /> Duplizieren
+                            </button>
+                            <button
+                                onClick={() => handleExportXml(contextMenu.node)}
+                                className="w-full flex items-center gap-3 px-4 py-2 hover:bg-white/5 text-sm transition-colors text-ink-primary"
+                            >
+                                <FileOutput size={14} className="text-amber2" /> Export as Rekordbox
+                                XML
                             </button>
                             <button
                                 onClick={() => handleDelete(contextMenu.node)}
@@ -1146,6 +1100,7 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
                                     <input
                                         type="text"
                                         placeholder="Search..."
+                                        title={SEARCH_SYNTAX_HINT}
                                         value={showCollection ? collectionSearch : playlistSearch}
                                         onChange={(e) =>
                                             showCollection

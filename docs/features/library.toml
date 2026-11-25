@@ -11,34 +11,55 @@ id = "track-table"
 group = "Browsen & Suchen"
 name = "Track-Tabelle"
 status = "shipped"
+test = "getestet"
+tested = "2026-11-22"
 desc = "Sortierbare Track-Liste: Spalten, Camelot-Key-Farben, Cover-Thumb, Drag, Kontextmenü."
 paths = ["frontend/src/components/TrackTable.jsx"]
 routes = ["/api/file/reveal"]
 related = ["inline-rating-color", "collection-view", "list-context-menus", "perf-frontend-virtualization"]
-notes = "Virtualisiert seit PR #63 (in #60, perf-frontend-virtualization). LibraryView.jsx ist ein toter Vorgänger."
+notes = "PC-Test 2026-11-22 (Kopie der Library, main f3ce85d): Virtualisiert (27 DOM-Zeilen bei 5037), Sortieren BPM/Title, Kontextmenü, Cover, Key-Farben. Virtualisiert seit PR #63 (in #60, perf-frontend-virtualization). LibraryView.jsx ist ein toter Vorgänger. B17 (Date Added leer) gefixt: Spalte zeigt StockDate, fehlendes Datum ist leer statt 'None'. fix/track-table (2026-11-23, nicht im Browser geprüft): Sortierung aus feat/sortable-columns übernommen, Date Added sortierbar; Textspalten per Intl.Collator (Umlaute beim Grundbuchstaben, Zahlen numerisch, stabil); fehlendes StockDate = Tag aus created_at (live_database.py) - nach Merge neu testen."
+
+[[feature]]
+id = "library-feature-sorting"
+group = "Browsen & Suchen"
+name = "Nach Merkmalen sortieren"
+status = "shipped"
+test = "getestet"
+tested = "2026-11-23"
+parent = "track-table"
+desc = "Track-Liste nach mehr Merkmalen sortieren: Genre, Label, Jahr, My Tags, Format, Hinzugefügt, Farbe; Key nach Camelot-Rad; fehlende Werte immer unten."
+paths = ["frontend/src/utils/trackSort.js", "frontend/src/utils/trackSort.test.js"]
+related = ["collection-view", "smart-playlists", "genre-atlas-hints"]
+notes = "Wunsch 2026-11-07, gebaut auf feat/sortable-columns (8c30c89); 2026-11-23 auf fix/track-table übernommen (virtualisierte TrackRow von main, Mindestbreite von main). Neue Spalten sind ab Werk aus (Rechtsklick auf den Tabellenkopf). Date Added liest StockDate ('None' zählt als leer, sortiert als Zahl JJJJMMTT). Text per Intl.Collator, 5037 Zeilen Title ~10 ms. Nicht im Browser geprüft."
+todo = ["Spalte Atlas-Genre (Vorschlag aus genre_atlas)", "LMS-Merkmale an die Track-Liste hängen (Route aus dem Analyse-Cache)"]
 
 [[feature]]
 id = "collection-view"
 group = "Browsen & Suchen"
 name = "Collection & Token-Suche"
 status = "shipped"
-desc = "Ganze Library als Collection-Knoten, Suche mit bpm:/key:/genre:/year:/rating:, Track löschen."
+test = "getestet"
+tested = "2026-11-23"
+desc = "Ganze Library als Collection-Knoten, Suche mit bpm:/key:/genre:/year:/rating: (Vergleiche, Bereiche, Werte in Anführungszeichen), Track löschen."
+paths = ["frontend/src/utils/trackSearch.js", "frontend/src/utils/trackSearch.test.js"]
 routes = ["/api/library/tracks", "/api/track/{tid}", "/api/track/delete", "/api/tracks/move"]
 depends_on = ["track-table", "live-master-db"]
-notes = "/api/tracks/move ist ein Stub. /api/library/tracks ohne Pagination; light=true-Projektion in #60 (perf-backend-quickwins). Auf main lädt die Collection die volle Liste (140 MB, ~18 s) und reißt den 10-s-Axios-Timeout -> nach Refresh oft 0 Tracks. Fix in PR #75 (feat/light-library-tracks): alle Listen-Views über fetchLibraryTracks() mit ?light=true (3,2 MB, ~0,2 s)."
-todo = ["PR #75 (feat/light-library-tracks, auf PR #60 gestapelt) mergen"]
+todo = ["Live-Modus: echtes Löschen aus master.db erst mit einer rbox-Version, die Content-Zeilen löschen kann (0.1.7 kann es nicht)", "POST /api/track/delete ist toter Endpunkt: POST /api/track/{tid} (Edit) ist vorher registriert und fängt 'delete' als ID ab", "XML-Modus: Entfernen-Dialog in der UI nicht im PC-Test geprüft (nur per Route-Test)"]
+notes = "PC-Test 2026-11-22: Suche bpm:/key:/genre:/year:/rating: = Trefferzahlen der DB; Light-Liste 3,4 MB in 0,04 s, Health dabei <35 ms (B3). /api/tracks/move ist ein Stub. /api/library/tracks ohne Pagination; light=true-Projektion in #60 (perf-backend-quickwins). Route kodiert ihr JSON selbst im Threadpool, pro Track ein json.dumps - blockiert den Event-Loop nicht mehr (B3, PR #82). Alle Listen-Views laden über fetchLibraryTracks() mit ?light=true (3,2 MB, ~0,2 s; PR #75). Editoren laden den Beatgrid mit PR #77. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): B3 (Collection 0 Tracks, Backend 18 s blockiert) in PR #75 + #82 gefixt - neu prüfen. Track löschen ehrlich gemacht (fix/track-delete, 2026-11-23): im Live-Modus kein Menüpunkt, DELETE /api/track/{id} -> 409 mit Hinweis, Cache bleibt unverändert; XML-Modus löscht weiter, eine Rückfrage statt zwei. PC-Test Live: Menü ohne Löschen, API 409, Track bleibt. Suche (fix/track-table, 2026-11-23, nicht im Browser geprüft): Parser in utils/trackSearch.js; bpm:/rating:/year: mit > >= < <= =, Bereiche bleiben; Werte in \"…\" mit Leerzeichen; key: nach Camelot-Slot (key:1A trifft nicht mehr 11A, key:A = A + Am); neu artist:/title:/album:; nur bekannte Feldnamen vor dem Doppelpunkt (4:44, re:zero bleiben Freitext); \" nur nach feld: oder als geschlossene Phrase, sonst Zeichen (12\" mix); kaputte Zahlen -> Freitext wie getippt, halb getippte Tokens filtern nichts; BPM 0 und Jahr 0 fallen aus Vergleichen, bpm:0 / year:0 finden sie; Syntax als Tooltip - nach Merge neu testen."
 
 [[feature]]
 id = "category-browser"
 group = "Browsen & Suchen"
 name = "Artists/Labels/Albums-Browser"
 status = "shipped"
+test = "getestet"
+tested = "2026-11-14"
 desc = "Library nach Artist, Label, Album gruppiert, Track-Liste pro Eintrag."
 paths = ["frontend/src/components/MetadataView.jsx"]
 routes = ["/api/artists", "/api/artist/{aid}/tracks", "/api/labels", "/api/albums"]
 depends_on = ["track-table", "name-normalisation"]
 related = ["artist-hub"]
-notes = "Auf PR #58 übernimmt der Artist Hub den Artists-Tab."
+notes = "Auf PR #58 übernimmt der Artist Hub den Artists-Tab. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): ok."
 
 # ── Playlists ─────────────────────────────────────────────────────────────
 
@@ -47,22 +68,28 @@ id = "playlist-tree-crud"
 group = "Playlists"
 name = "Playlist-Baum"
 status = "shipped"
+test = "getestet"
+tested = "2026-11-22"
 desc = "Ordner/Playlists anlegen, umbenennen, per Drag verschieben, duplizieren, löschen."
 paths = ["frontend/src/components/PlaylistBrowser.jsx"]
 routes = ["/api/playlists/tree", "/api/playlists/create", "/api/playlists/rename", "/api/playlists/move", "/api/playlists/delete"]
 depends_on = ["live-master-db"]
 related = ["standalone-library-mode"]
+notes = "PC-Test 2026-11-22 (Kopie der Library, main f3ce85d): Anlegen, Umbenennen, Duplizieren, in leeren Ordner ziehen, zurück nach ROOT, Löschen; jeder Schritt in master.db der Kopie nachgelesen (B11). Live-move_playlist war in leere Ordner und zurück nach ROOT kaputt (rbox: parent_id=None = Eltern behalten, seq ist ein Wert <= Anzahl). Fix auf fix/kernloop-0.1-bugs (B11): ROOT als \"root\", seq=None zum Anhängen, vor/nach per seq-Wert, Baum-Cache danach frisch aus master.db. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): B11 (Verschieben in leeren Ordner / zurück nach ROOT) in PR #82 gefixt - neu prüfen. /api/playlists/create gab den ganzen Knoten als id zurück (Duplizieren kopierte keine Tracks) und success auch ohne neue Playlist: jetzt id-String bzw. 500."
 
 [[feature]]
 id = "playlist-track-ops"
 group = "Playlists"
 name = "Tracks in Playlists (add/remove/reorder)"
 status = "partial"
+test = "getestet"
+tested = "2026-11-22"
 desc = "Track hinzufügen/entfernen, Drag-Reorder innerhalb der Playlist."
+paths = ["tests/test_live_playlist_ops.py", "tests/test_live_playlist_b11.py"]
 routes = ["/api/playlists/add-track", "/api/playlists/remove-track", "/api/playlists/reorder"]
 depends_on = ["playlist-tree-crud", "db-write-lock"]
-todo = ["Fix da6ba0d (falsche rbox-Arity bei remove/reorder) mit PR #58 landen", "Test-Playlist anlegen, Remove/Reorder real prüfen, wegräumen"]
-notes = "Im Live-Modus auf main kaputt."
+todo = ["Test-Playlist im echten Rekordbox anlegen, Add/Remove/Reorder prüfen, wegräumen"]
+notes = "PC-Test 2026-11-22 (Kopie der Library, main f3ce85d): 5 Tracks hinzugefügt, 2 entfernt, 3x umsortiert; track_no in der Kopie lückenlos und gleich der UI (B11). Im Live-Modus auf main kaputt. Auf fix/kernloop-0.1-bugs (B11): add/remove frischen den playlists_tracks-Cache auf, reorder setzt den Track per rbox move_playlist_song an target_index (0-basiert, geklemmt wie XML); da6ba0d (rbox-Arity) liegt schon in PR #60. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): B11 (Add/Remove erst nach Reload sichtbar, Reorder ignorierte Ziel) in PR #82 gefixt - neu prüfen."
 
 [[feature]]
 id = "smart-playlists"
@@ -101,9 +128,12 @@ id = "inline-rating-color"
 group = "Bewertung & Tags"
 name = "Rating & Farbe inline"
 status = "shipped"
+test = "getestet"
+tested = "2026-11-14"
 desc = "5-Sterne-Klick und Pioneer-Farbpicker direkt in der Tabelle."
 routes = ["/api/tracks/batch"]
 depends_on = ["track-metadata-update", "track-table"]
+notes = "Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): ok."
 
 [[feature]]
 id = "ranking-mode"
@@ -115,6 +145,7 @@ paths = ["frontend/src/components/RankingView.jsx"]
 routes = ["/api/track/{tid}", "/api/track/{tid}/mytags", "/api/genres"]
 depends_on = ["track-metadata-update", "mytag-management"]
 related = ["mobile-companion"]
+todo = ["Leere/fertige Playlist zeigt 'Track 1 / 0'"]
 notes = "Springt auch bei fehlgeschlagenem Save weiter. 'Service Mark' ist ein Platzhalter."
 
 [[feature]]
@@ -122,9 +153,9 @@ id = "ranking-genre-tree"
 group = "Bewertung & Tags"
 parent = "ranking-mode"
 name = "Ranking-Tags als Genre-Baum"
-status = "unmerged"
-branch = "claude/dreamy-planck-w7771v"
-pr = 60
+status = "shipped"
+test = "getestet"
+tested = "2026-11-07"
 desc = "Tag-Chips als Genre > Sub-Genre sortiert, Tokens landen im Comment."
 paths = ["frontend/src/config/tagTaxonomy.js", "frontend/src/config/tagTaxonomy.test.js"]
 related = ["genre-normalization", "genre-definition-schema", "genre-atlas"]
@@ -146,11 +177,14 @@ id = "import-manager"
 group = "Import"
 name = "Import-Manager"
 status = "shipped"
+test = "getestet"
+tested = "2026-11-22"
 desc = "Drag-Drop/Ordner-Import, Ordner wird Playlist, 7-Stufen-Pipeline."
-paths = ["frontend/src/components/ImportView.jsx", "app/import_tracker.py", "tests/test_import*.py"]
+paths = ["frontend/src/components/ImportView.jsx", "app/import_tracker.py", "tests/test_import*.py", "tests/test_live_import_analysis.py"]
 routes = ["/api/library/import-paths", "/api/audio/import", "/api/import/tasks"]
 depends_on = ["native-tag-read", "analysis-on-import", "anlz-writer"]
 related = ["download-manager-view", "import-progress-banner"]
+notes = "AIFF-Tags geprüft 2026-11-23: read_tags liefert bei 12 von 12 zufälligen AIFF der Library (2877 AIFF) denselben Titel wie master.db, Artist jeweils gesetzt. PC-Test 2026-11-22 (Kopie der Library, main f3ce85d): 3 neue Dateien (mp3/aiff/flac) per import-paths: BPM, Länge, Key in Camelot, ANLZ-Trio im share, analysed 105, Ordner wird Playlist (B4). Live-Modus: Import schreibt BPM (centi), Länge, Key (Rekordbox-Schreibweise) in master.db und die ANLZ-Dateien in den Rekordbox-share unter /PIONEER/USBANLZ/<uuid[:3]>/<uuid[3:]>/ samt AnalysisDataPath + analysed=105 (B4, fix/kernloop-0.1-bugs). Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): B4 (BPM/Länge/Key/Analysepfad fehlten in master.db) in PR #82 gefixt - neu prüfen. Fix 2026-11-23 (fix/track-writes): Import setzt FileType aus der Dateiendung (library_format_swap.file_type_for: mp3 1, m4a 4, flac 5, wav 11, aiff 12) im selben update_content wie BPM/Länge; AIFF 12 ist richtig, die 6 alter Library-Zeilen ist der alte Fehler und wird nie übernommen."
 
 [[feature]]
 id = "import-quality-panel"
@@ -158,18 +192,22 @@ group = "Import"
 parent = "import-manager"
 name = "Import-Settings-Panel"
 status = "partial"
+test = "testen"
 desc = "Rechte Spalte im Import: Lossless/Lossy-Analyse, Zielformat, Safe-Delete."
-notes = "/api/library/quality-stats fehlt (zeigt hart 1247/892). Zielformat und Backup gehen nie ans Backend."
+notes = "Zielformat und Backup gehen nie ans Backend. Qualitäts-Zahlen kommen seit B16 von GET /api/library/quality-stats (nach Dateiendung, .m4a = lossy); vorher zeigte das Panel hart 1247/892."
 
 [[feature]]
 id = "folder-watcher"
 group = "Import"
 name = "Folder-Watcher & Ordner-Scan"
 status = "shipped"
+test = "getestet"
+tested = "2026-11-14"
 desc = "Überwachte Ordner automatisch importieren, einmaliger Scan."
 paths = ["app/folder_watcher.py"]
 routes = ["/api/library/folder-watcher", "/api/library/scan-folder"]
 depends_on = ["import-manager"]
+notes = "Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): ok."
 
 [[feature]]
 id = "rekordbox-free-workflow-toggles"
@@ -216,9 +254,7 @@ notes = "/api/insights/dj_stats existiert nicht - läuft immer über den Client-
 id = "quality-tiers-audit"
 group = "Qualität & Duplikate"
 name = "Qualitäts-Audit A-D"
-status = "in_progress"
-branch = "claude/dreamy-planck-w7771v"
-pr = 60
+status = "partial"
 desc = "Ehrliche Qualitätskarte (Papier- + Spektral-Rating, schlechteres gewinnt) als Basis für das große Re-Format."
 paths = ["scripts/dev/scan_audio_quality.py", "scripts/dev/rescan_unreadable.py"]
 related = ["quality-upgrade-finder", "format-converter", "quality-settings-lossless-tagging", "library-health-filters"]
@@ -255,6 +291,7 @@ id = "format-converter"
 group = "Format-Konvertierung"
 name = "Format-Converter (Library-weit)"
 status = "partial"
+test = "testen"
 research = "library-format-converter"
 desc = "m4a/mp3 -> AIFF/FLAC/WAV/MP3 in place, content_id bleibt (Cues/Grid/Playlists), Dry-Run, Rollback, Export-Kopien."
 paths = ["frontend/src/components/FormatConverterView.jsx", "frontend/src/components/format-swap/", "app/library_format_swap.py", "scripts/dev/safe_format_swap.py", "tests/test_library_format_swap.py"]
@@ -269,9 +306,8 @@ id = "format-converter-filetype-fix"
 group = "Format-Konvertierung"
 parent = "format-converter"
 name = "Pioneer-FileType-Codes"
-status = "unmerged"
-branch = "claude/dreamy-planck-w7771v"
-pr = 60
+status = "shipped"
+test = "testen"
 desc = "Converter schreibt korrekte FileType-Codes (AIFF 12, WAV 11, FLAC 5)."
 notes = "Basiert auf main. Mit PR #58 nur MAP.md-Konflikt (regen)."
 
@@ -280,9 +316,8 @@ id = "format-converter-mp3-cbr"
 group = "Format-Konvertierung"
 parent = "format-converter"
 name = "MP3 320 CBR statt V0"
-status = "unmerged"
-branch = "claude/dreamy-planck-w7771v"
-pr = 60
+status = "shipped"
+test = "testen"
 desc = "MP3-Export einheitlich 320 kbps CBR (K9), keine Bitrate-Inflation bei lossy Quellen."
 
 [[feature]]

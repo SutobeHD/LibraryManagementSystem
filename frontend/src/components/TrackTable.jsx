@@ -26,7 +26,10 @@ import { log } from '../utils/log';
 import { TRACK_TABLE_TEXT_COL_MIN_PX } from '../config/constants';
 import { openExternal } from '../utils/openExternal';
 import { useVirtualRows } from '../hooks/useVirtualRows';
+import { dateAdded, formatOf, mytagList, sortTracks } from '../utils/trackSort';
 
+// `defaultHidden` columns stay off until switched on in the header's right-click menu,
+// so a fresh install keeps the table narrow enough for the percentage columns.
 const DEFAULT_COLUMNS = [
     { id: 'index', label: '#', width: '32px', align: 'right', fixed: true },
     { id: 'preview', label: 'Prev', width: '40px', align: 'center', fixed: true },
@@ -36,14 +39,33 @@ const DEFAULT_COLUMNS = [
     { id: 'Album', label: 'Album', width: '20%', sortable: true },
     { id: 'BPM', label: 'BPM', width: '48px', align: 'center', sortable: true },
     { id: 'Key', label: 'Key', width: '64px', align: 'center', sortable: true },
-    { id: 'Color', label: 'C', width: '32px', align: 'center' },
+    { id: 'Color', label: 'C', width: '32px', align: 'center', sortable: true },
     { id: 'Rating', label: 'Rating', width: '64px', align: 'center', sortable: true },
     { id: 'Bitrate', label: 'kbps', width: '64px', align: 'center', sortable: true },
     { id: 'PlayCount', label: 'Plays', width: '48px', align: 'center', sortable: true },
     { id: 'Composer', label: 'Composer', width: '150px', sortable: true },
     { id: 'Remixer', label: 'Remixer', width: '150px', sortable: true },
+    { id: 'Genre', label: 'Genre', width: '120px', sortable: true, defaultHidden: true },
+    { id: 'Label', label: 'Label', width: '120px', sortable: true, defaultHidden: true },
+    {
+        id: 'ReleaseYear',
+        label: 'Year',
+        width: '48px',
+        align: 'center',
+        sortable: true,
+        defaultHidden: true,
+    },
+    { id: 'MyTag', label: 'My Tags', width: '150px', sortable: true, defaultHidden: true },
+    {
+        id: 'Format',
+        label: 'Format',
+        width: '56px',
+        align: 'center',
+        sortable: true,
+        defaultHidden: true,
+    },
     { id: 'TotalTime', label: 'Time', width: '64px', align: 'center', sortable: true },
-    { id: 'DateAdded', label: 'Date Added', width: '96px', align: 'right' },
+    { id: 'DateAdded', label: 'Date Added', width: '96px', align: 'right', sortable: true },
     { id: 'actions', label: '', width: '40px', align: 'right', fixed: true },
 ];
 
@@ -197,7 +219,8 @@ const TrackTable = ({
     const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' });
     const [selectedKey, setSelectedKey] = useState(null);
     const [visibleColumns, setVisibleColumns] = useState(() => {
-        const fallback = defaultColumnIds ?? DEFAULT_COLUMNS.map((c) => c.id);
+        const fallback =
+            defaultColumnIds ?? DEFAULT_COLUMNS.filter((c) => !c.defaultHidden).map((c) => c.id);
         try {
             const saved = localStorage.getItem(columnsStorageKey);
             return saved ? JSON.parse(saved) : fallback;
@@ -248,30 +271,7 @@ const TrackTable = ({
         [visible, customColumns]
     );
 
-    const sortedTracks = useMemo(() => {
-        const { key, direction } = sortConfig;
-        if (!key) return tracks;
-        const dir = direction === 'asc' ? 1 : -1;
-
-        // Sort keys computed once per track, not twice per comparison (20k tracks ≈ 600k
-        // comparisons). Same order as before: numeric when both values are numbers,
-        // else lower-cased string compare; Array.prototype.sort is stable.
-        const decorated = tracks.map((t) => {
-            const v = t[key];
-            return {
-                t,
-                num: typeof v === 'number' ? v : null,
-                str: String(v || '').toLowerCase(),
-            };
-        });
-        decorated.sort((a, b) => {
-            if (a.num !== null && b.num !== null) return (a.num - b.num) * dir;
-            if (a.str < b.str) return -dir;
-            if (a.str > b.str) return dir;
-            return 0;
-        });
-        return decorated.map((d) => d.t);
-    }, [tracks, sortConfig]);
+    const sortedTracks = useMemo(() => sortTracks(tracks, sortConfig), [tracks, sortConfig]);
 
     // Report the displayed order only when it really changed — not on every render a
     // caller's inline callback or a same-content array would otherwise trigger.
@@ -729,17 +729,22 @@ const TrackRow = memo(function TrackRow({
                 </td>
             )}
             {[
-                { id: 'Bitrate', value: t.Bitrate || '-' },
-                { id: 'PlayCount', value: t.PlayCount || '-' },
+                { id: 'Bitrate', value: t.Bitrate || '-', mono: true },
+                { id: 'PlayCount', value: t.PlayCount || '-', mono: true },
                 { id: 'Composer', value: t.Composer },
                 { id: 'Remixer', value: t.Remixer },
+                { id: 'Genre', value: t.Genre },
+                { id: 'Label', value: t.Label },
+                { id: 'ReleaseYear', value: t.ReleaseYear || '-', mono: true },
+                { id: 'MyTag', value: mytagList(t.MyTag).join(', ') },
+                { id: 'Format', value: formatOf(t), mono: true },
             ].map(
                 (field) =>
                     visible.has(field.id) && (
                         <td
                             key={field.id}
-                            className={`p-1 truncate ${field.id === 'Bitrate' || field.id === 'PlayCount' ? 'text-center font-mono text-ink-secondary' : 'text-ink-muted'}`}
-                            title={field.value}
+                            className={`p-1 truncate ${field.mono ? 'text-center font-mono text-ink-secondary' : 'text-ink-muted'}`}
+                            title={field.value || undefined}
                         >
                             {field.value || '-'}
                         </td>
@@ -752,7 +757,7 @@ const TrackRow = memo(function TrackRow({
             )}
             {visible.has('DateAdded') && (
                 <td className="p-1 text-ink-muted text-right pr-2 text-[10px] font-mono">
-                    {t.DateAdded || '-'}
+                    {dateAdded(t) || '-'}
                 </td>
             )}
             {customColumns &&
@@ -1143,9 +1148,9 @@ const TrackContextMenuPopup = ({
                     <button
                         onClick={async () => {
                             const ok = await confirmModal({
-                                title: 'Delete track permanently?',
-                                message: `Are you sure you want to PERMANENTLY delete "${contextMenu.track.Title}" from the library?`,
-                                confirmLabel: 'Delete',
+                                title: 'Remove track from the library?',
+                                message: `"${contextMenu.track.Title}" is removed from the library and from every playlist. The audio file stays on disk.`,
+                                confirmLabel: 'Remove',
                                 danger: true,
                             });
                             if (ok) {
@@ -1155,7 +1160,7 @@ const TrackContextMenuPopup = ({
                         }}
                         className="w-full flex items-center gap-3 px-4 py-2 hover:bg-bad/10 text-[12px] text-ink-secondary hover:text-bad transition-colors text-left"
                     >
-                        <Trash2 size={14} /> Delete from Collection
+                        <Trash2 size={14} /> Remove from Collection
                     </button>
                 </>
             )}

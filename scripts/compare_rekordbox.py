@@ -16,7 +16,8 @@ BPM, musical key, and beat grid. This is the "verify what's better" tool:
 
 This script reads the live Rekordbox DB via `rbox` (the Rust-backed package,
 `pip install rbox==0.1.7` — distinct from pyrekordbox) — run it on the machine
-that has the library, with Rekordbox CLOSED.
+that has the library, with Rekordbox CLOSED. Beat grids come out of the ANLZ
+.DAT through pyrekordbox (`app.anlz_safe`), keys through the djmdKey table.
 
 Usage:
     python scripts/compare_rekordbox.py --db "<path to master.db>" -n 10
@@ -32,7 +33,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import random
+import statistics
 import sys
 from pathlib import Path
 from typing import Any
@@ -139,6 +142,8 @@ def beatgrid_metrics(rb_beats_ms: list[float], our_beats_ms: list[float]) -> dic
       first_offset_ms  — |first RB beat - first our beat|
       mean_abs_err_ms  — mean nearest-neighbour distance over the overlap
       max_abs_err_ms   — worst nearest-neighbour distance
+      median_signed_ms — median of (our beat - RB beat): > 0 means our grid sits
+                         late, < 0 early; None when nothing overlaps
       matched          — beats compared
     """
     if not rb_beats_ms or not our_beats_ms:
@@ -146,6 +151,7 @@ def beatgrid_metrics(rb_beats_ms: list[float], our_beats_ms: list[float]) -> dic
             "first_offset_ms": -1.0,
             "mean_abs_err_ms": -1.0,
             "max_abs_err_ms": -1.0,
+            "median_signed_ms": None,
             "matched": 0,
         }
     rb = sorted(rb_beats_ms)
@@ -154,25 +160,28 @@ def beatgrid_metrics(rb_beats_ms: list[float], our_beats_ms: list[float]) -> dic
     # nearest-neighbour error: for each RB beat within our grid's span,
     # find the closest of our beats.
     lo, hi = ours[0], ours[-1]
-    errs: list[float] = []
+    signed: list[float] = []
     j = 0
     for t in rb:
         if t < lo or t > hi:
             continue
         while j + 1 < len(ours) and abs(ours[j + 1] - t) <= abs(ours[j] - t):
             j += 1
-        errs.append(abs(ours[j] - t))
-    if not errs:
+        signed.append(ours[j] - t)
+    if not signed:
         return {
             "first_offset_ms": round(first_offset, 1),
             "mean_abs_err_ms": -1.0,
             "max_abs_err_ms": -1.0,
+            "median_signed_ms": None,
             "matched": 0,
         }
+    errs = [abs(e) for e in signed]
     return {
         "first_offset_ms": round(first_offset, 1),
         "mean_abs_err_ms": round(sum(errs) / len(errs), 1),
         "max_abs_err_ms": round(max(errs), 1),
+        "median_signed_ms": round(statistics.median(signed), 1),
         "matched": len(errs),
     }
 
@@ -183,23 +192,60 @@ def beatgrid_metrics(rb_beats_ms: list[float], our_beats_ms: list[float]) -> dic
 
 
 def _read_rb_beats_ms(dat_path: str) -> list[float]:
-    """Read beat times (ms) from a Rekordbox ANLZ .DAT PQTZ tag via rbox."""
-    import rbox  # type: ignore
+    """Read beat times (ms) from a Rekordbox ANLZ .DAT PQTZ tag.
 
-    anlz = rbox.Anlz(dat_path)
-    pqtz = getattr(anlz, "pqtz", None)
-    if not pqtz or not getattr(pqtz, "entries", None):
-        return []
-    return [float(e.time) for e in pqtz.entries]
+    Goes through the app's pyrekordbox reader: `rbox.Anlz` reports no PQTZ for
+    a Rekordbox 6.8.4 library (0 grids over 40 real files), which made every
+    grid metric -1.
+    """
+    from app.anlz_safe import _pqtz_entries_from_dat
+
+    entries = _pqtz_entries_from_dat(dat_path) or []
+    return [e["time"] * 1000.0 for e in entries]
 
 
-def _rb_camelot_from_key_id(key_id: int) -> str:
-    """Map a Rekordbox key_id (1..24) to a Camelot code using our engine maps."""
-    from app.analysis_engine import _CAMELOT_MAP, _REKORDBOX_KEY_ID
+_FLAT_TO_SHARP = {"Db": "C#", "Eb": "D#", "Gb": "F#", "Ab": "G#", "Bb": "A#"}
 
-    inv = {v: k for k, v in _REKORDBOX_KEY_ID.items()}  # key_id -> "C major"
-    full = inv.get(int(key_id))
-    return _CAMELOT_MAP.get(full, "") if full else ""
+
+def rb_key_name_to_camelot(name: str | None) -> str:
+    """Rekordbox key name ('11A', 'Am', 'Dbm', 'F#') -> Camelot code, '' when unknown.
+
+    djmdKey stores the name the library was analysed with: Camelot on some
+    libraries, musical notation (minor = trailing 'm') on others.
+    """
+    if not name:
+        return ""
+    s = str(name).strip()
+    parsed = parse_camelot(s)
+    if parsed:
+        return f"{parsed[0]}{parsed[1]}"
+    minor = s.endswith("m")
+    root = s[:-1] if minor else s
+    if not root:
+        return ""
+    root = root[0].upper() + root[1:]
+    root = _FLAT_TO_SHARP.get(root, root)
+    from app.analysis_engine import _CAMELOT_MAP
+
+    return _CAMELOT_MAP.get(f"{root} {'minor' if minor else 'major'}", "")
+
+
+def default_master_db(appdata: str | None = None) -> str | None:
+    """Rekordbox's own master.db path, or None. rbox has no auto-detect: `MasterDb()` needs a path."""
+    base = appdata if appdata is not None else os.environ.get("APPDATA", "")
+    if not base:
+        return None
+    path = Path(base) / "Pioneer" / "rekordbox" / "master.db"
+    return str(path) if path.exists() else None
+
+
+def _rb_key_names(db) -> dict[str, str]:
+    """djmdKey id -> name. `key_id` on a track is this table's row id, not 1..24."""
+    try:
+        return {str(row.id): str(row.name) for row in db.get_keys()}
+    except Exception as e:
+        print(f"  [warn] key table unreadable: {e}", file=sys.stderr)
+        return {}
 
 
 def _collect_tracks(
@@ -229,7 +275,9 @@ def _collect_tracks(
     return analyzed[:n]
 
 
-def compare_track(db, tid: str, tol_pct: float = 4.0) -> dict[str, Any]:
+def compare_track(
+    db, tid: str, tol_pct: float = 4.0, key_names: dict[str, str] | None = None
+) -> dict[str, Any]:
     """Read RB analysis for one track and re-run ours; return a comparison row."""
     from app.analysis_engine import run_full_analysis
 
@@ -241,8 +289,10 @@ def compare_track(db, tid: str, tol_pct: float = 4.0) -> dict[str, Any]:
         return {"id": tid, "status": "error", "error": f"audio missing: {path}"}
 
     rb_bpm = float(getattr(item, "bpm", 0) or 0) / 100.0
-    rb_key_id = int(getattr(item, "key_id", 0) or getattr(item, "KeyID", 0) or 0)
-    rb_camelot = _rb_camelot_from_key_id(rb_key_id) if rb_key_id else ""
+    rb_key_id = str(getattr(item, "key_id", "") or getattr(item, "KeyID", "") or "")
+    if key_names is None:
+        key_names = _rb_key_names(db)
+    rb_camelot = rb_key_name_to_camelot(key_names.get(rb_key_id)) if rb_key_id else ""
 
     rb_beats: list[float] = []
     try:
@@ -341,17 +391,25 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
 
-    db = rbox.MasterDb(args.db) if args.db else rbox.MasterDb()
+    db_path = args.db or default_master_db()
+    if not db_path:
+        print(
+            "ERROR: no master.db found under %APPDATA%/Pioneer/rekordbox — pass --db.",
+            file=sys.stderr,
+        )
+        return 2
+    db = rbox.MasterDb(db_path)
     tids = _collect_tracks(db, args.ids, args.n, args.seed, min_len_s=args.min_len)
     if not tids:
         print("No analyzed tracks found.", file=sys.stderr)
         return 1
     print(f"Comparing {len(tids)} track(s)...")
 
+    key_names = _rb_key_names(db)
     rows = []
     for tid in tids:
         try:
-            rows.append(compare_track(db, tid, tol_pct=args.tol))
+            rows.append(compare_track(db, tid, tol_pct=args.tol, key_names=key_names))
         except Exception as e:
             rows.append({"id": tid, "status": "error", "error": repr(e)})
 

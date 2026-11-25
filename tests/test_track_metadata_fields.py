@@ -14,6 +14,7 @@ Every rbox handle is a mock and every XML library lives in ``tmp_path``; no real
 
 from __future__ import annotations
 
+import asyncio
 import math
 import os
 import stat
@@ -23,9 +24,10 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
 
+import httpx
 import pytest
 
-from app import database
+from app import database, main
 from app.database import RekordboxDB, RekordboxXMLDB
 from app.live_database import LiveRekordboxDB
 from app.track_fields import (
@@ -33,6 +35,7 @@ from app.track_fields import (
     XML_WRITABLE_FIELDS,
     InvalidTrackFieldValue,
     TrackFieldError,
+    UnknownTrackIds,
     UnsupportedTrackFields,
     normalise_track_updates,
 )
@@ -202,13 +205,16 @@ def test_live_writes_every_allowed_field(live, conn) -> None:
     assert live.tracks["1"]["ColorID"] == 2
 
 
-def test_live_add_track_does_not_send_bpm(live, conn) -> None:
+def test_live_add_track_sends_bpm_and_key_outside_the_metadata_update(live, conn) -> None:
+    # BPM / key are not user-editable fields, so update_track_metadata never gets them
+    # (it refuses the whole update for one); add_track writes them itself (B4).
     conn.create_content.return_value = SimpleNamespace(id="1")
     tid = live.add_track({"path": "C:/a.mp3", "Title": "T", "BPM": 128.0, "Key": "Am"})
     assert tid == "1"
     assert conn.item.title == "T"
-    assert "update_content" in _writes(conn)
-    assert live.tracks["1"]["BPM"] == 128.0  # cached as before, never sent to master.db
+    assert conn.item.bpm == 12800
+    conn.update_content_key.assert_called_once_with("1", "Am")
+    assert live.tracks["1"]["BPM"] == 128.0
 
 
 def test_live_add_track_skips_missing_tags(live, conn) -> None:
@@ -356,7 +362,9 @@ def test_xml_ui_rating_is_stored_on_the_ui_scale(xml_db) -> None:
 
 def test_xml_unknown_track_changes_nothing(xml_db) -> None:
     before = _lib(xml_db).read_bytes()
-    assert xml_db.update_tracks_metadata(["1", "nope"], {"Title": "Z"}) is False
+    with pytest.raises(UnknownTrackIds) as exc:
+        xml_db.update_tracks_metadata(["1", "nope"], {"Title": "Z"})
+    assert exc.value.track_ids == ["nope"]
     assert xml_db.xml_db.tracks["1"]["Title"] == "A"
     _assert_library_intact(xml_db, before)
 
@@ -434,3 +442,125 @@ def test_xml_unserialisable_nested_value_is_false_and_the_next_save_works(xml_db
     _assert_library_intact(xml_db, before)
     assert xml_db.save() is True
     _reload(xml_db)
+
+
+# --- routes -----------------------------------------------------------------------
+
+
+def _req(method: str, url: str, body: dict[str, Any], headers: dict[str, str]) -> httpx.Response:
+    async def go() -> httpx.Response:
+        transport = httpx.ASGITransport(app=main.app, raise_app_exceptions=False)
+        async with httpx.AsyncClient(transport=transport, base_url="http://t") as client:
+            return await client.request(method, url, json=body, headers=headers)
+
+    return asyncio.run(go())
+
+
+@pytest.fixture
+def no_tag_writes(monkeypatch) -> None:
+    # The XML fixture names C:/a.mp3: never let the route's tag write-back touch a real file.
+    monkeypatch.setattr(
+        main.SettingsManager, "load", staticmethod(lambda: {"write_tags_to_files": False})
+    )
+
+
+@pytest.fixture
+def live_main(monkeypatch, live, no_tag_writes) -> RekordboxDB:
+    db = RekordboxDB()
+    db.mode = "live"
+    db.live_db = live
+    db.loaded = True
+    monkeypatch.setattr(main, "db", db)
+    # A Rekordbox open on the dev machine must not turn these into 409s.
+    monkeypatch.setattr(main, "_is_rekordbox_running", lambda: False)
+    return db
+
+
+@pytest.fixture
+def xml_main(monkeypatch, xml_db, no_tag_writes) -> RekordboxDB:
+    xml_db.loaded = True
+    monkeypatch.setattr(main, "db", xml_db)
+    return xml_db
+
+
+def test_batch_route_400_names_the_refused_fields(live_main, conn, auth_token) -> None:
+    body = {"track_ids": ["1"], "updates": {"BPM": 128.0, "Key": "8A"}}
+    r = _req("PATCH", "/api/tracks/batch", body, auth_token)
+    assert r.status_code == 400, r.text
+    assert r.json()["detail"] == "live library cannot write field(s): BPM, Key"
+    assert conn.method_calls == []
+
+
+@pytest.mark.parametrize("updates", [{"ColorID": ""}, {"Rating": 99}, {"Title": None}])
+def test_batch_route_400_on_a_bad_value(live_main, conn, auth_token, updates) -> None:
+    r = _req("PATCH", "/api/tracks/batch", {"track_ids": ["1"], "updates": updates}, auth_token)
+    assert r.status_code == 400, r.text
+    assert conn.method_calls == []
+
+
+def test_batch_route_success(live_main, conn, auth_token) -> None:
+    body = {"track_ids": ["1"], "updates": {"Rating": 3, "ColorID": "5"}}
+    r = _req("PATCH", "/api/tracks/batch", body, auth_token)
+    assert r.status_code == 200, r.text
+    assert r.json() == {"status": "success", "file_tags": {"1": "skipped"}}
+    assert (conn.item.rating, conn.item.color_id) == (3, "5")
+
+
+def test_batch_route_xml_value_that_would_corrupt_the_file_is_400(xml_main, auth_token) -> None:
+    before = _lib(xml_main).read_bytes()
+    r = _req("PATCH", "/api/tracks/batch", {"track_ids": ["1"], "updates": {"Key": 8}}, auth_token)
+    assert r.status_code == 400, r.text
+    _assert_library_intact(xml_main, before)
+
+
+def test_batch_route_unknown_track_is_404(xml_main, auth_token) -> None:
+    before = _lib(xml_main).read_bytes()
+    body = {"track_ids": ["1", "nope"], "updates": {"Rating": 3}}
+    r = _req("PATCH", "/api/tracks/batch", body, auth_token)
+    assert r.status_code == 404, r.text
+    assert r.json()["detail"] == "Unknown track id(s): nope"
+    assert xml_main.xml_db.tracks["1"]["Rating"] == 204
+    _assert_library_intact(xml_main, before)
+
+
+def test_batch_route_failed_xml_save_is_500(xml_main, auth_token) -> None:
+    lib = _lib(xml_main)
+    before = lib.read_bytes()
+    os.chmod(lib, stat.S_IREAD)
+    try:
+        body = {"track_ids": ["1"], "updates": {"Title": "Z"}}
+        r = _req("PATCH", "/api/tracks/batch", body, auth_token)
+    finally:
+        os.chmod(lib, stat.S_IREAD | stat.S_IWRITE)
+    assert r.status_code == 500, r.text  # was 200 {"status": "error"}, read by no caller
+    assert xml_main.xml_db.tracks["1"]["Title"] == "A"
+    _assert_library_intact(xml_main, before)
+
+
+def test_batch_route_xml_writes_bpm_and_key(xml_main, auth_token) -> None:
+    body = {"track_ids": ["1"], "updates": {"BPM": 128.5, "Key": "8A"}}
+    r = _req("PATCH", "/api/tracks/batch", body, auth_token)
+    assert r.status_code == 200, r.text
+    fresh = _reload(xml_main)
+    assert (fresh.tracks["1"]["BPM"], fresh.tracks["1"]["Key"]) == (128.5, "8A")
+
+
+def test_track_route_rejects_an_unknown_body_key(live_main, conn, auth_token) -> None:
+    r = _req("POST", "/api/track/1", {"Rating": 3, "BPM": 999}, auth_token)
+    assert r.status_code == 422, r.text
+    assert conn.method_calls == []
+
+
+def test_track_route_400_on_an_out_of_range_value(live_main, conn, auth_token) -> None:
+    r = _req("POST", "/api/track/1", {"Rating": 9}, auth_token)
+    assert r.status_code == 400, r.text
+    assert "Rating" in r.json()["detail"]
+    assert conn.method_calls == []
+
+
+def test_track_route_writes_the_ranking_view_fields(live_main, conn, auth_token) -> None:
+    body = {"Rating": 3, "ColorID": 4, "Comment": "c", "Genre": "G"}
+    r = _req("POST", "/api/track/1", body, auth_token)
+    assert r.status_code == 200, r.text
+    assert (conn.item.rating, conn.item.color_id, conn.item.commnt) == (3, "4", "c")
+    conn.update_content_genre.assert_called_once_with("1", "G")

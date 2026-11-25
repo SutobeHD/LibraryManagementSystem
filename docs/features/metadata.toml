@@ -11,44 +11,49 @@ id = "track-metadata-update"
 group = "Tag-Editing"
 name = "Track-Metadaten speichern"
 status = "shipped"
+test = "getestet"
+tested = "2026-11-14"
 desc = "Felder einzeln oder als Batch in master.db bzw. XML schreiben."
 paths = ["frontend/src/components/BatchEditBar.jsx"]
 routes = ["/api/track/{tid}", "/api/tracks/batch"]
 depends_on = ["live-master-db"]
 related = ["file-tag-writeback"]
-notes = "Kein eigenes Edit-Formular. BatchEditBar.jsx nicht gemountet. Unbekannte Feld-Keys werden still mit True quittiert (K8)."
+notes = "Kein eigenes Edit-Formular. BatchEditBar.jsx nicht gemountet. Unbekannte Feld-Keys werden still mit True quittiert (K8). Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): ok."
 
 [[feature]]
 id = "track-write-safety"
 group = "Tag-Editing"
 parent = "track-metadata-update"
 name = "Feld-Validierung + sichere Writes"
-status = "unmerged"
-branch = "claude/dreamy-planck-w7771v"
-pr = 60
+status = "partial"
+test = "testen"
 desc = "Felder ablehnen, die Live/XML nicht speichern kann; XML-Save atomar; 400/422 statt stillem 200."
-paths = ["app/track_fields.py", "tests/test_track_metadata_fields.py"]
+paths = ["app/track_fields.py", "tests/test_track_metadata_fields.py", "tests/test_track_batch_writes.py"]
 related = ["db-write-lock", "artist-merge"]
-todo = ["4 uncommittete Dateien im Worktree committen (Routen-Teil)", "Backup vor Merge inkl. masterPlaylists6.xml", "Rekordbox-läuft-Guard auch für Playlist-/Metadaten-Writer", "Datei-Backup vor Tag-Writes (Revert stellt nur den Tag-String her)"]
-notes = "Worktree .claude/worktrees/wf_1fefdec9-6fc-2. Auf PR #58 gestapelt - nach #58 landen."
+todo = ["Backup vor Merge inkl. masterPlaylists6.xml", "Datei-Backup vor Tag-Writes (Revert stellt nur den Tag-String her)"]
+notes = "PC-Test 2026-11-22: 13 verbotene Felder/Werte -> 400/422 ohne Änderung; gültige Edits ändern nur ihre Spalten. Routen-Teil (400/422/500 statt 200) aus dem alten Worktree wf_1fefdec9-6fc-2 (Branch claude/fix-track-metadata-fields) auf fix/kern-loop-backend-b12-b14 portiert; der alte Worktree ist danach überholt. Fix 2026-11-23 (fix/track-writes): PATCH /api/tracks/batch live alles-oder-nichts - alle IDs vor dem ersten Write gelesen, unbekannte -> 404 mit ID, nichts geschrieben; rbox-Fehler mittendrin -> schon geschriebene Zeilen aus Snapshots zurückgeschrieben, dann 500. POST /api/track/{tid} mit unbekannter ID -> 404 statt 500, XML-Modus ebenso."
 
 [[feature]]
 id = "file-tag-writeback"
 group = "Tag-Editing"
 name = "Tags in Audiodatei schreiben"
 status = "shipped"
+test = "testen"
 desc = "Mutagen schreibt ID3/FLAC/MP4/Vorbis/AIFF/WAV inkl. Cover (Setting write_tags_to_files)."
-paths = ["app/audio_tags.py"]
+paths = ["app/audio_tags.py", "tests/test_track_batch_tags.py"]
 depends_on = ["track-metadata-update"]
-notes = "src-tauri/src/audio/metadata.rs (lofty) ist toter Code."
+todo = ["Route mit write_tags_to_files=true nicht im PC-Test (nur write_tags direkt auf Kopien)"]
+notes = "PC-Test 2026-11-22: write_tags auf Kopien in 5 Containern, Tags + Cover per mutagen zurückgelesen, PCM-md5 unverändert. src-tauri/src/audio/metadata.rs (lofty) ist toter Code. Fix 2026-11-23 (fix/track-writes): PATCH /api/tracks/batch schreibt jetzt dieselben Tags wie POST /api/track/{tid} (gemeinsames _file_tag_writeback in app/main.py, gleiches Setting + Cover), file_tags pro Track; Route-Tests auf tmp-Kopien (mp3/wav), nicht im PC-Test. Review-Fix: Edits betten das Library-Thumbnail nicht mehr ein (ersetzte das eigene Cover, löschte Back-Cover, PNG wurde image/jpeg); nur Felder mit Datei-Tag schreiben (ColorID allein / Streaming -> skipped, Datei unverändert); Tag-Writes pro Datei gesperrt und in master.db-Reihenfolge (audio_tags.FileWriteLocks)."
 
 [[feature]]
 id = "native-tag-read"
 group = "Tag-Editing"
 name = "Tags lesen beim Import"
 status = "shipped"
+test = "getestet"
+tested = "2026-11-14"
 desc = "Title/Artist/Album/BPM/Key/ISRC lesen, Fallback 'Artist - Title' aus Dateiname."
-notes = "Lebt in app/audio_tags.py und app/services.py."
+notes = "Lebt in app/audio_tags.py und app/services.py. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): ok."
 
 # ── Bereinigung & Normalisierung ──────────────────────────────────────────
 
@@ -69,10 +74,12 @@ id = "name-normalisation"
 group = "Bereinigung & Normalisierung"
 name = "Artist-Split & Alias-Mapping"
 status = "shipped"
+test = "getestet"
+tested = "2026-11-14"
 desc = "Artist-Strings beim Laden splitten/normalisieren, Alias-Merge für Label/Album/Artist."
 routes = ["/api/metadata/merge"]
 related = ["artist-merge", "metadata-merge-consolidation"]
-notes = "Alias-Mapping lebt nur in der App, wird nie in master.db/Tags geschrieben."
+notes = "Alias-Mapping lebt nur in der App, wird nie in master.db/Tags geschrieben. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): ok."
 
 [[feature]]
 id = "metadata-merge-consolidation"
@@ -129,9 +136,9 @@ notes = "Eigenes Repo C:/Users/tb/Documents/GitHub/genre-atlas (301 Genres, 29 T
 id = "genre-atlas-hints"
 group = "Genre"
 name = "Genre-Vorschläge aus dem Genre-Atlas"
-status = "unmerged"
-branch = "claude/dreamy-planck-w7771v"
-pr = 60
+status = "partial"
+test = "getestet"
+tested = "2026-11-07"
 desc = "Schlägt pro Track Genres vor (Uploader/Label-Szene, Etiketten wie SoundCloud-'trance' oder Beatport-Kategorien, Genre-Namen, BPM-Fenster) - mit Begründung, schreibt nichts automatisch."
 parent = "genre-atlas"
 paths = ["app/genre_atlas.py", "app/data/genre_atlas.json", "scripts/sync_genre_atlas.py", "tests/test_genre_atlas.py", "tests/test_genre_atlas_routes.py", "frontend/src/components/GenreSuggestions.jsx"]
@@ -147,7 +154,10 @@ id = "artwork-serve-embed"
 group = "Artwork"
 name = "Cover anzeigen & einbetten"
 status = "shipped"
+test = "getestet"
+tested = "2026-11-14"
 desc = "Cover aus Pfad/Rekordbox-Share ausliefern, beim Tag-Write einbetten."
+paths = ["app/library_artwork.py", "tests/test_library_artwork.py"]
 routes = ["/api/artwork"]
 related = ["usb-artwork", "library-health-filters"]
-notes = "Kein Cover-Editor/Upload im UI."
+notes = "Kein Cover-Editor/Upload im UI. Kern-Loop-Test 2026-11-14 (Stand PR #60 a71bfa7, Library-Kopie): ok. Pfad-Resolver aus der Route nach app/library_artwork.py gezogen (fix/usb-artwork-library-cover, 2026-11-25), damit der Stick-Export dasselbe Cover nimmt wie die App; Jail jetzt Path.is_relative_to statt String-Prefix (Nachbarordner wie share_evil kam vorher durch)."

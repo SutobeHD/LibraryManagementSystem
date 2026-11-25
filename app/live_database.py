@@ -6,6 +6,7 @@ import threading
 import time
 import xml.etree.ElementTree as ET
 from collections import defaultdict
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -18,9 +19,11 @@ except ImportError:
     rbox = None
 
 from .anlz_safe import SafeAnlzParser
-from .track_fields import normalise_track_updates
+from .track_fields import TrackWriteFailed, UnknownTrackIds, normalise_track_updates
 
 logger = logging.getLogger(__name__)
+
+_MISSING = object()
 
 
 class LiveRekordboxDB:
@@ -58,6 +61,9 @@ class LiveRekordboxDB:
             # Trigger connection on main thread
             _ = self.db
             logger.info(f"Successfully opened live database at {self.db_path}")
+
+            # A reload can follow a re-analysis in Rekordbox under another key notation.
+            self.get_analysis_writer().forget_key_notation()
 
             # Pre-load metadata maps for performance
             self._load_metadata_maps()
@@ -186,6 +192,31 @@ class LiveRekordboxDB:
         except Exception as e:
             logger.error(f"Failed to load MyTags: {e}")
 
+    _ISO_DATE_PREFIX = re.compile(r"^\d{4}-\d{2}-\d{2}")
+
+    @classmethod
+    def _stock_date(cls, item: Any) -> str:
+        """Date added as ``YYYY-MM-DD``, or "" when the row carries no date at all.
+
+        Rekordbox leaves ``stock_date`` NULL on some imports, while ``created_at``
+        (NOT NULL in djmdContent) still holds the day the track entered the library.
+        """
+        stock = getattr(item, "stock_date", None)
+        if stock is not None and str(stock).strip():
+            return str(stock).strip()
+        created = getattr(item, "created_at", None)
+        if isinstance(created, datetime):
+            if created.tzinfo is not None:
+                created = created.astimezone()
+            return created.strftime("%Y-%m-%d")
+        if isinstance(created, date):
+            return created.isoformat()
+        if isinstance(created, str):
+            match = cls._ISO_DATE_PREFIX.match(created.strip())
+            if match:
+                return match.group(0)
+        return ""
+
     def _load_tracks(self):
         self.tracks = {}
         content_items = self.db.get_contents()
@@ -230,7 +261,7 @@ class LiveRekordboxDB:
                 else "",
                 "Subtitle": getattr(item, "subtitle", ""),
                 "ReleaseYear": int(getattr(item, "release_year", 0) or 0),
-                "StockDate": str(getattr(item, "stock_date", "")),
+                "StockDate": self._stock_date(item),
                 "SampleRate": int(getattr(item, "sample_rate", 0) or 0),
                 "ISRC": getattr(item, "isrc", ""),
             }
@@ -971,8 +1002,8 @@ class LiveRekordboxDB:
             item = self.db.create_content(path)
             tid = str(item.id)
 
-            # 2. Update metadata. No BPM: it never reached master.db here, and
-            # update_track_metadata now refuses the whole update for a key it cannot write.
+            # 2. Text metadata. BPM, length and key are not user-editable fields
+            # (update_track_metadata refuses them), so step 2b writes them directly.
             updates = {
                 k: track_data[k]
                 for k in ("Title", "Artist", "Album", "Genre", "Comment")
@@ -982,15 +1013,21 @@ class LiveRekordboxDB:
             if updates:
                 self.update_track_metadata(tid, updates)
 
-            # 3. Cache the new track locally
+            # 2b. The analysis columns Rekordbox, the track list and the USB export read.
+            # Without them an imported track showed BPM 0 after a reload and reached
+            # the stick with bpmx100 = 0 and length = 0.
+            written = self._write_import_analysis_columns(tid, track_data)
+
+            # 3. Cache the new track locally, with what master.db really holds
             self.tracks[tid] = {
                 "ID": tid,
                 "Title": track_data.get("Title", ""),
                 "Artist": track_data.get("Artist", ""),
                 "Album": track_data.get("Album", ""),
-                "BPM": track_data.get("BPM", 0),
+                "BPM": written.get("BPM", 0.0),
+                "Key": written.get("Key", ""),
                 "path": path,
-                "TotalTime": track_data.get("TotalTime", 0),
+                "TotalTime": written.get("TotalTime", 0.0),
                 "beatGrid": track_data.get("beatGrid", []),
                 "Comment": track_data.get("Comment", ""),
                 "Artwork": track_data.get("Artwork", ""),
@@ -1006,33 +1043,195 @@ class LiveRekordboxDB:
             logger.error(f"Failed to add track to live DB: {e}")
             raise e
 
-    def delete_track(self, tid: str) -> bool:
+    @staticmethod
+    def _import_key_id(track_data: dict[str, Any]) -> int | None:
+        """Engine key id (1-12 major, 13-24 minor) for an import's analysis, else None."""
+        from .analysis_db_writer import rekordbox_key_name
+
+        key_id = track_data.get("KeyID")
+        if rekordbox_key_name(key_id):
+            return key_id
+        # Fallback: the engine's short key ("C#m", "A"), sharps as the engine spells them.
+        m = re.fullmatch(r"([A-G])(#?)(m?)", str(track_data.get("Key") or "").strip())
+        if not m:
+            return None
+        pitch = ("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
+        root = m.group(1) + m.group(2)
+        if root not in pitch:  # "E#", "B#"
+            return None
+        return pitch.index(root) + 1 + (12 if m.group(3) else 0)
+
+    def _import_key_name(self, track_data: dict[str, Any]) -> str | None:
+        """Key name for an import's analysis as the library spells it ("Am" or "8A"), else None.
+
+        Notation and name come from the analysis writer (``library_key_name``), so an
+        import and a later re-analysis store the same text for the same key.
+        """
+        from .analysis_db_writer import library_key_name
+
+        key_id = self._import_key_id(track_data)
+        if key_id is None:
+            return None
+        notation = self.get_analysis_writer().key_notation()
+        return library_key_name(key_id, notation, track_data.get("Camelot"))
+
+    def _write_import_analysis_columns(
+        self, tid: str, track_data: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Write BPM (centi-BPM), length (whole seconds), FileType and key into a new row.
+
+        Returns the values that landed as cache fields (``BPM``, ``TotalTime``, ``Key``);
+        a refused write is logged and leaves them out, so the cache never shows a BPM
+        master.db does not hold. ``analysed`` / ``AnalysisDataPath`` stay untouched here:
+        they belong to ANLZ files, which ``attach_import_anlz`` writes.
+
+        FileType comes from the file's extension (``library_format_swap.file_type_for``):
+        rbox ``create_content`` leaves 0 for an mp3, where Rekordbox writes 1. Never
+        from other library rows: some still carry an old wrong code (AIFF = 6).
+        """
+        from .database import db_lock
+        from .library_format_swap import file_type_for
+
+        try:
+            bpm = float(track_data.get("BPM") or 0)
+            length = float(track_data.get("TotalTime") or 0)
+        except (TypeError, ValueError):
+            bpm, length = 0.0, 0.0
+        key_name = self._import_key_name(track_data)
+        file_type = file_type_for(str(track_data.get("path") or ""))
+
+        out: dict[str, Any] = {}
+        try:
+            with db_lock():
+                item = self.db.get_content_by_id(tid)
+                if item is None:
+                    raise LookupError(f"content {tid} vanished after create_content")
+                if bpm > 0:
+                    item.bpm = round(bpm * 100)
+                if length > 0:
+                    item.length = max(1, round(length))
+                if file_type:
+                    item.file_type = file_type
+                if bpm > 0 or length > 0 or file_type:
+                    self.db.update_content(item)
+                    if bpm > 0:
+                        out["BPM"] = round(bpm * 100) / 100.0
+                    if length > 0:
+                        out["TotalTime"] = float(max(1, round(length)))
+                if key_name:
+                    self.db.update_content_key(tid, key_name)
+                    out["Key"] = key_name
+        except Exception as e:  # rbox raises its own error types
+            logger.error(
+                "op=import_analysis_columns tid=%s bpm=%s length=%s file_type=%s key=%s err=%s",
+                tid,
+                bpm,
+                length,
+                file_type,
+                key_name,
+                e,
+            )
+        else:
+            logger.info(
+                "op=import_analysis_columns tid=%s bpm=%s length=%s file_type=%s key=%s",
+                tid,
+                out.get("BPM"),
+                out.get("TotalTime"),
+                file_type,
+                out.get("Key"),
+            )
+        return out
+
+    def attach_import_anlz(self, tid: str, analysis_result: dict[str, Any]) -> str | None:
+        """Write a new track's ANLZ trio into Rekordbox's share and record it in master.db.
+
+        The dir is the one Rekordbox itself uses for the row's uuid
+        (``analysis_db_writer.rekordbox_anlz_rel_path``), so Rekordbox, ``analyze-full``
+        and the USB export find the files the same way as for a track Rekordbox
+        analysed. Sets ``AnalysisDataPath`` and ``analysed`` only once the ``.DAT`` is
+        on disk. A row that already records a path is left alone.
+
+        Returns the recorded ``AnalysisDataPath`` or None (nothing written).
+        """
+        from .analysis_db_writer import REKORDBOX_ANALYSED, rekordbox_anlz_rel_path
+        from .anlz_writer import write_anlz_files
+        from .database import db_lock
+
         tid = str(tid)
+        try:
+            item = self.db.get_content_by_id(tid)
+        except Exception as e:  # rbox raises its own error types
+            logger.error("op=attach_import_anlz tid=%s read failed: %s", tid, e)
+            return None
+        if item is None or getattr(item, "analysis_data_path", None):
+            return None
+        rel = rekordbox_anlz_rel_path(getattr(item, "uuid", None))
+        share = self.db.share_directory()
+        if not rel or not share:
+            logger.warning("op=attach_import_anlz tid=%s no uuid or share dir", tid)
+            return None
+        share_root = Path(share).resolve()
+        anlz_dir = (share_root / rel.lstrip("/")).parent
+        if not anlz_dir.is_relative_to(share_root):
+            logger.error("op=attach_import_anlz tid=%s dir escapes the share", tid)
+            return None
 
-        # 1. Remove from local cache
-        if tid in self.tracks:
-            del self.tracks[tid]
+        try:
+            anlz_dir.mkdir(parents=True, exist_ok=True)
+            paths = write_anlz_files(
+                anlz_dir=str(anlz_dir),
+                track_path=str(getattr(item, "folder_path", "") or ""),
+                analysis_result=analysis_result,
+                filename_base="ANLZ0000",
+            )
+        except Exception as e:  # anlz_writer raises from struct / numpy / OSError
+            logger.error("op=attach_import_anlz tid=%s ANLZ write failed: %s", tid, e)
+            return None
+        if "dat" not in paths:
+            logger.error("op=attach_import_anlz tid=%s no .DAT written", tid)
+            self._discard_anlz(anlz_dir, paths)
+            return None
 
-        # 2. Remove from all playlists (internal cache)
-        for pid, tracks in self.playlists_tracks.items():
-            if tid in [str(t.id) if hasattr(t, "id") else str(t["ID"]) for t in tracks]:
-                # This is tricky because we store objects or dicts.
-                # Ideally we call remove_track_from_playlist
-                try:
-                    self.remove_track_from_playlist(pid, tid)
-                except Exception as e:
-                    logger.warning(
-                        "live_database: remove_track_from_playlist(%s, %s) failed: %s",
-                        pid,
-                        tid,
-                        e,
-                    )
+        try:
+            with db_lock():
+                item = self.db.get_content_by_id(tid)
+                if item is None or getattr(item, "analysis_data_path", None):
+                    # Gone, or recorded by someone else meanwhile: leave the row alone.
+                    self._discard_anlz(anlz_dir, paths)
+                    return None
+                item.analysis_data_path = rel
+                item.analysed = REKORDBOX_ANALYSED
+                self.db.update_content(item)
+        except Exception as e:  # rbox raises its own error types
+            logger.error("op=attach_import_anlz tid=%s master.db write failed: %s", tid, e)
+            self._discard_anlz(anlz_dir, paths)
+            return None
+        logger.info("op=attach_import_anlz tid=%s path=%s", tid, rel)
+        return rel
 
-        # 3. Warn about Master DB
-        logger.warning(
-            f"Track {tid} removed from cache/playlists, but RBOX library does not support direct deletion from Master DB via this API."
-        )
-        return True
+    @staticmethod
+    def _discard_anlz(anlz_dir: Path, paths: dict[str, str]) -> None:
+        """Remove ANLZ files this import just wrote that no master.db row points to."""
+        for f in paths.values():
+            try:
+                Path(f).unlink(missing_ok=True)
+            except OSError as e:
+                logger.warning("op=attach_import_anlz unlink %s failed: %s", f, e)
+        for d in (anlz_dir, anlz_dir.parent):  # rmdir only succeeds on an empty dir
+            try:
+                d.rmdir()
+            except OSError:
+                break
+
+    def delete_track(self, tid: str) -> bool:
+        """Always False: rbox 0.1.7 cannot delete a djmdContent row.
+
+        The old version removed the track from the in-memory cache and the playlists
+        (and crashed on string entries there), so the UI showed it gone until the
+        next reload. The routes now answer 409 in live mode before reaching this.
+        """
+        logger.warning("op=delete_track tid=%s refused: live library has no content delete", tid)
+        return False
 
     def update_track_comment(self, tid: str, comment: str) -> bool:
         return self.update_track_metadata(tid, {"Comment": comment})
@@ -1051,7 +1250,7 @@ class LiveRekordboxDB:
             item = self.db.get_content_by_id(tid)
             if not item:
                 logger.error(f"Track {tid} not found in DB")
-                raise Exception(f"Track {tid} not found in Live DB")
+                raise UnknownTrackIds([tid])
 
             changed = False
             # 1. Direct fields
@@ -1112,6 +1311,106 @@ class LiveRekordboxDB:
         except Exception as e:
             logger.error(f"Failed to update track metadata {tid}: {e}")
             raise e
+
+    # The master.db column each user-editable field lands in. Artist / Genre / Album are
+    # the row's foreign key, which update_content_artist & co. repoint; a restore sets
+    # the old id back. An artist / genre / album row such a call created stays behind,
+    # unreferenced.
+    _RESTORE_COLUMNS: ClassVar[dict[str, str]] = {
+        "Title": "title",
+        "Comment": "commnt",
+        "Rating": "rating",
+        "ColorID": "color_id",
+        "Artist": "artist_id",
+        "Genre": "genre_id",
+        "Album": "album_id",
+    }
+
+    def update_tracks_metadata(self, track_ids: list[str], updates: dict[str, Any]) -> bool:
+        """Write ``updates`` to every row in ``track_ids``, all or nothing. True when done.
+
+        Refuses before the first write: ``TrackFieldError`` for a field or value
+        (``app.track_fields``), ``UnknownTrackIds`` naming every id master.db lacks.
+        rbox commits each call on its own, so a write that fails partway (rbox error)
+        writes the rows this call touched back from snapshots read before its first
+        write, then raises ``TrackWriteFailed``.
+        """
+        from .database import db_lock
+
+        updates = normalise_track_updates(updates, "live")
+        ids = list(dict.fromkeys(str(t) for t in track_ids))
+        columns = [self._RESTORE_COLUMNS[k] for k in updates]
+        with db_lock():
+            snapshots: dict[str, dict[str, Any]] = {}
+            cached_before: dict[str, dict[str, Any]] = {}
+            unknown: list[str] = []
+            for tid in ids:
+                item = self.db.get_content_by_id(tid)
+                if item is None:
+                    unknown.append(tid)
+                    continue
+                snapshots[tid] = {col: getattr(item, col, None) for col in columns}
+                cached = self.tracks.get(tid)
+                if cached is not None:
+                    cached_before[tid] = {k: cached.get(k, _MISSING) for k in updates}
+            if unknown:
+                logger.warning("op=update_tracks_metadata unknown ids=%s", unknown[:10])
+                raise UnknownTrackIds(unknown)
+            if not updates:
+                return True
+
+            touched: list[str] = []
+            for tid in ids:
+                touched.append(tid)
+                try:
+                    self.update_track_metadata(tid, updates)
+                except Exception as e:  # rbox raises its own error types
+                    restored, unrestored = self._restore_rows(touched, snapshots, cached_before)
+                    logger.error(
+                        "op=update_tracks_metadata failed tid=%s fields=%s restored=%d "
+                        "unrestored=%s err=%s",
+                        tid,
+                        ",".join(updates),
+                        len(restored),
+                        unrestored,
+                        e,
+                    )
+                    raise TrackWriteFailed(tid, e, restored, unrestored) from e
+        return True
+
+    def _restore_rows(
+        self,
+        tids: list[str],
+        snapshots: dict[str, dict[str, Any]],
+        cached_before: dict[str, dict[str, Any]],
+    ) -> tuple[list[str], list[str]]:
+        """Write each row's snapshot back, newest first. Returns ``(restored, unrestored)``.
+
+        The cache follows a row only once master.db holds the old values again.
+        """
+        restored: list[str] = []
+        unrestored: list[str] = []
+        for tid in reversed(tids):
+            try:
+                item = self.db.get_content_by_id(tid)
+                if item is None:
+                    raise LookupError(f"content {tid} vanished")
+                for col, value in snapshots[tid].items():
+                    setattr(item, col, value)
+                self.db.update_content(item)
+            except Exception as e:  # rbox raises its own error types
+                logger.error("op=update_tracks_metadata restore tid=%s err=%s", tid, e)
+                unrestored.append(tid)
+                continue
+            restored.append(tid)
+            cached = self.tracks.get(tid)
+            if cached is not None:
+                for key, value in cached_before.get(tid, {}).items():
+                    if value is _MISSING:
+                        cached.pop(key, None)
+                    else:
+                        cached[key] = value
+        return restored, unrestored
 
     # ── MyTag (Pioneer "My Tag") read/write ────────────────────────────────
     # rbox's wheel API for MyTag write hasn't been used elsewhere in this
@@ -1273,58 +1572,81 @@ class LiveRekordboxDB:
             logger.error(f"Failed to rename playlist {pid}: {e}")
             return False
 
+    @staticmethod
+    def _seq_value_for(
+        order: list[Any], moving: Any, target: Any, after: bool, attr: str = "seq"
+    ) -> int:
+        """The ``seq`` that puts ``moving`` right before / after ``target`` in ``order``.
+
+        rbox's ``move_playlist`` / ``move_playlist_song`` take a seq VALUE, not a list
+        position, and shift the rows between the old and the new value by one (verified
+        on a master.db copy, 2026-11-14). Real libraries carry gaps and duplicates in
+        those values, so a list index is not a seq. rbox refuses a value above the row
+        count, hence the clamp.
+        """
+        old, t = int(getattr(moving, attr) or 0), int(getattr(target, attr) or 0)
+        if after:
+            new = t if old < t else t + 1
+        else:
+            new = t - 1 if old < t else t
+        return max(1, min(new, len(order)))
+
+    def _refresh_playlist_nodes(self) -> None:
+        """Rebuild the playlist-tree cache from master.db (parents and seqs after a move)."""
+        self.playlists = sorted(
+            (self._playlist_node(pl) for pl in self.db.get_playlists()),
+            key=lambda x: x.get("Seq", 0),
+        )
+
     def move_playlist(self, pid, new_parent_id, target_id=None, position=None):
+        """Move a playlist / folder into a parent, optionally right before/after a sibling.
+
+        ``position`` "inside" drops it at the end of folder ``target_id``; "before" /
+        "after" place it next to ``target_id`` in that node's parent; otherwise it goes
+        to the end of ``new_parent_id``. ROOT is passed to rbox as "root": its
+        ``parent_id=None`` means "keep the current parent", which is why moving back to
+        ROOT never worked.
+        """
+        pid = str(pid)
         try:
-            # 1. Determine actual parent and target sequence
-            sibling = None
-            actual_parent = None
-            target_seq = 0
-
+            target = None
             if position == "inside" and target_id:
-                actual_parent = None if str(target_id).upper() == "ROOT" else str(target_id)
-                # Max seq + 1 for new parent
-                siblings = [p for p in self.playlists if p["ParentID"] == (target_id or "ROOT")]
-                target_seq = max([p.get("Seq", 0) for p in siblings], default=-1) + 1
+                parent = str(target_id)
             elif target_id and position in ("before", "after"):
-                sibling = next((p for p in self.playlists if p["ID"] == str(target_id)), None)
-                if sibling:
-                    sp = sibling.get("ParentID", "ROOT")
-                    actual_parent = None if str(sp).upper() == "ROOT" else str(sp)
-                    target_seq = sibling.get("Seq", 0)
-                    if position == "after":
-                        target_seq += 1
-                else:
-                    actual_parent = (
-                        None if str(new_parent_id).upper() == "ROOT" else str(new_parent_id)
-                    )
-                    target_seq = 0
+                target = next((p for p in self.playlists if p["ID"] == str(target_id)), None)
+                parent = str(target["ParentID"]) if target else str(new_parent_id or "ROOT")
             else:
-                actual_parent = None if str(new_parent_id).upper() == "ROOT" else str(new_parent_id)
-                target_seq = 0
+                parent = str(new_parent_id or "ROOT")
+            parent_arg = "root" if parent.upper() == "ROOT" else parent
+            if parent_arg == pid:
+                raise ValueError("a playlist cannot be moved into itself")
 
-            logger.info(f"Moving playlist {pid} to parent_id={actual_parent}, seq={target_seq}")
+            current = next((p for p in self.playlists if p["ID"] == pid), None)
+            current_parent = str(current["ParentID"]) if current else None
+            if current_parent is None or current_parent.upper() != parent.upper():
+                # seq=None appends: an explicit seq is checked against the OLD parent's
+                # count, so it fails for an empty folder ("Invalid sequence number: 0").
+                self.db.move_playlist(pid, seq=None, parent_id=parent_arg)
 
-            # 2. Call DB (rbox should handle the shift if seq is provided)
-            # If rbox move_playlist(pid, seq=target_seq, parent_id=actual_parent) works as expected:
-            self.db.move_playlist(str(pid), seq=target_seq, parent_id=actual_parent)
+            if target is not None and target["ID"] != pid:
+                order = sorted(
+                    self.db.get_playlist_children(parent_arg), key=lambda r: int(r.seq or 0)
+                )
+                me = next((r for r in order if str(r.id) == pid), None)
+                tgt = next((r for r in order if str(r.id) == target["ID"]), None)
+                if me is not None and tgt is not None:
+                    seq = self._seq_value_for(order, me, tgt, after=position == "after")
+                    if seq != int(me.seq or 0):
+                        self.db.move_playlist(pid, seq=seq)
 
-            # 3. Update Cache & Re-sort siblings locally to reflect the move
-            resolved_parent = str(actual_parent) if actual_parent else "ROOT"
-
-            for p in self.playlists:
-                if p["ID"] == str(pid):
-                    p["ParentID"] = resolved_parent
-                    p["Seq"] = target_seq
-                    break
-
-            # Simple local re-sequencing for siblings to keep cache in sync
-            parent_siblings = [p for p in self.playlists if p["ParentID"] == resolved_parent]
-            parent_siblings.sort(key=lambda x: (x.get("Seq", 0), 0 if x["ID"] == str(pid) else 1))
-
-            for i, p in enumerate(parent_siblings):
-                p["Seq"] = i
-
-            self.playlists.sort(key=lambda x: x.get("Seq", 0))
+            logger.info(
+                "op=move_playlist pid=%s parent=%s target=%s position=%s",
+                pid,
+                parent_arg,
+                target_id,
+                position,
+            )
+            self._refresh_playlist_nodes()
             return True
         except Exception as e:
             logger.error(f"Failed to move playlist {pid}: {e}")
@@ -1360,10 +1682,19 @@ class LiveRekordboxDB:
             logger.error(f"Failed to create playlist {name}: {e}")
             return None
 
+    def _refresh_playlist_tracks(self, pid: str) -> None:
+        """Re-read one playlist's track order into ``playlists_tracks``.
+
+        ``get_playlist_tracks`` serves from that cache; without this an added track
+        stayed invisible until the next library load.
+        """
+        self.playlists_tracks[str(pid)] = self.get_playlist_track_ids(pid)
+
     def add_track_to_playlist(self, pid, tid):
         try:
             # rbox uses create_playlist_song(playlist_id, track_id)
             self.db.create_playlist_song(str(pid), str(tid))
+            self._refresh_playlist_tracks(pid)
             return True
         except Exception as e:
             logger.error(f"Failed to add track {tid} to playlist {pid}: {e}")
@@ -1384,6 +1715,7 @@ class LiveRekordboxDB:
                 logger.warning("track %s is not in playlist %s — nothing to remove", tid, pid)
                 return False
             self.db.delete_playlist_song(str(row.id))
+            self._refresh_playlist_tracks(pid)
             return True
         except Exception as e:
             logger.error(f"Failed to remove track {tid} from playlist {pid}: {e}")
@@ -1457,16 +1789,26 @@ class LiveRekordboxDB:
             return None
 
     def reorder_playlist_track(self, pid: str, track_id: str, new_index: int) -> bool:
-        """
-        Reorders a track in a playlist.
-        For now, this performs a Remove + Add, which effectively moves it to the end.
-        True index-based reordering requires deeper SQL access not yet implemented in rbox wrapper.
+        """Move a track to 0-based position ``new_index`` of the playlist (clamped).
+
+        Same contract as the XML backend. Used to be remove + add, which always put the
+        track at the end and still answered success.
         """
         try:
-            # 1. Remove
-            self.remove_track_from_playlist(pid, track_id)
-            # 2. Add (Appends to end)
-            self.add_track_to_playlist(pid, track_id)
+            songs = sorted(self.db.get_playlist_songs(str(pid)), key=lambda r: int(r.track_no or 0))
+            me = next((r for r in songs if str(r.content_id) == str(track_id)), None)
+            if me is None:
+                logger.warning("track %s is not in playlist %s — nothing to reorder", track_id, pid)
+                return False
+            others = [r for r in songs if r is not me]
+            idx = max(0, min(int(new_index), len(others)))
+            if others:
+                after = idx == len(others)
+                anchor = others[-1] if after else others[idx]
+                seq = self._seq_value_for(songs, me, anchor, after=after, attr="track_no")
+                if seq != int(me.track_no or 0):
+                    self.db.move_playlist_song(str(me.id), seq)
+            self._refresh_playlist_tracks(pid)
             return True
         except Exception as e:
             logger.error(f"Failed to reorder playlist track: {e}")

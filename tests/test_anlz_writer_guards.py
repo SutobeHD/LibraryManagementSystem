@@ -1,20 +1,30 @@
-"""Tests for app/anlz_writer.py logic-safety guards (NOT byte-layout).
+"""Tests for app/anlz_writer.py logic-safety guards + waveform tag headers.
 
-These lock the out-of-range clamp in the 1-byte waveform builders (PWAV/PWV2/
-PWV3) — for valid 0..255 input the output is byte-identical; the test only
-asserts it no longer raises on out-of-range and that valid bytes round-trip.
-Byte-layout itself is covered by tests/test_anlz_reference_parse.py.
+These lock the out-of-range clamp in the waveform builders: PWAV/PWV3 clamp to
+0..255 (valid input is byte-identical), PWV2 to its 4-bit range 0..15 and
+PWV4/PWV6/PWV7 to 7 bit. The header bytes asserted here are the ones Rekordbox
+writes (docs/reference/rbxport/waveform.md section 3.1). Whole-file layout is
+covered by tests/test_anlz_reference_parse.py.
 """
 
 from __future__ import annotations
 
 import os
+import struct
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-from app.anlz_writer import _build_pwav, _build_pwv2, _build_pwv3  # noqa: E402
+from app.anlz_writer import (  # noqa: E402
+    _build_pwav,
+    _build_pwv2,
+    _build_pwv3,
+    _build_pwv4,
+    _build_pwv5,
+    _build_pwv6,
+    _build_pwv7,
+)
 
 
 def test_pwav_valid_values_byte_identical():
@@ -33,10 +43,38 @@ def test_pwav_out_of_range_does_not_crash():
     assert payload == bytes([255, 0, 255, 128])  # clamped to 0..255
 
 
-def test_pwv2_out_of_range_clamped():
-    out = _build_pwv2([256, -1, 50])
+def test_pwv2_clamped_to_4_bit():
+    """PWV2 is height-only 1..15: one byte > 15 makes Nexus-era firmware reject
+    the whole preview, so the writer clamps instead of passing it through."""
+    out = _build_pwv2([256, -1, 50, 15, 7])
     assert out[:4] == b"PWV2"
-    assert out[20:23] == bytes([255, 0, 50])
+    assert out[20:25] == bytes([15, 0, 15, 15, 7])
+
+
+def test_pwv4_header_and_7_bit_clamp():
+    out = _build_pwv4([[200, 0, 0, 127, 128, -3]] * 1200)
+    assert out[:24] == b"PWV4" + struct.pack(">IIIIHH", 24, 24 + 1200 * 6, 6, 1200, 0, 0)
+    assert out[24:30] == bytes([127, 0, 0, 127, 127, 0])
+
+
+def test_pwv6_header_and_7_bit_clamp():
+    out = _build_pwv6([[255, 127, 64]] * 1200)
+    assert out[:20] == b"PWV6" + struct.pack(">IIII", 20, 20 + 1200 * 3, 3, 1200)
+    assert out[20:23] == bytes([127, 127, 64])
+
+
+def test_pwv7_header_and_7_bit_clamp():
+    out = _build_pwv7([[0, 128, 300], [1, 2, 3]])
+    assert out[:24] == b"PWV7" + struct.pack(">IIIIHH", 24, 24 + 2 * 3, 3, 2, 150, 0)
+    assert out[24:30] == bytes([0, 127, 127, 1, 2, 3])
+
+
+def test_pwv5_header_and_bit_layout():
+    # R=low 7, G=mid 5, B=high 1, height 31
+    val = (7 << 13) | (5 << 10) | (1 << 7) | (31 << 2)
+    out = _build_pwv5([val])
+    assert out[:24] == b"PWV5" + struct.pack(">IIIII", 24, 26, 2, 1, 0x00960305)
+    assert out[24:26] == struct.pack(">H", val)
 
 
 def test_pwv3_out_of_range_clamped_preserves_count():

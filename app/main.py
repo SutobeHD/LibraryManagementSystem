@@ -4,6 +4,7 @@ import json
 import logging
 import multiprocessing as _mp
 import os
+import re
 import secrets
 import shutil
 import sqlite3
@@ -16,8 +17,8 @@ import urllib.parse
 import uuid
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from concurrent.futures import Executor, ThreadPoolExecutor
-from contextlib import asynccontextmanager
-from pathlib import Path
+from contextlib import ExitStack, asynccontextmanager
+from pathlib import Path, PureWindowsPath
 from typing import Any, BinaryIO
 
 import uvicorn
@@ -34,6 +35,7 @@ from fastapi import (
     Response,
     UploadFile,
 )
+from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -87,7 +89,7 @@ KEYRING_SERVICE = "library_management_system"
 # Keyring entry name for the SoundCloud OAuth bearer token.
 KEYRING_SC_TOKEN = "sc_token"
 
-from . import audio_tags, download_registry, folder_watcher
+from . import audio_tags, download_registry, folder_watcher, playable_audio
 from . import soundcloud_api as sc_api
 from . import soundcloud_auth as sc_auth
 from .artist_store import attribution as artist_attribution
@@ -102,8 +104,9 @@ from .artist_store import schema as artist_schema
 from .artist_store import sync as artist_sync
 from .audio_analyzer import LIBROSA_AVAILABLE, AudioAnalyzer, fingerprint_pcm_md5
 from .config import EXPORT_DIR, LOG_DIR, MUSIC_DIR, TEMP_DIR
-from .database import db, db_lock
+from .database import _STREAMING_PREFIXES, db, db_lock
 from .genre_atlas import get_atlas, library_spelling
+from .library_artwork import COVERS_DIR, ArtworkPathError, resolve_artwork_path
 from .metadata_fixer import schema as fixer_log
 from .phrase_generator import (
     PhraseNotAnalysedError,
@@ -122,7 +125,7 @@ from .playcount_sync import (
 )
 from .rbep_parser import list_projects as rbep_list_projects
 from .rbep_parser import parse_project as rbep_parse_project
-from .rekordbox_bridge import RekordboxBridge
+from .rekordbox_bridge import PlaylistNotFoundError, RekordboxBridge
 from .services import (
     AudioEngine,
     BeatAnalyzer,
@@ -139,6 +142,12 @@ from .soundcloud_api import (
     SoundCloudSyncEngine,
 )
 from .soundcloud_downloader import sc_downloader
+from .track_fields import (
+    TrackFieldError,
+    TrackWriteFailed,
+    UnknownTrackIds,
+    normalise_track_updates,
+)
 from .usb_manager import (
     UsbActions,
     UsbDetector,
@@ -213,7 +222,16 @@ def _init_allowed_roots():
             roots.append(dj_path.resolve())
     ALLOWED_AUDIO_ROOTS.extend(roots)
     if _mp.current_process().name == "MainProcess":
-        logger.info(f"Allowed audio roots: {[str(r) for r in ALLOWED_AUDIO_ROOTS]}")
+        logger.info("Allowed audio roots: %s", _describe_roots(ALLOWED_AUDIO_ROOTS))
+
+
+def _describe_roots(roots: list[Path]) -> str:
+    """Roots for the boot log, user-specific prefixes as ``[...]``.
+
+    The old line logged ``str(list)``: the list repr doubles every backslash, so the
+    log formatter's prefix scrub never matched and full user paths reached app.log.
+    """
+    return ", ".join(safe_error_message_str(str(r)) for r in roots)
 
 
 _init_allowed_roots()
@@ -283,18 +301,25 @@ def safe_error_message(e: Exception) -> str:
 
 
 # --- SECURITY: CORS locked to localhost only ---
+# Tauri 2 webview origins: `tauri://localhost` (macOS/Linux),
+# `http://tauri.localhost` (Windows default, `useHttpsScheme` false — the
+# installed app is locked out without it), `https://tauri.localhost`
+# (Windows with `useHttpsScheme: true`).
+CORS_ALLOWED_ORIGINS: tuple[str, ...] = (
+    "http://localhost:1420",
+    "http://127.0.0.1:1420",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+    "tauri://localhost",
+    "http://tauri.localhost",
+    "https://tauri.localhost",
+)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:1420",
-        "http://127.0.0.1:1420",
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://localhost:8000",
-        "http://127.0.0.1:8000",
-        "tauri://localhost",
-        "https://tauri.localhost",
-    ],
+    allow_origins=list(CORS_ALLOWED_ORIGINS),
     allow_credentials=False,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "X-Session-Token", "Authorization"],
@@ -342,8 +367,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 app.mount("/exports", StaticFiles(directory=EXPORT_DIR), name="exports")
 
-# Artwork Mount
-COVERS_DIR = Path(APP_DIR).parent / "app" / "data" / "covers"
+# Artwork Mount (COVERS_DIR: app/library_artwork.py)
 COVERS_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/api/artwork", StaticFiles(directory=COVERS_DIR), name="artwork")
 
@@ -369,6 +393,9 @@ class BatchReq(BaseModel):
 
 
 class TrackUpdateReq(BaseModel):
+    # forbid: an unknown key (e.g. "BPM") was dropped here and the request answered 200.
+    model_config = {"extra": "forbid"}
+
     Rating: int | None = None
     ColorID: int | None = None
     Comment: str | None = None
@@ -613,8 +640,12 @@ class MergeReq(BaseModel):
 
 
 class RbxSyncReq(BaseModel):
-    track_ids: list[str]
+    """Tracks by id (``playlist_name`` makes them one playlist) or one library playlist/folder."""
+
+    track_ids: list[str] = _Field(default_factory=list)
     filename: str | None = "rekordbox_export.xml"
+    playlist_id: str | None = None
+    playlist_name: str | None = None
 
 
 class RbxImportReq(BaseModel):
@@ -816,92 +847,104 @@ def _content_disposition_inline(filename: str) -> str:
 # in its threadpool instead of on the event loop.
 _STREAM_CHUNK_BYTES = 1024 * 1024
 
+#: Content-Type per stored format. AIFF never goes out raw (``playable_audio`` WAV view).
+_STREAM_MEDIA_TYPES = {
+    ".mp3": "audio/mpeg",
+    ".wav": "audio/wav",
+    ".flac": "audio/flac",
+    ".m4a": "audio/mp4",
+    ".ogg": "audio/ogg",
+}
 
-@app.get("/api/stream")
-async def stream_audio(path: str, request: Request):
-    """Streams audio file with HTTP Range support — required for browser seeking."""
-    file_path = validate_audio_path(path)
 
-    mime_types = {
-        ".mp3": "audio/mpeg",
-        ".wav": "audio/wav",
-        ".aiff": "audio/aiff",
-        ".aif": "audio/aiff",
-        ".flac": "audio/flac",
-        ".m4a": "audio/mp4",
-        ".ogg": "audio/ogg",
+def _read_file_range(file_path: Path, start: int, end: int) -> Iterator[bytes]:
+    """Bytes ``start..end`` (inclusive) of ``file_path`` in 1 MiB reads. Blocking."""
+    with open(file_path, "rb") as f:
+        f.seek(start)
+        remaining = end - start + 1
+        while remaining > 0:
+            data = f.read(min(_STREAM_CHUNK_BYTES, remaining))
+            if not data:
+                break
+            remaining -= len(data)
+            yield data
+
+
+def _byte_range_response(
+    request: Request,
+    size: int,
+    read_range: Callable[[int, int], Iterator[bytes]],
+    media_type: str,
+    filename: str,
+) -> Response:
+    """One RFC 7233 Range answer for every stream route, raw file and WAV view alike.
+
+    Single range only (``a-b``, ``a-``, ``-n``; ``n`` past the size = whole file) -> 206.
+    No, malformed or multi-range header -> 200 with the whole file (RFC 7233 lets a
+    server ignore Range; no multipart/byteranges). Unsatisfiable -> 416 ``bytes */size``.
+    HEAD gets the same status and headers, no body, and reads nothing.
+    """
+    headers = {
+        "Accept-Ranges": "bytes",
+        "Content-Disposition": _content_disposition_inline(filename),
+        "Cache-Control": "no-cache",
     }
-    ext = file_path.suffix.lower()
-    media_type = mime_types.get(ext, "application/octet-stream")
-
-    file_size = file_path.stat().st_size
-    range_header = request.headers.get("range") or request.headers.get("Range")
-
-    # No Range header → still expose Accept-Ranges so browsers know seeking is possible
-    if not range_header:
-
-        def _full() -> Iterator[bytes]:
-            with open(file_path, "rb") as f:
-                while True:
-                    chunk = f.read(_STREAM_CHUNK_BYTES)
-                    if not chunk:
-                        break
-                    yield chunk
-
-        return StreamingResponse(
-            _full(),
-            media_type=media_type,
-            headers={
-                "Accept-Ranges": "bytes",
-                "Content-Length": str(file_size),
-                "Content-Disposition": _content_disposition_inline(file_path.name),
-                "Cache-Control": "no-cache",
-            },
-        )
-
-    # Parse "bytes=START-END"
-    try:
-        units, _, rng = range_header.partition("=")
-        if units.strip().lower() != "bytes":
-            raise ValueError("only byte ranges supported")
-        start_s, _, end_s = rng.strip().partition("-")
-        start = int(start_s) if start_s else 0
-        end = int(end_s) if end_s else file_size - 1
-        end = min(end, file_size - 1)
-        if start > end or start < 0:
-            raise ValueError("invalid range")
-    except Exception as e:
-        return Response(
-            status_code=416,
-            headers={"Content-Range": f"bytes */{file_size}"},
-            content=f"Invalid range: {e}",
-        )
-
-    chunk_size = end - start + 1
-
-    def _ranged() -> Iterator[bytes]:
-        with open(file_path, "rb") as f:
-            f.seek(start)
-            remaining = chunk_size
-            while remaining > 0:
-                data = f.read(min(_STREAM_CHUNK_BYTES, remaining))
-                if not data:
-                    break
-                remaining -= len(data)
-                yield data
-
+    start, end, status = 0, size - 1, 200
+    range_header = request.headers.get("range")
+    if range_header:
+        try:
+            byte_range = playable_audio.parse_range(range_header, size)
+        except ValueError as e:
+            return Response(
+                status_code=416,
+                headers={"Content-Range": f"bytes */{size}"},
+                content=f"Invalid range: {e}",
+            )
+        if byte_range is not None:
+            start, end = byte_range
+            status = 206
+            headers["Content-Range"] = f"bytes {start}-{end}/{size}"
+    headers["Content-Length"] = str(end - start + 1)
+    if request.method == "HEAD":
+        return Response(status_code=status, media_type=media_type, headers=headers)
     return StreamingResponse(
-        _ranged(),
-        status_code=206,
-        media_type=media_type,
-        headers={
-            "Accept-Ranges": "bytes",
-            "Content-Range": f"bytes {start}-{end}/{file_size}",
-            "Content-Length": str(chunk_size),
-            "Content-Disposition": _content_disposition_inline(file_path.name),
-            "Cache-Control": "no-cache",
-        },
+        read_range(start, end), status_code=status, media_type=media_type, headers=headers
     )
+
+
+async def _audio_stream_response(path: str, request: Request) -> Response:
+    """Shared body of ``/api/stream`` and ``/api/audio/stream`` (GET + HEAD).
+
+    AIFF goes out as a virtual WAV (Chromium decodes no AIFF); every other format as stored.
+    """
+    file_path = validate_audio_path(path)
+    if playable_audio.needs_wav_view(file_path):
+        try:
+            view = await asyncio.to_thread(playable_audio.describe, file_path)
+        except playable_audio.WavViewError as e:
+            logger.warning("op=wav_view file=%s err=%s", file_path.name, e)
+            raise HTTPException(415, "Audio encoding not supported for playback") from e
+        return _byte_range_response(
+            request,
+            view.size,
+            lambda start, end: playable_audio.iter_range(view, start, end),
+            "audio/wav",
+            playable_audio.wav_filename(file_path.name),
+        )
+
+    return _byte_range_response(
+        request,
+        file_path.stat().st_size,
+        lambda start, end: _read_file_range(file_path, start, end),
+        _STREAM_MEDIA_TYPES.get(file_path.suffix.lower(), "application/octet-stream"),
+        file_path.name,
+    )
+
+
+@app.api_route("/api/stream", methods=["GET", "HEAD"])
+async def stream_audio(path: str, request: Request):
+    """Streams an audio file with HTTP Range support — required for browser seeking."""
+    return await _audio_stream_response(path, request)
 
 
 def _waveform_body(file_path: Path, pps: int) -> bytes:
@@ -1215,21 +1258,45 @@ def track_genre_suggestions(tid: str, limit: _GenreHintLimit = 8) -> dict[str, A
     return result
 
 
+def _json_default(o: Any) -> Any:
+    """``json.dumps`` fallback for the odd non-JSON value in a track dict (Path, date...)."""
+    return jsonable_encoder(o)
+
+
+def _encode_track_list(tracks: list[dict[str, Any]]) -> bytes:
+    """JSON array of ``tracks``, encoded like Starlette's ``JSONResponse``.
+
+    One ``json.dumps`` per track, not one for the list: the C encoder holds the GIL
+    for a whole call, and the full list is ~145 MB once the beat grids are loaded.
+    Short calls let the event-loop thread run in between.
+    """
+    parts = [
+        json.dumps(
+            t, default=_json_default, ensure_ascii=False, allow_nan=False, separators=(",", ":")
+        )
+        for t in tracks
+    ]
+    return ("[" + ",".join(parts) + "]").encode("utf-8")
+
+
 @app.get("/api/library/tracks")
-def get_library_tracks(light: bool = False):
+def get_library_tracks(light: bool = False) -> Response:
     """Every track of the loaded library (hide_streaming applied).
 
     ``light=true`` leaves out beatGrid, Cues, positionMarks and phrases.
+
+    Returns a ready ``Response`` encoded here, in the threadpool. For a returned list
+    FastAPI runs ``jsonable_encoder`` and ``json.dumps`` on the event loop; for the full
+    list that froze every other request (health, task polls) for ~18 s.
     """
     try:
         tracks = db.get_all_tracks()
         logger.info(f"Returning {len(tracks)} tracks for library view")
-        if light:
-            return [_light_track(t) for t in tracks]
-        return tracks
+        payload = [_light_track(t) for t in tracks] if light else tracks
+        return Response(content=_encode_track_list(payload), media_type="application/json")
     except Exception as e:
         logger.error(f"Failed to fetch library tracks: {e}")
-        return []
+        return Response(content=b"[]", media_type="application/json")
 
 
 @app.get("/api/insights/low_quality")
@@ -3110,15 +3177,13 @@ async def analyze_track(tid: str):
         raise HTTPException(500, safe_error_message(e))
 
 
-@app.get("/api/audio/stream")
-async def stream_audio_file(path: str):
-    """Streams an audio file from the local filesystem"""
-    logger.info(f"Stream request for: {path}")
+@app.api_route("/api/audio/stream", methods=["GET", "HEAD"])
+async def stream_audio_file(path: str, request: Request):
+    """Same response as ``/api/stream``, under the URL DawEngine uses.
 
-    # SECURITY: Validate against allowed audio roots to prevent path traversal
-    valid_path = validate_audio_path(path)
-
-    return FileResponse(valid_path, headers={"Accept-Ranges": "bytes"})
+    Was a ``FileResponse``, which on Starlette 0.35 ignores Range (200 + whole body).
+    """
+    return await _audio_stream_response(path, request)
 
 
 # ── Pioneer "My Tag" (mode-agnostic — XML + Live both supported) ──────────────
@@ -3147,6 +3212,7 @@ def create_mytag(r: MyTagCreateReq):
     name = (r.name or "").strip()
     if not name:
         raise HTTPException(400, "Tag name is required.")
+    _reject_while_rekordbox_runs("editing MyTags")
     try:
         new_id = _require_live_db().create_mytag(name)
         return {"status": "success", "id": new_id, "name": name}
@@ -3158,6 +3224,7 @@ def create_mytag(r: MyTagCreateReq):
 
 @app.delete("/api/mytags/{tag_id}", dependencies=[Depends(require_session)])
 def delete_mytag(tag_id: str):
+    _reject_while_rekordbox_runs("editing MyTags")
     try:
         _require_live_db().delete_mytag(tag_id)
         return {"status": "success"}
@@ -3174,6 +3241,7 @@ def get_track_mytags(tid: str):
 
 @app.post("/api/track/{tid}/mytags", dependencies=[Depends(require_session)])
 def set_track_mytags(tid: str, r: TrackMyTagsReq):
+    _reject_while_rekordbox_runs("editing MyTags")
     try:
         result = _require_live_db().set_track_mytags(tid, r.tag_ids)
         return {"status": "success", **result}
@@ -3193,45 +3261,117 @@ def save_grid(r: GridReq):
     return {"status": "success" if db.save_track_beatgrid(r.track_id, r.beat_grid) else "error"}
 
 
+def _tag_file_paths(track_ids: list[str]) -> list[str]:
+    """Audio files of ``track_ids`` the tag write-back may touch (no streaming URIs)."""
+    paths = []
+    for tid in track_ids:
+        src = (db.get_track_details(tid) or {}).get("path")
+        if src and not str(src).startswith(_STREAMING_PREFIXES):
+            paths.append(str(src))
+    return paths
+
+
+def _file_tag_writeback(track_ids: list[str], updates: dict[str, Any]) -> dict[str, str]:
+    """Mirror ``updates`` into each track's audio file tags, after the library write.
+
+    Best effort: a failure here never undoes the library write. Per track "written",
+    "failed" (the tag writer refused), "skipped" (nothing written: no field the file
+    stores, e.g. ColorID alone; no local file; settings.write_tags_to_files=False,
+    default true) or "error". Pictures stay as they are: the edits carry no artwork,
+    and re-embedding the library's thumbnail replaced the file's own cover and
+    dropped a back cover.
+    """
+    status = dict.fromkeys(track_ids, "skipped")
+    if not audio_tags.tag_fields(updates):
+        return status
+    try:
+        enabled = SettingsManager.load().get("write_tags_to_files", True)
+    except Exception as exc:
+        logger.warning(f"Tag write-back skipped, settings unreadable: {exc}")
+        return dict.fromkeys(track_ids, "error")
+    if not enabled:
+        return status
+    for tid in status:
+        try:
+            src = (db.get_track_details(tid) or {}).get("path")
+            if src and not str(src).startswith(_STREAMING_PREFIXES):
+                ok = audio_tags.write_tags(src, updates)
+                status[tid] = "written" if ok else "failed"
+        except Exception as exc:
+            logger.warning(f"Tag write-back skipped for {tid}: {exc}")
+            status[tid] = "error"
+    return status
+
+
+def _update_tracks_then_tags(
+    track_ids: list[str], updates: dict[str, Any]
+) -> dict[str, str] | None:
+    """Library write, then the file write-back. None when the library answers False.
+
+    Each file's tag-write lock is taken before the master.db lock is released, so two
+    edits of one track write its file in the order they wrote the library; the older
+    value never lands last. Raises what ``update_tracks_metadata`` raises.
+    """
+    paths = _tag_file_paths(track_ids) if audio_tags.tag_fields(updates) else []
+    file_locks = audio_tags.FileWriteLocks(paths)
+    with ExitStack() as held:
+        with db_lock():
+            if not db.update_tracks_metadata(track_ids, updates):
+                return None
+            held.enter_context(file_locks)
+        return _file_tag_writeback(track_ids, updates)
+
+
 @app.post("/api/track/{tid}", dependencies=[Depends(require_session)])
 def update_track(tid: str, r: TrackUpdateReq):
+    """Edit one track. 404 for an unknown id, 400 for a value the backend refuses.
+
+    ``file_tags`` reports the best-effort write-back into the audio file.
+    """
+    _reject_while_rekordbox_runs("editing tracks")
     updates = {k: v for k, v in r.model_dump().items() if v is not None}
     if not updates:
         return {"status": "no_change"}
     try:
-        if not db.update_tracks_metadata([tid], updates):
-            raise HTTPException(500, "Update returned False (unknown error)")
-
-        # Best-effort write-back to the source audio file's tags. Disabled by
-        # toggling settings.write_tags_to_files=False (default true).
-        tag_status = "skipped"
-        try:
-            cfg = SettingsManager.load()
-            if cfg.get("write_tags_to_files", True):
-                track = db.get_track_details(tid) or {}
-                src = track.get("path")
-                if src:
-                    artwork_bytes = None
-                    art_path = track.get("Artwork")
-                    if art_path:
-                        artwork_bytes = audio_tags.load_artwork(art_path)
-                    ok = audio_tags.write_tags(src, updates, artwork=artwork_bytes)
-                    tag_status = "written" if ok else "failed"
-        except Exception as exc:
-            logger.warning(f"Tag write-back skipped for {tid}: {exc}")
-            tag_status = "error"
-
-        return {"status": "success", "file_tags": tag_status}
-    except HTTPException:
-        raise
+        file_tags = _update_tracks_then_tags([tid], updates)
+    except TrackFieldError as e:
+        raise HTTPException(400, str(e)) from e
+    except UnknownTrackIds as e:
+        raise HTTPException(404, str(e)) from e
     except Exception as e:
         logger.error(f"Update failed for {tid}: {e}")
         raise HTTPException(500, f"Update failed: {e!s}")
+    if file_tags is None:
+        raise HTTPException(500, "Update returned False (unknown error)")
+    return {"status": "success", "file_tags": file_tags[tid]}
 
 
 @app.patch("/api/tracks/batch", dependencies=[Depends(require_session)])
 def batch_up(r: BatchReq):
-    return {"status": "success" if db.update_tracks_metadata(r.track_ids, r.updates) else "error"}
+    """Write the same fields to many tracks, all or nothing.
+
+    400 names a field or value the backend refuses, 404 every unknown track id; both
+    before the first write. A write that fails partway is a 500 once the tracks
+    already written are restored (live mode). ``file_tags`` maps each track id to its
+    best-effort write-back into the audio file, as the single-track edit reports it.
+    """
+    _reject_while_rekordbox_runs("editing tracks")
+    track_ids = list(dict.fromkeys(r.track_ids))
+    try:
+        updates = normalise_track_updates(r.updates, db.mode)
+        file_tags = _update_tracks_then_tags(track_ids, updates)
+    except TrackFieldError as e:
+        raise HTTPException(400, str(e)) from e
+    except UnknownTrackIds as e:
+        raise HTTPException(404, str(e)) from e
+    except TrackWriteFailed as e:
+        raise HTTPException(500, str(e)) from e
+    except Exception as e:
+        logger.error(f"Batch update failed for {len(track_ids)} track(s): {e}")
+        raise HTTPException(500, f"Library update failed: {e!s}") from e
+    if file_tags is None:
+        raise HTTPException(500, "Library update failed for one or more tracks.")
+    return {"status": "success", "file_tags": file_tags}
 
 
 @app.post("/api/system/heartbeat")
@@ -3282,8 +3422,24 @@ async def system_health() -> HealthResponse:
     return HealthResponse(status="ok", library_loaded=bool(getattr(db, "loaded", False)))
 
 
+def _reject_track_delete_in_live_mode() -> None:
+    """409 in live mode: rbox 0.1.7 has no way to delete a djmdContent row.
+
+    The old live path dropped the track from the in-memory cache only and reported
+    success; the track was back after the next restart.
+    """
+    if getattr(db, "mode", None) == "live":
+        raise HTTPException(
+            409,
+            "Deleting tracks from the Rekordbox library is not supported yet. "
+            "Remove the track in Rekordbox.",
+        )
+
+
 @app.post("/api/track/delete", dependencies=[Depends(require_session)])
 def del_trk(r: DeleteTrackReq):
+    _reject_while_rekordbox_runs("deleting tracks")
+    _reject_track_delete_in_live_mode()
     return {"status": "success" if db.delete_track(r.track_id) else "error"}
 
 
@@ -3321,18 +3477,29 @@ def get_tree():
 
 
 @app.post("/api/playlists/create", dependencies=[Depends(require_session)])
-def create_pl(r: CreatePlReq):
-    pid = db.create_playlist(r.name, r.parent_id, r.type == "0", r.track_ids)
-    return {"status": "success", "id": pid}
+def create_pl(r: CreatePlReq) -> dict[str, str]:
+    """Create a playlist (``type`` "1") or folder ("0"). Answers the new playlist's id.
+
+    Was ``{"status": "success", "id": <whole node dict>}`` even when the live write
+    failed and returned None.
+    """
+    _reject_while_rekordbox_runs("changing playlists")
+    node = db.create_playlist(r.name, r.parent_id, r.type == "0", r.track_ids)
+    pid = node.get("ID") if isinstance(node, dict) else None
+    if not pid:
+        raise HTTPException(500, "Could not create the playlist.")
+    return {"status": "success", "id": str(pid)}
 
 
 @app.post("/api/playlists/rename", dependencies=[Depends(require_session)])
 def rename_pl(r: RenamePlReq):
+    _reject_while_rekordbox_runs("changing playlists")
     return {"status": "success" if db.rename_playlist(r.pid, r.name) else "error"}
 
 
 @app.post("/api/playlists/move", dependencies=[Depends(require_session)])
 def move_pl(r: MovePlReq):
+    _reject_while_rekordbox_runs("changing playlists")
     return {
         "status": "success"
         if db.move_playlist(r.pid, r.parent_id, r.target_id, r.position)
@@ -3342,16 +3509,19 @@ def move_pl(r: MovePlReq):
 
 @app.post("/api/playlists/delete", dependencies=[Depends(require_session)])
 def delete_pl(r: DeletePlReq):
+    _reject_while_rekordbox_runs("changing playlists")
     return {"status": "success" if db.delete_playlist(r.pid) else "error"}
 
 
 @app.post("/api/playlists/add-track", dependencies=[Depends(require_session)])
 def add_trk_pl(r: TrackPlReq):
+    _reject_while_rekordbox_runs("changing playlists")
     return {"status": "success" if db.add_track_to_playlist(r.pid, r.track_id) else "error"}
 
 
 @app.post("/api/playlists/remove-track", dependencies=[Depends(require_session)])
 def remove_track_pl(r: PlRemoveTrackReq):
+    _reject_while_rekordbox_runs("changing playlists")
     try:
         db.remove_track_from_playlist(r.pid, r.track_id)
         return {"status": "success"}
@@ -3362,6 +3532,8 @@ def remove_track_pl(r: PlRemoveTrackReq):
 
 @app.delete("/api/track/{tid}", dependencies=[Depends(require_session)])
 def delete_track(tid: str):
+    _reject_while_rekordbox_runs("deleting tracks")
+    _reject_track_delete_in_live_mode()
     logger.info(f"API Request: Delete track {tid}")
     if db.delete_track(tid):
         return {"status": "success", "tid": tid}
@@ -3370,6 +3542,7 @@ def delete_track(tid: str):
 
 @app.post("/api/playlists/reorder", dependencies=[Depends(require_session)])
 def reorder_pl_track(r: PlReorderReq):
+    _reject_while_rekordbox_runs("changing playlists")
     try:
         if db.reorder_playlist_track(r.pid, r.track_id, r.target_index):
             return {"status": "success"}
@@ -3398,10 +3571,12 @@ class SmartPlaylistUpdateReq(BaseModel):
 
 @app.post("/api/playlists/smart/create", dependencies=[Depends(require_session)])
 def create_smart_pl(r: SmartPlaylistCreateReq):
+    _reject_while_rekordbox_runs("changing playlists")
     try:
         node = db.create_smart_playlist(r.name, r.criteria, r.parent_id)
-        if node:
-            return {"status": "success", "id": str(node.get("ID") or node)}
+        pid = node.get("ID") if isinstance(node, dict) else None
+        if pid:
+            return {"status": "success", "id": str(pid)}
         raise HTTPException(400, "create_smart_playlist not supported in current mode")
     except HTTPException:
         raise
@@ -3480,6 +3655,7 @@ def read_usb_history(r: UsbHistoryReq):
 @app.post("/api/playlists/folder/create", dependencies=[Depends(require_session)])
 def create_folder_pl(r: CreatePlReq):
     """Convenience: create a folder (Type=0). Equivalent to /create with type='0'."""
+    _reject_while_rekordbox_runs("changing playlists")
     try:
         node = (
             db.create_folder(r.name, r.parent_id)
@@ -3557,6 +3733,7 @@ def batch_comment(r: BatchCommentReq) -> dict[str, Any]:
 
 @app.post("/api/library/clean-titles", dependencies=[Depends(require_session)])
 def clean_titles(r: CleanTitlesReq):
+    _reject_while_rekordbox_runs("editing tracks")
     return LibraryTools.clean_track_titles(r.track_ids)
 
 
@@ -4232,6 +4409,29 @@ def get_lib_status():
     }
 
 
+@app.get("/api/library/quality-stats")
+def get_library_quality_stats() -> dict[str, int]:
+    """Lossless/lossy track counts of the loaded library, by file extension.
+
+    Extension only, no file I/O: ``.m4a`` counts as lossy even when it holds ALAC.
+    Streaming entries and unknown extensions count as neither.
+    """
+    from app.library_format_swap import LOSSLESS_SOURCE_EXTS, LOSSY_SOURCE_EXTS
+
+    lossless = lossy = 0
+    if db.loaded:
+        for t in db.get_all_tracks():
+            p = str(t.get("path") or t.get("Location") or "")
+            if not p or p.startswith(_STREAMING_PREFIXES):
+                continue
+            ext = Path(p).suffix.lower()
+            if ext in LOSSLESS_SOURCE_EXTS:
+                lossless += 1
+            elif ext in LOSSY_SOURCE_EXTS:
+                lossy += 1
+    return {"lossless": lossless, "lossy": lossy, "total": lossless + lossy}
+
+
 @app.post("/api/library/mode", dependencies=[Depends(require_session)])
 def set_lib_mode(r: DBModeReq):
     logger.info(f"Setting library mode to: {r.mode}")
@@ -4296,25 +4496,73 @@ def unload_lib():
 # --- REKORDBOX SYNC ENDPOINTS ---
 
 
+_RBX_EXPORT_DEFAULT_NAME = "rekordbox_export.xml"
+_ILLEGAL_FILENAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+
+
+def _rbx_export_path(filename: str | None) -> Path:
+    """``EXPORT_DIR/<basename>.xml`` for a client-chosen name, or 400.
+
+    The name was joined onto ``EXPORT_DIR`` as sent: ``../rekordbox.xml`` overwrote the
+    XML library, an absolute path wrote anywhere, ``None`` was a 500. ``PureWindowsPath``
+    drops directory parts for both separators and a drive prefix on every OS; the
+    resolve + ``is_relative_to`` check (as in ``validate_audio_path``) still catches a
+    name that resolves outside ``EXPORT_DIR``.
+    """
+    raw = (filename or "").strip() or _RBX_EXPORT_DEFAULT_NAME
+    name = PureWindowsPath(raw).name.strip()
+    if name in ("", ".", "..") or _ILLEGAL_FILENAME_CHARS.search(name):
+        raise HTTPException(400, "Invalid export file name.")
+    if not name.lower().endswith(".xml"):
+        name += ".xml"  # appended, not with_suffix: "Set 21.11.2026" keeps its dots
+    root = Path(EXPORT_DIR).resolve()
+    target = (root / name).resolve()
+    if not target.is_relative_to(root) or target == root:
+        raise HTTPException(400, "Invalid export file name.")
+    return target
+
+
 @app.post("/api/rekordbox/export", dependencies=[Depends(require_session)])
-async def rbx_export(r: RbxSyncReq):
-    """Exports specified tracks to a Rekordbox XML file."""
+def rbx_export(r: RbxSyncReq) -> dict[str, Any]:
+    """Write tracks, or one playlist/folder with its NODE tree, as Rekordbox XML into ``EXPORT_DIR``.
+
+    Streaming tracks have no file and are left out (``skipped_streaming``). 400 on a bad
+    name, on ``playlist_id`` together with ``track_ids``, or when nothing exportable is
+    left; 404 for an unknown ``playlist_id``.
+    """
+    output_path = _rbx_export_path(r.filename)
+    name = (r.playlist_name or "").strip() or None
+    if r.playlist_id and r.track_ids:
+        raise HTTPException(400, "Send either track_ids or playlist_id, not both.")
     try:
-        output_path = EXPORT_DIR / r.filename
-        xml_path = RekordboxBridge.export_collection(r.track_ids, output_path)
-        return {
-            "status": "success",
-            "message": f"Exported {len(r.track_ids)} tracks to XML.",
-            "path": str(xml_path),
-        }
+        if r.playlist_id:
+            result = RekordboxBridge.export_playlist(r.playlist_id, output_path, name)
+        else:
+            result = RekordboxBridge.export_collection(r.track_ids, output_path, name)
+    except PlaylistNotFoundError as e:
+        raise HTTPException(404, str(e)) from e
+    except ValueError as e:  # no id resolved to a track, or only streaming tracks
+        raise HTTPException(400, str(e)) from e
     except Exception as e:
         logger.error(f"Rekordbox export failed: {e}")
-        raise HTTPException(500, safe_error_message(e))
+        raise HTTPException(500, safe_error_message(e)) from e
+    message = f"Exported {result.exported} tracks to XML."
+    if result.skipped_streaming:
+        message += f" Skipped {result.skipped_streaming} streaming tracks (no local file)."
+    return {
+        "status": "success",
+        "message": message,
+        "path": result.path,
+        "exported": result.exported,
+        "skipped_streaming": result.skipped_streaming,
+        "playlist": result.playlist,
+    }
 
 
 @app.post("/api/rekordbox/import", dependencies=[Depends(require_session)])
 async def rbx_import(r: RbxImportReq):
     """Imports tracks and metadata from a Rekordbox XML file."""
+    await asyncio.to_thread(_reject_while_rekordbox_runs, "importing tracks")
     try:
         if not os.path.exists(r.xml_path):
             raise HTTPException(404, "XML file not found")
@@ -4325,6 +4573,8 @@ async def rbx_import(r: RbxImportReq):
             "message": f"Import complete: {results['added']} added, {results['updated']} updated.",
             "details": results,
         }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Rekordbox import failed: {e}")
         raise HTTPException(500, safe_error_message(e))
@@ -4339,6 +4589,7 @@ def gen_smart(r: SmartPlReq):
     carries `legacy_by_artist` while the retired generator's folder is still in
     the library, so the UI can say so instead of pretending it is gone.
     """
+    _reject_while_rekordbox_runs("changing playlists")
     report = LibraryTools.generate_smart_playlists(r.artist_threshold, r.label_threshold)
     return {"status": "success" if report.get("ok") else "error", **report}
 
@@ -4367,6 +4618,7 @@ async def scan_folder(r: PathRequest):
     Walks the folder recursively and imports any audio files not yet in the library.
     Long-running — runs in a background thread via BackgroundTasks.
     """
+    await asyncio.to_thread(_reject_while_rekordbox_runs, "importing tracks")
     path_str = r.path.strip()
     if not path_str:
         raise HTTPException(status_code=400, detail="'path' is required.")
@@ -4423,6 +4675,7 @@ async def import_paths(r: ImportPathsReq):
                                   (or `playlist_name` if given).
       playlist_name: str        — explicit playlist name override.
     """
+    await asyncio.to_thread(_reject_while_rekordbox_runs, "importing tracks")
     raw = r.paths
     if not raw:
         raise HTTPException(status_code=400, detail="'paths' must be a non-empty list")
@@ -4613,52 +4866,16 @@ def clear_import_tasks():
 async def get_artwork(path: str):
     """
     Serves artwork image from absolute path or Rekordbox relative path.
+
+    Path rules (share / covers jail, image types): `library_artwork.resolve_artwork_path`,
+    shared with the USB export so the stick shows the same cover.
     """
-    if not path:
-        raise HTTPException(404, "No path provided")
-
-    # Try resolving Rekordbox relative paths (e.g. /PIONEER/Artwork/...)
-    p_path = path
-    if path.startswith("/PIONEER/"):
-        app_data = os.environ.get("APPDATA")
-        if app_data:
-            # Rekordbox 6/7 stores artwork in AppData/Roaming/Pioneer/rekordbox/share
-            # The relative path starts with /PIONEER/ which matches inside the share folder.
-            rel = path.lstrip("/")  # Remove leading slash
-            p_path = Path(app_data) / "Pioneer" / "rekordbox" / "share" / rel
-            # logger.debug(f"Resolved PIONEER path: {p_path}")
-        else:
-            logger.warning("APPDATA not found, cannot resolve PIONEER artwork path")
-
-    file_path = Path(p_path).resolve()
-
-    # SECURITY: Directory Jail & Extension Validation
-    ALLOWED_ARTWORK_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif"}
-    if file_path.suffix.lower() not in ALLOWED_ARTWORK_EXTENSIONS:
-        raise HTTPException(status_code=400, detail="Invalid artwork file type")
-
-    # Ensure the path is either in the local covers dir or the Pioneer share dir
-    is_allowed = False
-    if str(file_path).startswith(str(COVERS_DIR.resolve())):
-        is_allowed = True
-    elif os.environ.get("APPDATA"):
-        rb_share_dir = (
-            Path(os.environ.get("APPDATA")) / "Pioneer" / "rekordbox" / "share"
-        ).resolve()
-        if str(file_path).startswith(str(rb_share_dir)):
-            is_allowed = True
-
-    # As a fallback, if not in defined locations, allow only if it's explicitly tracked in the DB as artwork.
-    # Note: we mostly rely on the above checks for safety.
-    if not is_allowed:
-        logger.warning(f"SECURITY: Blocked access to non-artwork path: {file_path}")
-        raise HTTPException(
-            status_code=403, detail="Access denied: path outside allowed artwork directories"
-        )
-
-    if not file_path.exists() or not file_path.is_file():
-        raise HTTPException(404, "Artwork file not found")
-
+    try:
+        file_path = resolve_artwork_path(path)
+    except ArtworkPathError as exc:
+        if exc.status == 403:
+            logger.warning("SECURITY: Blocked access to non-artwork path: %s", path)
+        raise HTTPException(status_code=exc.status, detail=exc.detail) from None
     return FileResponse(file_path)
 
 
@@ -4829,6 +5046,7 @@ def import_audio(files: list[UploadFile] = File(...), wait: bool = False):
     Synchronous (wait=true): kept for CLI / test usage — blocks until every
         file has been analysed and returns the full result objects.
     """
+    _reject_while_rekordbox_runs("importing tracks")
     from . import import_tracker
 
     results = []
@@ -5301,8 +5519,15 @@ def usb_get_profiles():
 
 @app.post("/api/usb/profiles", dependencies=[Depends(require_session)])
 def usb_save_profile(r: UsbProfileReq):
-    """Create or update a USB device profile."""
-    profile = UsbProfileManager.save_profile(r.model_dump())
+    """Create or update a USB device profile.
+
+    Partial update: only the fields the request sets overwrite a stored profile.
+    Model defaults fill fields the stored profile lacks; a new profile gets all of them.
+    """
+    stored = UsbProfileManager.get_profile(r.device_id) or {}
+    profile = UsbProfileManager.save_profile(
+        {**r.model_dump(), **stored, **r.model_dump(exclude_unset=True)}
+    )
     return {"status": "success", "profile": profile}
 
 
@@ -5329,7 +5554,9 @@ def usb_get_diff(device_id: str):
         raise HTTPException(400, "No library loaded")
     db_path = getattr(db.active_db, "db_path", None) or getattr(db.active_db, "xml_path", None)
     engine = UsbSyncEngine(str(db_path), profile["drive"], profile.get("filesystem", ""))
-    diff = engine.calculate_diff()
+    # The UI only runs playlist syncs (the profile's checked playlists), so the preview
+    # compares the stick against those, not against the whole library.
+    diff = engine.calculate_diff(profile.get("sync_playlists") or None)
     # Add space estimate: ~10MB avg per track to add
     avg_track_size = 10 * 1024 * 1024
     diff["space_estimate"] = diff["tracks"]["to_add"] * avg_track_size
@@ -5692,6 +5919,7 @@ def usb_save_settings(r: UsbSettingsReq):
 @app.post("/api/tools/duplicates/merge", dependencies=[Depends(require_session)])
 def merge_duplicates(r: DupMergeReq):
     """Merge duplicate tracks: keep one, transfer playlist memberships, delete others."""
+    _reject_while_rekordbox_runs("merging duplicates")
     try:
         if not db.active_db:
             raise HTTPException(400, "No database loaded")
@@ -5726,6 +5954,7 @@ def merge_duplicates(r: DupMergeReq):
 @app.post("/api/tools/duplicates/merge-all", dependencies=[Depends(require_session)])
 def merge_all_duplicates():
     """Auto-merge all duplicate groups using best-metadata heuristic."""
+    _reject_while_rekordbox_runs("merging duplicates")
     try:
         groups = LibraryTools.find_duplicates()
         merged = 0
@@ -5790,9 +6019,8 @@ def analyze_audio(req: AudioImportReq):
     if not LIBROSA_AVAILABLE:
         logger.warning("Librosa not installed. Audio analysis will be mocked.")
 
-    file_path = Path(req.file_path)
-    if not file_path.exists() or not file_path.is_file():
-        raise HTTPException(status_code=404, detail="Audio file not found")
+    # Same sandbox as the stream routes: 400 bad path/extension, 404 missing, 403 outside roots.
+    file_path = validate_audio_path(req.file_path)
 
     task_id = f"analysis_{secrets.token_hex(8)}"
     return AudioAnalyzer.analyze_track(task_id, str(file_path), req.mode)
@@ -5867,7 +6095,56 @@ _ANALYZE_FULL_ERRORS: dict[str, tuple[int, str]] = {
         "master.db records no analysis path for this track. Analyse it once in Rekordbox first.",
     ),
     "audio_missing": (409, "The track's audio file is missing on disk"),
+    "db_update_failed": (
+        500,
+        "The analysis files were written, but updating master.db failed. Check logs.",
+    ),
 }
+_ANALYSIS_FAILED_DETAIL = "Analysis failed. Check logs for details."
+
+#: Writer result fields a client may see. Everything else (``anlz_paths``, raw ``error``
+#: text, exception messages) can carry absolute user paths and stays in the log.
+_PUBLIC_ANALYSIS_FIELDS = frozenset(
+    {
+        "track_id",
+        "index",
+        "total",
+        "analyzed",
+        "skipped",
+        "errors",
+        "status",
+        "reason",
+        "bpm",
+        "key",
+        "camelot",
+        "key_id",
+        "duration",
+        "lufs",
+        "beat_count",
+        "phrase_count",
+        "beat_method",
+        "key_method",
+        "db_updated",
+        "elapsed",
+    }
+)
+
+
+def _public_analysis_result(result: Mapping[str, Any]) -> dict[str, Any]:
+    """Writer result / batch progress line without file paths.
+
+    ``anlz_paths`` becomes ``anlz_files`` (the kinds written: ``dat``, ``ext``, ...);
+    an error's text is replaced by the fixed detail for its ``reason``.
+    """
+    public = {k: v for k, v in result.items() if k in _PUBLIC_ANALYSIS_FIELDS}
+    anlz_paths = result.get("anlz_paths")
+    if isinstance(anlz_paths, Mapping):
+        public["anlz_files"] = sorted(str(kind) for kind in anlz_paths)
+    if result.get("status") == "error":
+        public["error"] = _ANALYZE_FULL_ERRORS.get(
+            str(result.get("reason")), (500, _ANALYSIS_FAILED_DETAIL)
+        )[1]
+    return public
 
 
 @app.post("/api/track/{tid}/analyze-full", dependencies=[Depends(require_session)])
@@ -5892,11 +6169,11 @@ async def analyze_track_full(tid: str, req: AnalyzeFullReq = AnalyzeFullReq()):
         if result.get("status") == "error":
             logger.warning("analyze-full %s refused: %s", tid, result.get("error"))
             status_code, detail = _ANALYZE_FULL_ERRORS.get(
-                str(result.get("reason")), (500, "Analysis failed. Check logs for details.")
+                str(result.get("reason")), (500, _ANALYSIS_FAILED_DETAIL)
             )
             raise HTTPException(status_code, detail)
 
-        return {"status": "ok", "data": result}
+        return {"status": "ok", "data": _public_analysis_result(result)}
     except HTTPException:
         raise
     except Exception as e:
@@ -5928,8 +6205,9 @@ async def analyze_batch(req: AnalyzeBatchReq = AnalyzeBatchReq()):
     Batch-analyze tracks and write results to Rekordbox DB + ANLZ.
     If track_ids is None, automatically finds all unanalyzed tracks.
 
-    Returns a streaming response with progress updates (NDJSON). 409 while another
-    analysis-to-DB run (this route or analyze-full) is in flight.
+    Returns a streaming response with progress updates (NDJSON, one
+    ``_public_analysis_result`` line per track: ids, counters, status, results, no file
+    paths). 409 while another analysis-to-DB run (this route or analyze-full) is in flight.
     """
     from starlette.background import BackgroundTask
 
@@ -5959,7 +6237,7 @@ async def analyze_batch(req: AnalyzeBatchReq = AnalyzeBatchReq()):
             _analyze_batch_active += 1
         try:
             for progress in writer.analyze_batch(track_ids, force=req.force):
-                yield json.dumps(progress) + "\n"
+                yield json.dumps(_public_analysis_result(progress)) + "\n"
         finally:
             with _analyze_batch_count_lock:
                 _analyze_batch_active -= 1
@@ -6004,13 +6282,27 @@ def get_analyze_capabilities():
 
 
 def _is_rekordbox_running() -> bool:
-    """Check if Rekordbox is currently running."""
+    """True while a Rekordbox process runs. Fails open: no rbox or a failed scan -> False."""
     try:
         import rbox
-
-        return rbox.is_rekordbox_running()
-    except Exception:
+    except ImportError:
         return False
+    try:
+        return bool(rbox.is_rekordbox_running())
+    except Exception as e:  # compiled extension: the raised type is not contractual
+        logger.warning("is_rekordbox_running() failed err=%s", e)
+        return False
+
+
+def _reject_while_rekordbox_runs(action: str) -> None:
+    """409 while Rekordbox runs on the live library; XML mode returns without a process scan.
+
+    Rekordbox keeps master.db open and overwrites or corrupts rows written behind its back.
+    Call it first in the handler, outside any ``try``: a catch-all ``except Exception``
+    would turn the 409 into a 500. ``getattr``: test stubs for ``db`` carry no ``mode``.
+    """
+    if getattr(db, "mode", None) == "live" and _is_rekordbox_running():
+        raise HTTPException(409, f"Rekordbox is running. Close it before {action}.")
 
 
 def _live_master_db_path() -> Path | None:
@@ -6737,6 +7029,8 @@ async def sync_soundcloud_playlists(r: ScSyncReq, request: Request):
     if _sync_lock.locked():
         raise HTTPException(409, "A sync operation is already in progress. Please wait.")
 
+    await asyncio.to_thread(_reject_while_rekordbox_runs, "syncing SoundCloud playlists")
+
     auth_token = await asyncio.to_thread(_sc_access_token)
     if not auth_token:
         raise HTTPException(400, "SoundCloud auth token not configured")
@@ -6830,6 +7124,8 @@ async def sync_all_soundcloud(request: Request):
     if _sync_lock.locked():
         raise HTTPException(409, "A sync operation is already in progress. Please wait.")
 
+    await asyncio.to_thread(_reject_while_rekordbox_runs, "syncing SoundCloud playlists")
+
     auth_token = await asyncio.to_thread(_sc_access_token)
     if not auth_token:
         raise HTTPException(400, "SoundCloud auth token not configured")
@@ -6875,6 +7171,8 @@ async def merge_soundcloud_playlists(r: ScMergeReq, request: Request):
     """
     if _sync_lock.locked():
         raise HTTPException(409, "A sync operation is already in progress. Please wait.")
+
+    await asyncio.to_thread(_reject_while_rekordbox_runs, "merging SoundCloud playlists")
 
     auth_token = await asyncio.to_thread(_sc_access_token)
     if not auth_token:
@@ -7077,25 +7375,23 @@ async def usb_playcount_resolve(body: PlayCountResolveRequest):
     """
     Commit resolved play counts to the PC database and the USB XML.
 
-    Writes to PC via rbox (best-effort) and patches the USB XML atomically.
-    Updates the sync metadata timestamp on success.
+    Writes to the live library's master.db via rbox (best-effort, under ``db_lock``) and
+    patches the USB XML atomically. Updates the sync metadata timestamp on success.
+    Live mode: 409 while Rekordbox runs. XML library: no master.db, so only the USB XML
+    is patched and ``pc_db_skipped`` is true.
 
     Request body: {resolutions: [...], usb_root, usb_xml_path}
-    Returns: {status, data: {committed, errors}}
+    Returns: {status, data: {committed, usb_updated, pc_db_skipped, errors}}
     """
+    _reject_while_rekordbox_runs("syncing play counts")
+    live_db_path = _live_master_db_path()
+    pc_db_path = str(live_db_path) if live_db_path is not None else None
     logger.info(
         "[USB-PC] playcount resolve: %d resolutions, usb_root=%s",
         len(body.resolutions),
         body.usb_root,
     )
     try:
-        import os as _os
-
-        from .config import DB_FILENAME
-
-        rb_root = str(Path(_os.environ.get("APPDATA", "")) / "Pioneer" / "rekordbox")
-        pc_db_path = str(Path(rb_root) / DB_FILENAME) if hasattr(Path(rb_root), "__str__") else ""
-
         resolutions_dicts = [r.model_dump() for r in body.resolutions]
         result = await asyncio.get_event_loop().run_in_executor(
             None,
@@ -7950,6 +8246,7 @@ def duplicates_merge(body: DuplicateMergeRequest):
     Request body: {keep_path, remove_paths, merge_play_counts}
     Returns: {status, data: {removed, merged_play_count}}
     """
+    _reject_while_rekordbox_runs("merging duplicates")
     logger.info(
         "[DUP] merge: keep=%s remove=%d paths merge_pc=%s",
         body.keep_path,
@@ -8032,4 +8329,6 @@ def duplicates_merge(body: DuplicateMergeRequest):
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    from .logging_utils import uvicorn_log_config
+
+    uvicorn.run(app, host="127.0.0.1", port=8000, log_config=uvicorn_log_config())

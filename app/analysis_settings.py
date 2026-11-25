@@ -65,7 +65,7 @@ class AnalysisSettings:
     minor_bias: float = 1.0
 
     # -- Waveform colors --------------------------------------------------
-    color_gamma: float = 0.65  # < 1 brightens mids in PWV4/5/6/7
+    color_gamma: float = 0.65  # unused since ANALYSIS_VERSION 6 (Rekordbox applies no gamma)
 
     # -- Cue generation toggles ------------------------------------------
     # When False, the corresponding cue list is left empty in the result
