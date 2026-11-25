@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- Editor track browser:
+  - Fixed: covers in the editor's track browser never loaded: the image URL
+    was `/api/artwork/<path>` (the static covers mount, 404 for library
+    paths). It now uses `/api/artwork?path=` like the track table and player.
 - Rekordbox XML export:
   - Added: right-click a playlist, smart playlist or folder -> "Export as
     Rekordbox XML" writes `exports/<name>.xml` (a folder with its whole
