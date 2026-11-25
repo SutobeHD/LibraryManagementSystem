@@ -27,6 +27,17 @@
   - Changed: `/api/artwork` checks its folder jail with `Path.is_relative_to`
     instead of a string prefix, so a sibling folder like `share_evil` no
     longer passes.
+- Import covers:
+  - Fixed: the cover the import extracts from a file was saved to
+    `%APPDATA%/Pioneer/app/data/covers`, a folder `GET /api/artwork` and the
+    USB export refuse, so an imported track showed no cover (403) and the stick
+    got the embedded image. Covers now go to
+    `%APPDATA%/MusicLibraryManager/covers`, which the import, `/api/artwork`
+    and the USB export share (not the code tree: in the installed app that is a
+    temp folder deleted on exit). Covers already in the old folders stay
+    readable. Importing an MP3 and a FLAC into a copy of the real library:
+    before 403 for both, after 200 with the embedded bytes and the stick picks
+    the library cover.
 - Beat grid (MP3):
   - Fixed: MP3 beat grids sat about 25 ms away from Rekordbox's. The grid was
     shifted by a fixed 22.5 ms because the LAME header was never actually read.

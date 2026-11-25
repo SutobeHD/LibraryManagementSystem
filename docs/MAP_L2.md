@@ -670,6 +670,7 @@ Library artwork path -> image file on disk.
 
 - `ArtworkPathError` — An artwork path the resolver refuses; `status` is what `/api/artwork` answers.
 - `rekordbox_share_dir()` — Rekordbox 6/7 share folder (root of ImagePath), or None without APPDATA.
+- `legacy_covers_dirs()` — Folders older builds wrote imported covers to; read, never written.
 - `resolve_artwork_path()` — The image file a library artwork path points at.
 - `library_artwork_file()` — `resolve_artwork_path`, or None where the route would answer an error.
 
@@ -4254,10 +4255,13 @@ One artwork resolver for the app and the stick (`app/library_artwork.py`).
 - `share()` — APPDATA -> tmp; returns the Rekordbox share folder (with one cover in it).
 - `test_imagepath_resolves_inside_the_share()`
 - `test_absolute_path_in_the_covers_folder_passes()`
+- `test_covers_dir_is_the_per_user_data_folder_not_the_code_tree()`
+- `test_legacy_covers_folders_stay_readable()`
 - `test_refusals_carry_the_routes_status()`
 - `test_without_appdata_a_share_path_is_refused()`
 - `test_library_artwork_file_is_none_where_the_route_refuses()`
 - `test_route_serves_and_refuses_through_the_resolver()`
+- `test_imported_cover_is_served_and_picked_for_the_stick()`
 
 ### `tests/test_library_format_swap.py`
 
