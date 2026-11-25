@@ -1,5 +1,5 @@
 import logging
-import os
+import posixpath
 import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
@@ -33,8 +33,17 @@ _DRIVE_PATH = re.compile(r"[A-Za-z]:/")
 
 
 def _path_key(path: Any) -> str:
-    """Comparable library path: one separator style, case-folded where the OS ignores case."""
-    return os.path.normcase(os.path.normpath(str(path))) if path else ""
+    """Comparable library path, the same on every OS the sidecar runs on.
+
+    A drive path (``C:\\x`` / ``C:/x``) is Windows: either separator, case-insensitive.
+    ``os.path.normcase`` only does that on Windows, so a POSIX run never matched.
+    """
+    if not path:
+        return ""
+    p = str(path).replace("\\", "/")
+    if _DRIVE_PATH.match(p):
+        return posixpath.normpath(p).casefold()
+    return posixpath.normpath(p)
 
 
 def _float_or_none(value: str | None) -> float | None:

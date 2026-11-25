@@ -4978,6 +4978,7 @@ Tests for app/rekordbox_bridge.py — Rekordbox XML <-> library.
 - `test_import_route_status_reflects_failures()`
 - `test_export_writes_live_cues_as_position_marks()`
 - `test_export_keeps_xml_library_position_marks()`
+- `test_path_key_is_the_same_on_every_os()` — CI runs on Linux, where os.path.normcase/normpath leave backslashes alone.
 
 ### `tests/test_rekordbox_running_guard.py`
 

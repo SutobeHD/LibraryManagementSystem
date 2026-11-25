@@ -255,3 +255,12 @@ def test_export_keeps_xml_library_position_marks():
     track = {"positionMarks": marks, "Cues": [{"InMsec": 5, "Num": 1}]}
 
     assert rb._with_cues(track) is track
+
+
+def test_path_key_is_the_same_on_every_os():
+    """CI runs on Linux, where os.path.normcase/normpath leave backslashes alone."""
+    key = rb._path_key
+    assert key(r"C:\Music\My Set\a.mp3") == key("c:/music/my set/A.MP3")
+    assert key("C:/Music//sub/../a.mp3") == key(r"C:\Music\a.mp3")
+    assert key("/home/u/Music/A.mp3") != key("/home/u/music/a.mp3")  # POSIX keeps case
+    assert key(None) == key("") == ""
