@@ -15,6 +15,10 @@ class PlaylistNotFoundError(LookupError):
     pass
 
 
+class BeatgridsLoadingError(RuntimeError):
+    """The live library's beat grids are still loading; an export now would have no TEMPO."""
+
+
 @dataclass(frozen=True)
 class RbxExportResult:
     path: str
@@ -70,6 +74,22 @@ def _xml_node(
     return XmlPlaylist(label, entries)
 
 
+def _await_beatgrids(tracks: list[dict[str, Any]]) -> None:
+    """Return once the grids these tracks will get are in memory; else BeatgridsLoadingError.
+
+    The live library's grids arrive ~30 s after a load (background loader). An export
+    in that window wrote every track without TEMPO (5041 tracks: 2.2 MB instead of
+    265 MB) and reported success. The track dicts are the library's own, so the grids
+    the loader adds show up in them. No wait when every local track has a grid.
+    """
+    if all(t.get("beatGrid") for t in tracks if not is_streaming_path(t.get("path"))):
+        return
+    if not db.wait_for_beatgrids():
+        raise BeatgridsLoadingError(
+            "Beat grids are still loading from the Rekordbox analysis files - retry in a moment."
+        )
+
+
 def _write(
     tracks: _ExportTracks, nodes: list[XmlPlaylist | XmlFolder], output_path: Path
 ) -> RbxExportResult:
@@ -80,6 +100,7 @@ def _write(
         raise ValueError(
             f"Nothing to export: all {skipped} tracks are streaming tracks without a local file."
         )
+    _await_beatgrids(tracks.data)
     path = RekordboxXML.generate(tracks.data, output_path, nodes)
     return RbxExportResult(
         path=path,

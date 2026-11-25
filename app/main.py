@@ -125,7 +125,7 @@ from .playcount_sync import (
 )
 from .rbep_parser import list_projects as rbep_list_projects
 from .rbep_parser import parse_project as rbep_parse_project
-from .rekordbox_bridge import PlaylistNotFoundError, RekordboxBridge
+from .rekordbox_bridge import BeatgridsLoadingError, PlaylistNotFoundError, RekordboxBridge
 from .services import (
     AudioEngine,
     BeatAnalyzer,
@@ -4533,7 +4533,9 @@ def rbx_export(r: RbxSyncReq) -> dict[str, Any]:
 
     Streaming tracks have no file and are left out (``skipped_streaming``). 400 on a bad
     name, on ``playlist_id`` together with ``track_ids``, or when nothing exportable is
-    left; 404 for an unknown ``playlist_id``.
+    left; 404 for an unknown ``playlist_id``. Right after a live-library load it waits
+    for the beat grids (``BEATGRID_WAIT_TIMEOUT_S``), then 503 rather than writing
+    tracks without TEMPO.
     """
     output_path = _rbx_export_path(r.filename)
     name = (r.playlist_name or "").strip() or None
@@ -4546,6 +4548,8 @@ def rbx_export(r: RbxSyncReq) -> dict[str, Any]:
             result = RekordboxBridge.export_collection(r.track_ids, output_path, name)
     except PlaylistNotFoundError as e:
         raise HTTPException(404, str(e)) from e
+    except BeatgridsLoadingError as e:
+        raise HTTPException(503, str(e), headers={"Retry-After": "10"}) from e
     except ValueError as e:  # no id resolved to a track, or only streaming tracks
         raise HTTPException(400, str(e)) from e
     except Exception as e:

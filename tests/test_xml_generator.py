@@ -381,10 +381,13 @@ _LIB_CONTENTS = {"p1": ["12", "13", "11", "12"], "p2": ["14", "11"], "p3": ["13"
 
 
 class _Library:
-    """RekordboxDB stand-in: the three calls the export makes."""
+    """RekordboxDB stand-in: the calls the export makes."""
 
     def get_track_details(self, tid: str) -> dict[str, Any] | None:
         return _LIB_TRACKS.get(str(tid))
+
+    def wait_for_beatgrids(self, timeout: float | None = None) -> bool:
+        return True
 
     def get_playlist_tree(self) -> list[dict[str, Any]]:
         return _LIB_TREE

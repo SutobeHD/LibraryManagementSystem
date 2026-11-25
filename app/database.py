@@ -1226,6 +1226,17 @@ class RekordboxDB:
     def get_track_details(self, tid: str) -> dict[str, Any] | None:
         return self.active_db.get_track_details(tid)
 
+    def wait_for_beatgrids(self, timeout: float | None = None) -> bool:
+        """True once the active library's beat grids are in memory; False on timeout.
+
+        Live mode loads them on a background thread after ``load_library`` returns
+        (``LiveRekordboxDB.wait_for_beatgrids``, default ``BEATGRID_WAIT_TIMEOUT_S``);
+        XML mode parses them with the tracks. Never call this under ``db_lock()``: the
+        wait would hold every writer.
+        """
+        wait = getattr(self.active_db, "wait_for_beatgrids", None)
+        return True if wait is None else bool(wait(timeout))
+
     def add_track(self, track_data: dict[str, Any]) -> str | None:
         if hasattr(self.active_db, "add_track"):
             return self.active_db.add_track(track_data)

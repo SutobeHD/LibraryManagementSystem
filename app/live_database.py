@@ -25,6 +25,10 @@ logger = logging.getLogger(__name__)
 
 _MISSING = object()
 
+# How long a grid writer (XML export) waits for the background beat-grid loader
+# before it gives up. Measured 2026-11-25 on a 5041-track library copy: 27 s.
+BEATGRID_WAIT_TIMEOUT_S = 90.0
+
 
 class LiveRekordboxDB:
     def __init__(self, db_path: str):
@@ -37,6 +41,12 @@ class LiveRekordboxDB:
         self.genres = []
         self.loaded = False
         self.loading_status = "Idle"
+        # Beat-grid passes requested by loads vs. passes finished; see
+        # _start_beatgrid_background_load and wait_for_beatgrids.
+        self._grid_cv = threading.Condition()
+        self._grid_requested = 0
+        self._grid_done = 0
+        self._beatgrid_thread: threading.Thread | None = None
 
     @property
     def db(self):
@@ -53,8 +63,8 @@ class LiveRekordboxDB:
         it goes through subprocess-isolated rbox calls (see
         `app.anlz_safe`) and a buggy DB row could otherwise stall the
         library load. Tracks become visible in the UI immediately;
-        beatgrids fill in as soon as the worker finishes (typically
-        within a few seconds of the load returning).
+        beatgrids fill in when the worker finishes (27 s for 5041 tracks).
+        Code that writes grids to a file calls `wait_for_beatgrids` first.
         """
         try:
             logger.info("Opening Live Database...")
@@ -100,24 +110,56 @@ class LiveRekordboxDB:
             return False
 
     def _start_beatgrid_background_load(self) -> None:
-        """Spawn a daemon thread to populate ANLZ beatgrids out of band."""
-        if getattr(self, "_beatgrid_thread", None) and self._beatgrid_thread.is_alive():
-            logger.debug("Beatgrid loader already running; skipping new spawn")
-            return
+        """Populate ANLZ beatgrids for the current track dict on a daemon thread.
 
-        def _runner() -> None:
+        Every call requests one pass. A call while a pass runs only adds the
+        request: that pass read the previous track dict, so the thread runs once
+        more before ``wait_for_beatgrids`` reports the grids loaded.
+        """
+        with self._grid_cv:
+            if self._beatgrid_thread is not None:
+                self._grid_requested += 1
+                logger.debug("Beatgrid loader already running; it re-runs for this load")
+                return
+            thread = threading.Thread(
+                target=self._run_beatgrid_passes,
+                name="anlz-beatgrid-loader",
+                daemon=True,
+            )
+            thread.start()
+            self._grid_requested += 1
+            self._beatgrid_thread = thread
+        logger.info("ANLZ beatgrid loader running in background")
+
+    def _run_beatgrid_passes(self) -> None:
+        while True:
+            with self._grid_cv:
+                target = self._grid_requested
             try:
                 self._load_beatgrids_from_anlz()
             except Exception as e:
                 logger.error("Background beatgrid loader crashed: %s", e, exc_info=True)
+            with self._grid_cv:
+                self._grid_done = target
+                self._grid_cv.notify_all()
+                if self._grid_requested == target:
+                    self._beatgrid_thread = None
+                    return
 
-        self._beatgrid_thread = threading.Thread(
-            target=_runner,
-            name="anlz-beatgrid-loader",
-            daemon=True,
-        )
-        self._beatgrid_thread.start()
-        logger.info("ANLZ beatgrid loader running in background")
+    def wait_for_beatgrids(self, timeout: float | None = None) -> bool:
+        """Block until the latest load's beat grids are in ``tracks``; False on timeout.
+
+        ``load()`` returns before the grids: they arrive from the background
+        loader, ~30 s later on a 5000-track library. Until then every track has
+        no ``beatGrid``, so a writer that does not wait writes files without grids.
+        ``timeout`` None = ``BEATGRID_WAIT_TIMEOUT_S``.
+        """
+        cv = getattr(self, "_grid_cv", None)
+        if cv is None:  # built without __init__
+            return True
+        limit = BEATGRID_WAIT_TIMEOUT_S if timeout is None else timeout
+        with cv:
+            return cv.wait_for(lambda: self._grid_done >= self._grid_requested, limit)
 
     def _load_metadata_maps(self):
         """Creates ID -> Name maps for joined tables."""
