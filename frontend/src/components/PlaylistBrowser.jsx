@@ -8,7 +8,12 @@ import {
     useDeferredValue,
 } from 'react';
 import { createPortal } from 'react-dom';
-import api, { getScAuthMode, fetchLibraryTracks } from '../api/api';
+import api, {
+    getScAuthMode,
+    fetchLibraryTracks,
+    exportRekordboxXml,
+    rekordboxXmlExportSummary,
+} from '../api/api';
 import { log } from '../utils/log';
 import { SEARCH_SYNTAX_HINT, filterTracks } from '../utils/trackSearch';
 import { useToast } from './ToastContext';
@@ -35,6 +40,7 @@ import {
     GripVertical,
     Library,
     Disc,
+    FileOutput,
 } from 'lucide-react';
 import TrackTable from './TrackTable';
 import SoundCloudProgressModal from './SoundCloudProgressModal';
@@ -236,6 +242,8 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
     const [dbLoaded, setDbLoaded] = useState(true);
     const [isProcessing, setIsProcessing] = useState(false);
     const [contextMenu, setContextMenu] = useState(null);
+    const contextMenuRef = useRef(null);
+    const [contextMenuSize, setContextMenuSize] = useState(null);
     const [showSmartEditor, setShowSmartEditor] = useState(false);
     const [smartEditorParent, setSmartEditorParent] = useState('ROOT');
     const [smartEditorEditing, setSmartEditorEditing] = useState(null);
@@ -475,6 +483,19 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
         setContextMenu(null);
     };
 
+    const handleExportXml = async (node) => {
+        setContextMenu(null);
+        try {
+            toast.success(rekordboxXmlExportSummary(await exportRekordboxXml(node)));
+        } catch (err) {
+            console.error('[PlaylistBrowser] Rekordbox XML export failed', err);
+            const detail = err.response?.data?.detail;
+            toast.error(
+                `Rekordbox XML export of "${node.Name}" failed${detail ? `: ${detail}` : ''}`
+            );
+        }
+    };
+
     const handleRemoveTrack = async (trackId) => {
         if (!selectedPlaylist) return;
         try {
@@ -601,6 +622,16 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
             setShowScProgress(false);
         }
     };
+
+    // Clamp to the viewport with the measured size: rows differ per node type,
+    // and the old fixed 320 px estimate pushed the last rows off-screen.
+    useLayoutEffect(() => {
+        const el = contextMenuRef.current;
+        if (!contextMenu || !el) return;
+        const w = el.offsetWidth;
+        const h = el.offsetHeight;
+        setContextMenuSize((prev) => (prev?.w === w && prev?.h === h ? prev : { w, h }));
+    }, [contextMenu]);
 
     useEffect(() => {
         // Close context menu only on LEFT-click (button 0) outside the menu.
@@ -892,12 +923,25 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
                 {contextMenu &&
                     createPortal(
                         <div
+                            ref={contextMenuRef}
                             data-context-menu="true"
                             className="bg-mx-shell border border-white/20 rounded-xl shadow-2xl py-1.5 min-w-[220px] animate-fade-in"
                             style={{
                                 position: 'fixed',
-                                top: Math.min(contextMenu.y, window.innerHeight - 320),
-                                left: Math.min(contextMenu.x, window.innerWidth - 230),
+                                top: Math.max(
+                                    0,
+                                    Math.min(
+                                        contextMenu.y,
+                                        window.innerHeight - (contextMenuSize?.h ?? 0)
+                                    )
+                                ),
+                                left: Math.max(
+                                    0,
+                                    Math.min(
+                                        contextMenu.x,
+                                        window.innerWidth - (contextMenuSize?.w ?? 0)
+                                    )
+                                ),
                                 zIndex: 99999,
                                 backdropFilter: 'blur(12px)',
                             }}
@@ -949,6 +993,13 @@ const PlaylistBrowser = ({ onSelectTrack, onEditTrack, onPlayTrack, libraryStatu
                                 className="w-full flex items-center gap-3 px-4 py-2 hover:bg-white/5 text-sm transition-colors text-cyan-300"
                             >
                                 <Plus size={14} /> Duplizieren
+                            </button>
+                            <button
+                                onClick={() => handleExportXml(contextMenu.node)}
+                                className="w-full flex items-center gap-3 px-4 py-2 hover:bg-white/5 text-sm transition-colors text-ink-primary"
+                            >
+                                <FileOutput size={14} className="text-amber2" /> Export as Rekordbox
+                                XML
                             </button>
                             <button
                                 onClick={() => handleDelete(contextMenu.node)}

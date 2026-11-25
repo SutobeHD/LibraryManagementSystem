@@ -2,12 +2,21 @@
  * SettingsExport — Default export folder, format defaults, Rekordbox bridge.
  */
 
-import React, { useCallback } from 'react';
-import api, { fetchLibraryTracks } from '../../api/api';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import api, { exportRekordboxXml, rekordboxXmlExportSummary } from '../../api/api';
 import toast from 'react-hot-toast';
 import { promptModal } from '../PromptModal';
 import { FileOutput, FolderOpen, RefreshCw } from 'lucide-react';
 import { Section, Field } from './SettingsControls';
+
+/** Playlist tree -> picker rows in tree order; `depth` drives the indent. */
+const flattenTree = (nodes, depth = 0, out = []) => {
+    for (const n of nodes || []) {
+        out.push({ node: n, depth });
+        flattenTree(n.Children, depth + 1, out);
+    }
+    return out;
+};
 
 const SettingsExport = ({ settings, setSettings }) => {
     const set = useCallback(
@@ -16,6 +25,32 @@ const SettingsExport = ({ settings, setSettings }) => {
         },
         [setSettings]
     );
+
+    const [playlistTree, setPlaylistTree] = useState([]);
+    const [xmlScopeId, setXmlScopeId] = useState('');
+    const [xmlExporting, setXmlExporting] = useState(false);
+
+    useEffect(() => {
+        api.get('/api/playlists/tree')
+            .then((res) => setPlaylistTree(Array.isArray(res.data) ? res.data : []))
+            .catch((err) => console.error('[SettingsExport] playlist tree load failed', err));
+    }, []);
+
+    const xmlScopeRows = useMemo(() => flattenTree(playlistTree), [playlistTree]);
+
+    const handleXmlExport = async () => {
+        const node = xmlScopeRows.find((r) => String(r.node.ID) === xmlScopeId)?.node ?? null;
+        setXmlExporting(true);
+        try {
+            toast.success(rekordboxXmlExportSummary(await exportRekordboxXml(node)));
+        } catch (err) {
+            console.error('[SettingsExport] Rekordbox push failed', err);
+            const detail = err.response?.data?.detail;
+            toast.error(`Export failed${detail ? `: ${detail}` : ''}`);
+        } finally {
+            setXmlExporting(false);
+        }
+    };
 
     return (
         <div className="space-y-6">
@@ -108,23 +143,30 @@ const SettingsExport = ({ settings, setSettings }) => {
                 <p className="text-xs text-ink-muted">
                     Bi-directional sync with the Rekordbox XML library.
                 </p>
+                <Field label="XML export scope">
+                    <select
+                        value={xmlScopeId}
+                        onChange={(e) => setXmlScopeId(e.target.value)}
+                        className="input-glass w-full"
+                    >
+                        <option value="">Whole library</option>
+                        {xmlScopeRows.map(({ node, depth }) => (
+                            <option key={node.ID} value={String(node.ID)}>
+                                {'\u00a0\u00a0'.repeat(depth)}
+                                {node.Type === '0' ? `${node.Name} (folder)` : node.Name}
+                            </option>
+                        ))}
+                    </select>
+                </Field>
+                <p className="text-xs text-ink-muted">
+                    Writes <span className="font-mono">exports/&lt;name&gt;.xml</span> — a folder
+                    exports its whole subtree. Streaming tracks have no local file and are skipped.
+                </p>
                 <div className="grid grid-cols-2 gap-3">
                     <button
-                        onClick={async () => {
-                            try {
-                                const tracks = await fetchLibraryTracks();
-                                // Live-library tracks carry `ID`, XML-mode tracks `id`.
-                                const ids = tracks.data.map((t) => t.ID ?? t.id).filter(Boolean);
-                                const res = await api.post('/api/rekordbox/export', {
-                                    track_ids: ids,
-                                });
-                                toast.success(`Exported: ${res.data.path}`);
-                            } catch (err) {
-                                console.error('[SettingsExport] Rekordbox push failed', err);
-                                toast.error('Export failed');
-                            }
-                        }}
-                        className="flex items-center justify-center gap-2 p-4 rounded-xl bg-mx-shell/50 border border-white/10 hover:border-amber2/50 hover:bg-amber2/5 transition-all text-sm"
+                        onClick={handleXmlExport}
+                        disabled={xmlExporting}
+                        className="flex items-center justify-center gap-2 p-4 rounded-xl bg-mx-shell/50 border border-white/10 hover:border-amber2/50 hover:bg-amber2/5 transition-all text-sm disabled:opacity-50 disabled:cursor-wait"
                     >
                         <FileOutput size={16} className="text-amber2" /> Push to Rekordbox
                     </button>

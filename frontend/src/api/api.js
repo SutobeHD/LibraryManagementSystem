@@ -474,5 +474,63 @@ export function fetchLibraryTracks(config = {}) {
     });
 }
 
+// ─── Rekordbox XML export ─────────────────────────────────────────────────────
+
+// The route answers 400 for these and for control characters instead of
+// stripping them (app/main.py `_ILLEGAL_FILENAME_CHARS`); a reserved device
+// name would not open on Windows.
+const XML_FILENAME_ILLEGAL = /[<>:"/\\|?*]/g;
+const XML_FILENAME_RESERVED = /^(con|prn|aux|nul|com\d|lpt\d)$/i;
+// The route builds the file synchronously: the whole 5041-track library
+// (265 MB XML) took 12-20 s on 2026-11-25, past the 10 s default, so the
+// toast said "failed" while the backend went on writing the file.
+const XML_EXPORT_TIMEOUT_MS = 300_000;
+
+function xmlExportFilename(name) {
+    const base = Array.from(String(name || ''), (ch) => (ch < ' ' ? '_' : ch))
+        .join('')
+        .replace(XML_FILENAME_ILLEGAL, '_')
+        .trim()
+        .replace(/[. ]+$/, '');
+    if (!base) return 'rekordbox_export.xml';
+    return `${XML_FILENAME_RESERVED.test(base) ? `${base}_` : base}.xml`;
+}
+
+/**
+ * Write Rekordbox XML into the backend's `exports/` folder (`POST /api/rekordbox/export`).
+ * `node` = a playlist-tree node (playlist, smart playlist, or folder with its subtree),
+ * written as `<node name>.xml`; without it the whole library goes to
+ * `rekordbox_export.xml` with no playlist. Resolves to the route's body:
+ * `{path, exported, skipped_streaming, playlist, message}`.
+ */
+export async function exportRekordboxXml(node = null) {
+    if (node) {
+        const res = await api.post(
+            '/api/rekordbox/export',
+            { playlist_id: String(node.ID), filename: xmlExportFilename(node.Name) },
+            { timeout: XML_EXPORT_TIMEOUT_MS }
+        );
+        return res.data;
+    }
+    const tracks = await fetchLibraryTracks();
+    // Live-library tracks carry `ID`, XML-mode tracks `id`.
+    const ids = tracks.data.map((t) => t.ID ?? t.id).filter(Boolean);
+    const res = await api.post(
+        '/api/rekordbox/export',
+        { track_ids: ids },
+        { timeout: XML_EXPORT_TIMEOUT_MS }
+    );
+    return res.data;
+}
+
+/** One-line toast text for an `exportRekordboxXml` result. */
+export function rekordboxXmlExportSummary(data) {
+    let text = `Exported ${data.exported} tracks as Rekordbox XML: ${data.path}`;
+    if (data.skipped_streaming > 0) {
+        text += ` (${data.skipped_streaming} streaming tracks without a local file skipped)`;
+    }
+    return text;
+}
+
 export default api;
 export { API_BASE_URL };
